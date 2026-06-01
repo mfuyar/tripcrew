@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -35,6 +35,9 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Web-only ref to a hidden <input type="file"> — bypasses expo-image-picker's
+  // dispatchEvent(new MouseEvent) which Chrome blocks for file inputs (isTrusted:false)
+  const webFileInputRef = useRef<any>(null);
 
   const loadMedia = useCallback(async () => {
     if (isDemoMode) { setMedia([]); setLoading(false); setRefreshing(false); return; }
@@ -46,53 +49,81 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
 
   useFocusEffect(useCallback(() => { loadMedia(); }, [loadMedia]));
 
-  async function handleUpload() {
-    if (isDemoMode) {
-      Alert.alert('Demo Mode', 'Photo upload is disabled in demo.');
-      return;
-    }
-    // On web, any await before launchImageLibraryAsync breaks the browser's
-    // user-gesture context and silently blocks the file picker from opening.
-    // Permission is always 'granted' on web so we skip the check there.
-    if (Platform.OS !== 'web') {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please allow photo library access.');
-        return;
+  // Shared upload logic used by both web and native paths
+  async function processUploads(uris: string[]) {
+    if (!user || !uris.length) return;
+    setUploading(true);
+    try {
+      const errors: string[] = [];
+      for (const uri of uris) {
+        const { error } = await mediaService.uploadMedia(
+          tripId, user.id, userFamily?.id, uri, 'photo'
+        );
+        if (error) errors.push(error);
       }
+      if (errors.length > 0) {
+        Alert.alert('Upload failed', errors[0]);
+      } else {
+        loadMedia();
+      }
+    } catch (e: any) {
+      Alert.alert('Upload error', e?.message ?? 'Something went wrong');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // Web: called from onChange on the hidden <input type="file">
+  async function handleWebFileChange(e: any) {
+    const files: File[] = Array.from(e.target.files ?? []);
+    e.target.value = ''; // allow re-selecting the same file
+    const uris = files.map((f) => URL.createObjectURL(f));
+    await processUploads(uris);
+    uris.forEach((u) => URL.revokeObjectURL(u));
+  }
+
+  // Web: called when Upload button is pressed — directly clicks the hidden input
+  // (synchronous .click() from user gesture = trusted = file dialog opens)
+  function handleUploadWeb() {
+    if (isDemoMode) { Alert.alert('Demo Mode', 'Photo upload is disabled in demo.'); return; }
+    webFileInputRef.current?.click();
+  }
+
+  // Native: uses expo-image-picker
+  async function handleUploadNative() {
+    if (isDemoMode) { Alert.alert('Demo Mode', 'Photo upload is disabled in demo.'); return; }
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow photo library access.');
+      return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images' as any,
       allowsMultipleSelection: true,
       quality: 0.7,
     });
-    if (!result.canceled && result.assets.length > 0 && user) {
-      setUploading(true);
-      try {
-        const errors: string[] = [];
-        for (const asset of result.assets) {
-          const { error } = await mediaService.uploadMedia(
-            tripId, user.id, userFamily?.id, asset.uri, 'photo'
-          );
-          if (error) errors.push(error);
-        }
-        if (errors.length > 0) {
-          Alert.alert('Upload failed', errors[0]);
-        } else {
-          loadMedia();
-        }
-      } catch (e: any) {
-        Alert.alert('Upload error', e?.message ?? 'Something went wrong');
-      } finally {
-        setUploading(false);
-      }
+    if (!result.canceled && result.assets.length > 0) {
+      await processUploads(result.assets.map((a) => a.uri));
     }
   }
+
+  const handleUpload = Platform.OS === 'web' ? handleUploadWeb : handleUploadNative;
 
   if (loading) return <LoadingView />;
 
   return (
     <View style={styles.container}>
+      {/* Hidden native file input for web — clicked directly so isTrusted=true */}
+      {Platform.OS === 'web' && (
+        <input
+          ref={webFileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' } as any}
+          onChange={handleWebFileChange}
+        />
+      )}
       <View style={styles.header}>
         <Text style={styles.count}>{media.length} photos</Text>
         <TouchableOpacity
