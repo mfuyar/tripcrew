@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } fr
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, Poll } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 import { pollService } from '../../services/pollService';
+import { demoPolls } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { StatusBadge } from '../../components/StatusBadge';
@@ -14,16 +16,18 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
 export function PollsScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
+  const { isDemoMode } = useAuth();
   const [polls, setPolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setPolls(demoPolls); setLoading(false); setRefreshing(false); return; }
     const { data } = await pollService.getPolls(tripId);
     setPolls(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

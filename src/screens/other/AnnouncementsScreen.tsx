@@ -8,6 +8,7 @@ import { Announcement, AnnouncementPriority } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { announcementService } from '../../services/announcementService';
+import { demoAnnouncements } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { AppButton } from '../../components/AppButton';
@@ -20,7 +21,7 @@ const PRIORITY_COLORS: Record<AnnouncementPriority, string> = {
 
 export function AnnouncementsScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { isTripOrganizer } = useTripContext();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,11 +33,12 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setAnnouncements(demoAnnouncements as Announcement[]); setLoading(false); setRefreshing(false); return; }
     const { data } = await announcementService.getAll(tripId);
     setAnnouncements(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

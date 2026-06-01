@@ -5,7 +5,9 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, ItineraryItem } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 import { itineraryService } from '../../services/itineraryService';
+import { demoItinerary } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
@@ -20,16 +22,18 @@ const TYPE_ICONS: Record<string, string> = {
 export function ItineraryScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
+  const { isDemoMode } = useAuth();
   const [items, setItems] = useState<ItineraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setItems(demoItinerary); setLoading(false); setRefreshing(false); return; }
     const { data } = await itineraryService.getItems(tripId);
     setItems(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

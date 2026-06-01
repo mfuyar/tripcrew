@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useTripContext } from '../../contexts/TripContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
+import { demoExpenses } from '../../lib/mockData';
 import { calculateFairnessMetrics, calculateFamilyBalances } from '../../utils/calculations';
 import { FairnessMetrics, FamilyBalance } from '../../types';
 import { LoadingView } from '../../components/LoadingView';
@@ -11,15 +13,18 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 export function FairnessDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const { families, currentTrip } = useTripContext();
+  const { isDemoMode } = useAuth();
   const [metrics, setMetrics] = useState<FairnessMetrics | null>(null);
   const [balances, setBalances] = useState<FamilyBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   async function load() {
-    const { data: expenses } = await expenseService.getExpenses(tripId);
-    const b = calculateFamilyBalances(expenses ?? [], families);
-    const m = calculateFairnessMetrics({ expenses: expenses ?? [], families });
+    const expenses = isDemoMode
+      ? demoExpenses
+      : (await expenseService.getExpenses(tripId)).data ?? [];
+    const b = calculateFamilyBalances(expenses, families);
+    const m = calculateFairnessMetrics({ expenses, families });
     setBalances(b);
     setMetrics(m);
     setLoading(false);

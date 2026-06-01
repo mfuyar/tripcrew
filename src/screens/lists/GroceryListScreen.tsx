@@ -8,6 +8,7 @@ import { GroceryItem } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { groceryService } from '../../services/groceryService';
+import { demoGroceries } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { AppButton } from '../../components/AppButton';
@@ -15,7 +16,7 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 
 export function GroceryListScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { families, userFamily } = useTripContext();
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,11 +27,12 @@ export function GroceryListScreen({ route }: { route: { params: { tripId: string
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setItems(demoGroceries); setLoading(false); setRefreshing(false); return; }
     const { data } = await groceryService.getItems(tripId);
     setItems(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

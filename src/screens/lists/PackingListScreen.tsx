@@ -8,6 +8,7 @@ import { PackingItem, PackingStatus } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { packingService } from '../../services/packingService';
+import { demoPacking } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { AppButton } from '../../components/AppButton';
@@ -21,7 +22,7 @@ const STATUS_STYLES: Record<PackingStatus, { bg: string; text: string; label: st
 
 export function PackingListScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { userFamily } = useTripContext();
   const [items, setItems] = useState<PackingItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,11 +33,12 @@ export function PackingListScreen({ route }: { route: { params: { tripId: string
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setItems(demoPacking); setLoading(false); setRefreshing(false); return; }
     const { data } = await packingService.getItems(tripId);
     setItems(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

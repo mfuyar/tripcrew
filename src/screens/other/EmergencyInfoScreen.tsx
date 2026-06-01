@@ -17,7 +17,7 @@ const TYPE_ICONS: Record<string, string> = { medical: '🏥', contact: '📞', i
 
 export function EmergencyInfoScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { userFamily } = useTripContext();
   const [info, setInfo] = useState<EmergencyInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,11 +29,12 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setInfo([]); setLoading(false); setRefreshing(false); return; }
     const { data } = await emergencyService.getInfo(tripId);
     setInfo(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

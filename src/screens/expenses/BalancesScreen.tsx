@@ -10,7 +10,9 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, FamilyBalance } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
+import { demoExpenses } from '../../lib/mockData';
 import { calculateFamilyBalances, calculateSettlements } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
@@ -23,13 +25,16 @@ type Props = NativeStackScreenProps<MainStackParamList, 'Balances'>;
 export function BalancesScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
   const { families, currentTrip } = useTripContext();
+  const { isDemoMode } = useAuth();
   const [balances, setBalances] = useState<FamilyBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   async function loadBalances() {
-    const { data } = await expenseService.getExpenses(tripId);
-    const result = calculateFamilyBalances(data ?? [], families);
+    const expenses = isDemoMode
+      ? demoExpenses
+      : (await expenseService.getExpenses(tripId)).data ?? [];
+    const result = calculateFamilyBalances(expenses, families);
     setBalances(result);
     setLoading(false);
     setRefreshing(false);

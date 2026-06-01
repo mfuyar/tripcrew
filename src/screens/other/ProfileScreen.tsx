@@ -10,14 +10,14 @@ import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 export function ProfileScreen() {
-  const { user, profile, signOut, refreshProfile } = useAuth();
+  const { user, profile, signOut, refreshProfile, isDemoMode } = useAuth();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(profile?.full_name ?? '');
   const [phone, setPhone] = useState(profile?.phone ?? '');
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
-    if (!user) return;
+    if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Profile editing is disabled in demo.'); return; }
     setSaving(true);
     const { error } = await authService.updateProfile(user.id, {
       full_name: name.trim(),

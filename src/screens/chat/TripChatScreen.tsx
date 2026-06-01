@@ -19,13 +19,14 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { chatService } from '../../services/chatService';
 import { mediaService } from '../../services/mediaService';
+import { demoMessages } from '../../lib/mockData';
 import { MessageBubble } from '../../components/MessageBubble';
 import { LoadingView } from '../../components/LoadingView';
 import { Colors, FontSize, Spacing, Radius, Shadow } from '../../constants/theme';
 
 export function TripChatScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { userFamily } = useTripContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,13 +39,20 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const listRef = useRef<FlatList>(null);
 
   const loadMessages = useCallback(async () => {
+    if (isDemoMode) {
+      setMessages(demoMessages);
+      setLoading(false);
+      return;
+    }
     const { data } = await chatService.getMessages(tripId);
     setMessages(data ?? []);
     setLoading(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useEffect(() => {
     loadMessages();
+
+    if (isDemoMode) return;
 
     // Subscribe to real-time messages
     channelRef.current = chatService.subscribeToMessages(tripId, (msg) => {

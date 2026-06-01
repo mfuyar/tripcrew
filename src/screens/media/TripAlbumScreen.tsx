@@ -28,7 +28,7 @@ const CELL = (Dimensions.get('window').width - Spacing.sm * (COLS + 1)) / COLS;
 export function TripAlbumScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { userFamily } = useTripContext();
   const [media, setMedia] = useState<TripMedia[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,11 +36,12 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   const [uploading, setUploading] = useState(false);
 
   const loadMedia = useCallback(async () => {
+    if (isDemoMode) { setMedia([]); setLoading(false); setRefreshing(false); return; }
     const { data } = await mediaService.getMedia(tripId);
     setMedia(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { loadMedia(); }, [loadMedia]));
 

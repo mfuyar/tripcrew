@@ -11,6 +11,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { familyService } from '../../services/familyService';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { EmptyState } from '../../components/EmptyState';
@@ -22,13 +23,15 @@ export function FamiliesScreen({ route }: { route: { params: { tripId: string } 
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
   const { families, setFamilies } = useTripContext();
+  const { isDemoMode } = useAuth();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const loadFamilies = useCallback(async () => {
+    if (isDemoMode) { setRefreshing(false); return; }
     const { data } = await familyService.getFamilies(tripId);
     setFamilies(data ?? []);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { loadFamilies(); }, [loadFamilies]));
 

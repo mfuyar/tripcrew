@@ -10,7 +10,9 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, SettlementCalculation } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
+import { demoExpenses } from '../../lib/mockData';
 import { settlementService } from '../../services/settlementService';
 import { calculateFamilyBalances, calculateSettlements } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
@@ -24,14 +26,17 @@ type Props = NativeStackScreenProps<MainStackParamList, 'Settlements'>;
 export function SettlementScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
   const { families, currentTrip } = useTripContext();
+  const { isDemoMode } = useAuth();
   const [settlements, setSettlements] = useState<SettlementCalculation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
 
   async function load() {
-    const { data: expenses } = await expenseService.getExpenses(tripId);
-    const balances = calculateFamilyBalances(expenses ?? [], families);
+    const expenses = isDemoMode
+      ? demoExpenses
+      : (await expenseService.getExpenses(tripId)).data ?? [];
+    const balances = calculateFamilyBalances(expenses, families);
     const calcs = calculateSettlements(balances);
     setSettlements(calcs);
     setLoading(false);
@@ -41,6 +46,7 @@ export function SettlementScreen({ navigation, route }: Props) {
   useEffect(() => { load(); }, [tripId, families]);
 
   async function handleMarkPaid(s: SettlementCalculation) {
+    if (isDemoMode) { Alert.alert('Demo Mode', 'Recording payments is disabled in demo.'); return; }
     const key = `${s.fromFamilyId}-${s.toFamilyId}`;
     setSaving(key);
     const { error } = await settlementService.createSettlement(tripId, {

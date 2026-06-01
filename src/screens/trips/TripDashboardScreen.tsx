@@ -14,6 +14,7 @@ import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
 import { announcementService } from '../../services/announcementService';
+import { demoExpenses, demoAnnouncements } from '../../lib/mockData';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 import { LoadingView } from '../../components/LoadingView';
 
@@ -36,13 +37,20 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
   const { currentTrip, families, members } = useTripContext();
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<{ title: string; priority: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async () => {
+    if (isDemoMode) {
+      setTotalExpenses(demoExpenses.reduce((s, e) => s + e.amount, 0));
+      setAnnouncements(demoAnnouncements.slice(0, 3));
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     const [expResult, annResult] = await Promise.all([
       expenseService.getExpenses(tripId),
       announcementService.getAll(tripId),

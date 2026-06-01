@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } fr
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, Car } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 import { carService } from '../../services/carService';
+import { demoCars } from '../../lib/mockData';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -14,16 +16,18 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
 export function CarPlanningScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
+  const { isDemoMode } = useAuth();
   const [cars, setCars] = useState<Car[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setCars(demoCars); setLoading(false); setRefreshing(false); return; }
     const { data } = await carService.getCars(tripId);
     setCars(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

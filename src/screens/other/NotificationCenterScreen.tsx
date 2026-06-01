@@ -17,18 +17,18 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 export function NotificationCenterScreen() {
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!user || isDemoMode) { setNotifications([]); setLoading(false); setRefreshing(false); return; }
     const { data } = await notificationService.getNotifications(user.id);
     setNotifications(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [user]);
+  }, [user, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
