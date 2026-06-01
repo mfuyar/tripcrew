@@ -388,11 +388,22 @@ ALTER TABLE live_locations ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Trip members can view live locations"
   ON live_locations FOR SELECT
-  USING (is_trip_member(trip_id, auth.uid()));
+  USING (
+    EXISTS (
+      SELECT 1 FROM trip_members
+      WHERE trip_id = live_locations.trip_id AND user_id = auth.uid()
+    )
+  );
 
 CREATE POLICY "Users can upsert their own location"
   ON live_locations FOR INSERT
-  WITH CHECK (is_trip_member(trip_id, auth.uid()) AND user_id = auth.uid());
+  WITH CHECK (
+    user_id = auth.uid() AND
+    EXISTS (
+      SELECT 1 FROM trip_members
+      WHERE trip_id = live_locations.trip_id AND user_id = auth.uid()
+    )
+  );
 
 CREATE POLICY "Users can update their own location"
   ON live_locations FOR UPDATE
