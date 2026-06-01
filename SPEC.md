@@ -215,14 +215,23 @@ disputed → paid (payer re-submits)
 
 ## Test Coverage Targets
 
-| Module | Tests | Status |
-|--------|-------|--------|
-| calculateExpenseSplits | 15 cases | ✅ Written |
-| calculateFamilyBalances | 5 cases | ✅ Written |
-| calculateSettlements | 7 cases | ✅ Written |
-| calculateFairnessMetrics | 4 cases | ✅ Written |
-| expenseService | 5 cases | ✅ Written |
-| settlementService | 4 cases | ✅ Written |
-| authService | 9 cases | ✅ Written |
-| tripService | 8 cases | ✅ Written |
-| groceryService | 7 cases | ✅ Written |
+| Spec | Module / File | Tests | Status |
+|------|--------------|-------|--------|
+| §1 Auth | spec-01-auth | 10 cases | ✅ Written |
+| §1 Auth | authService | 9 cases | ✅ Written |
+| §2 Trips | spec-02-trips | 11 cases | ✅ Written |
+| §2 Trips | tripService | 8 cases | ✅ Written |
+| §3 Families | familyService | 12 cases | ✅ Written |
+| §4 Splits | calculateExpenseSplits | 15 cases | ✅ Written |
+| §5 Balances | calculateFamilyBalances | 5 cases | ✅ Written |
+| §6 Settlements | calculateSettlements | 7 cases | ✅ Written |
+| §6 Settlements | expenseService | 5 cases | ✅ Written |
+| §7 Payment Flow | spec-07-payment-flow | 10 cases | ✅ Written |
+| §7 Payment Flow | settlementService | 4 cases | ✅ Written |
+| §8 Chat | chatService | 13 cases | ✅ Written |
+| §9 Album | mediaService | 9 cases | ✅ Written |
+| §10 Fairness | spec-10-fairness | 7 cases | ✅ Written |
+| §10 Fairness | calculateFairnessMetrics | 4 cases | ✅ Written |
+| §11 Offline | offlineService | 14 cases | ✅ Written |
+| §11 Offline | groceryService | 7 cases | ✅ Written |
+| §12 Integrity | spec-12-integrity + validate.ts | 20 cases | ✅ Written |
