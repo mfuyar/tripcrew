@@ -62,16 +62,16 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
     });
     if (!result.canceled && result.assets.length > 0 && user) {
       setUploading(true);
-      let failed = 0;
+      const errors: string[] = [];
       for (const asset of result.assets) {
         const { error } = await mediaService.uploadMedia(
           tripId, user.id, userFamily?.id, asset.uri, 'photo'
         );
-        if (error) failed++;
+        if (error) errors.push(error);
       }
       setUploading(false);
-      if (failed > 0) {
-        Alert.alert('Upload failed', `${failed} photo(s) could not be uploaded. Make sure the storage bucket exists in Supabase.`);
+      if (errors.length > 0) {
+        Alert.alert('Upload failed', errors[0]);
       }
       loadMedia();
     }
