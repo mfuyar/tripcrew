@@ -417,6 +417,23 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS notifications_user_id_idx ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS notifications_is_read_idx ON notifications(is_read);
 
+-- ─── Live Locations ───────────────────────────────────────────────────────────
+-- Stores each user's last-known position per trip (upserted on every broadcast).
+-- Deleted when the user stops sharing. Read-only for other trip members.
+CREATE TABLE IF NOT EXISTS live_locations (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  trip_id     UUID NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  family_id   UUID REFERENCES families(id) ON DELETE SET NULL,
+  latitude    DOUBLE PRECISION NOT NULL,
+  longitude   DOUBLE PRECISION NOT NULL,
+  accuracy    DOUBLE PRECISION,
+  heading     DOUBLE PRECISION,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (trip_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS live_locations_trip_id_idx ON live_locations(trip_id);
+
 -- ─── Supabase Storage Bucket ──────────────────────────────────────────────────
 -- Run this separately in Supabase dashboard > Storage, or via CLI:
 -- supabase storage create trip-media --public

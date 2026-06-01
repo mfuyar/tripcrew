@@ -454,6 +454,21 @@ export interface FairnessMetrics {
   insights: string[];
 }
 
+// ─── Live Location ────────────────────────────────────────────────────────────
+
+export interface LiveLocation {
+  userId: string;
+  familyId?: string;
+  familyName?: string;
+  userName?: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  heading?: number;
+  timestamp: string;
+  isLive: boolean; // true = currently broadcasting
+}
+
 // ─── Service Return Type ──────────────────────────────────────────────────────
 
 export interface ServiceResult<T> {
@@ -499,6 +514,7 @@ export type MainStackParamList = {
   Fairness: { tripId: string };
   Announcements: { tripId: string };
   TripSettings: { tripId: string };
+  LiveLocation: { tripId: string };
   CreateTrip: undefined;
   Notifications: undefined;
 };

@@ -213,6 +213,28 @@ disputed → paid (payer re-submits)
 
 ---
 
+## 13. Live Location
+
+**Permission:** Uses `expo-location` foreground permission. If denied, user is shown a prompt to open Settings.
+
+**Sharing:**
+- User toggles sharing on per-trip
+- Position broadcast every 8 seconds or every 5 metres moved via Supabase Realtime broadcast channel (`live-location:<tripId>`)
+- Stop sharing sends a `location-stop` event so peers immediately see the user go offline
+- No location data stored after sharing stops (privacy by design)
+
+**Viewing:**
+- All currently-sharing members shown with: name, family, coordinates, accuracy radius, "last updated" time
+- Live badge (green) = currently broadcasting; Last seen badge = stopped sharing
+- "Open in Maps" deep-links to the native Maps app
+
+**Privacy rules:**
+- Only trip members can see locations (Supabase RLS on `live_locations` table)
+- Location is never stored beyond the session (Realtime broadcast only — no persistent DB row while sharing)
+- `live_locations` table holds last-known position only for reconnect UX; row deleted on stop
+
+---
+
 ## Test Coverage Targets
 
 | Spec | Module / File | Tests | Status |
@@ -235,3 +257,4 @@ disputed → paid (payer re-submits)
 | §11 Offline | offlineService | 14 cases | ✅ Written |
 | §11 Offline | groceryService | 7 cases | ✅ Written |
 | §12 Integrity | spec-12-integrity + validate.ts | 20 cases | ✅ Written |
+| §13 Live Location | locationService | 15 cases | ✅ Written |

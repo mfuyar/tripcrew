@@ -6,6 +6,7 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^expo-location$': '<rootDir>/src/__mocks__/expo-location.ts',
     '^expo-.*': '<rootDir>/src/__mocks__/expo.ts',
     '^react-native$': '<rootDir>/src/__mocks__/react-native.ts',
     '^react-native-url-polyfill/auto$': '<rootDir>/src/__mocks__/expo.ts',

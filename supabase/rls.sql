@@ -383,7 +383,25 @@ CREATE POLICY "Users can update their own notifications"
   ON notifications FOR UPDATE
   USING (user_id = auth.uid());
 
+-- ─── live_locations ───────────────────────────────────────────────────────────
+ALTER TABLE live_locations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Trip members can view live locations"
+  ON live_locations FOR SELECT
+  USING (is_trip_member(trip_id, auth.uid()));
+
+CREATE POLICY "Users can upsert their own location"
+  ON live_locations FOR INSERT
+  WITH CHECK (is_trip_member(trip_id, auth.uid()) AND user_id = auth.uid());
+
+CREATE POLICY "Users can update their own location"
+  ON live_locations FOR UPDATE
+  USING (user_id = auth.uid());
+
+CREATE POLICY "Users can delete their own location"
+  ON live_locations FOR DELETE
+  USING (user_id = auth.uid());
+
 -- ─── Realtime enable ──────────────────────────────────────────────────────────
--- Enable real-time for messages table
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
