@@ -36,7 +36,7 @@ export const tripService = {
       .from('trip_members')
       .select('trip_id, trips(*)')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .order('joined_at', { ascending: false });
     if (error) return { data: null, error: error.message };
     const trips = (data ?? []).map((row: Record<string, unknown>) => row.trips).filter(Boolean) as Trip[];
     return { data: trips, error: null };

@@ -192,7 +192,7 @@ describe('SPEC §2.3 — Trip List', () => {
     await tripService.getMyTrips(userId);
 
     const orderCalls = (mockOrder as jest.Mock).mock.calls;
-    expect(orderCalls.some(([col, opts]) => col === 'created_at' && opts?.ascending === false)).toBe(true);
+    expect(orderCalls.some(([col, opts]) => col === 'joined_at' && opts?.ascending === false)).toBe(true);
   });
 
   it('returns extracted trips from membership rows', async () => {
