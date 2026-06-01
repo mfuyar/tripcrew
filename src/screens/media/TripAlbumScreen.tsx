@@ -62,18 +62,24 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
     });
     if (!result.canceled && result.assets.length > 0 && user) {
       setUploading(true);
-      const errors: string[] = [];
-      for (const asset of result.assets) {
-        const { error } = await mediaService.uploadMedia(
-          tripId, user.id, userFamily?.id, asset.uri, 'photo'
-        );
-        if (error) errors.push(error);
+      try {
+        const errors: string[] = [];
+        for (const asset of result.assets) {
+          const { error } = await mediaService.uploadMedia(
+            tripId, user.id, userFamily?.id, asset.uri, 'photo'
+          );
+          if (error) errors.push(error);
+        }
+        if (errors.length > 0) {
+          Alert.alert('Upload failed', errors[0]);
+        } else {
+          loadMedia();
+        }
+      } catch (e: any) {
+        Alert.alert('Upload error', e?.message ?? 'Something went wrong');
+      } finally {
+        setUploading(false);
       }
-      setUploading(false);
-      if (errors.length > 0) {
-        Alert.alert('Upload failed', errors[0]);
-      }
-      loadMedia();
     }
   }
 

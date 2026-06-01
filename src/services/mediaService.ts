@@ -11,9 +11,15 @@ export const mediaService = {
     caption?: string
   ): Promise<ServiceResult<TripMedia>> {
     // Convert URI to Blob for upload
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    // Strip query params from URI before extracting extension
+    let blob: Blob;
+    try {
+      const response = await fetch(uri);
+      blob = await response.blob();
+    } catch (e: any) {
+      return { data: null, error: `Could not read file: ${e?.message ?? 'unknown error'}` };
+    }
+
+    // Strip query params before extracting extension
     const cleanUri = uri.split('?')[0];
     const ext = cleanUri.split('.').pop()?.toLowerCase() ?? 'jpg';
     const fileName = `${tripId}/${userId}/${Date.now()}.${ext}`;
