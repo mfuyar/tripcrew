@@ -11,6 +11,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Platform } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, TripMedia } from '../../types';
@@ -50,10 +51,15 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
       Alert.alert('Demo Mode', 'Photo upload is disabled in demo.');
       return;
     }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow photo library access.');
-      return;
+    // On web, any await before launchImageLibraryAsync breaks the browser's
+    // user-gesture context and silently blocks the file picker from opening.
+    // Permission is always 'granted' on web so we skip the check there.
+    if (Platform.OS !== 'web') {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow photo library access.');
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images' as any,
