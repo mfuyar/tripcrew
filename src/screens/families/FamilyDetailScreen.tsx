@@ -15,7 +15,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'FamilyDetail'>;
 
 export function FamilyDetailScreen({ navigation, route }: Props) {
   const { tripId, familyId } = route.params;
-  const { user, profile } = useAuth();
+  const { user, profile, isDemoMode } = useAuth();
   const { families } = useTripContext();
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,11 +24,12 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
   const family = families.find((f) => f.id === familyId);
 
   useEffect(() => {
+    if (isDemoMode) { setLoading(false); return; }
     familyService.getFamilyMembers(familyId).then(({ data }) => {
       setMembers(data ?? []);
       setLoading(false);
     });
-  }, [familyId]);
+  }, [familyId, isDemoMode]);
 
   if (loading) return <LoadingView />;
   if (!family) return null;

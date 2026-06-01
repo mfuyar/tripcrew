@@ -16,19 +16,20 @@ type Props = NativeStackScreenProps<MainStackParamList, 'PollDetail'>;
 
 export function PollDetailScreen({ route }: Props) {
   const { tripId, pollId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { userFamily } = useTripContext();
   const [poll, setPoll] = useState<Poll | null>(null);
   const [loading, setLoading] = useState(true);
   const [voting, setVoting] = useState<string | null>(null);
 
   async function load() {
+    if (isDemoMode) { setLoading(false); return; }
     const { data } = await pollService.getPollById(pollId);
     setPoll(data);
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, [pollId]);
+  useEffect(() => { load(); }, [pollId, isDemoMode]);
 
   const totalVotes = poll?.options?.reduce((s, o) => s + o.votes_count, 0) ?? 0;
 
@@ -37,7 +38,7 @@ export function PollDetailScreen({ route }: Props) {
   );
 
   async function handleVote(optionId: string) {
-    if (!user || !poll || poll.status === 'closed') return;
+    if (!user || !poll || poll.status === 'closed' || isDemoMode) { if (isDemoMode) Alert.alert('Demo Mode', 'Voting is disabled in demo.'); return; }
     if (userVotedOption && !poll.allow_multiple) {
       Alert.alert('Already voted', 'You have already voted on this poll.');
       return;

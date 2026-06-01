@@ -40,7 +40,7 @@ const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
 export function AddEditExpenseScreen({ navigation, route }: Props) {
   const { tripId, expenseId } = route.params;
   const { families, currentTrip, userFamily } = useTripContext();
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const isEdit = !!expenseId;
 
   const [title, setTitle] = useState('');
@@ -67,6 +67,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   }, [expenseId]);
 
   async function loadExpense() {
+    if (isDemoMode) { setFetching(false); return; }
     const { data } = await expenseService.getExpenseById(expenseId!);
     if (data) {
       setTitle(data.title);
@@ -100,7 +101,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) { Alert.alert('Error', 'Please enter a valid amount.'); return; }
     if (!paidByFamilyId) { Alert.alert('Error', 'Please select who paid.'); return; }
-    if (!user) return;
+    if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Adding expenses is disabled in demo.'); return; }
 
     setLoading(true);
     const payload = {

@@ -22,7 +22,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'AddEditFamily'>;
 
 export function AddEditFamilyScreen({ navigation, route }: Props) {
   const { tripId, familyId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { families, setFamilies } = useTripContext();
   const isEdit = !!familyId;
   const existing = families.find((f) => f.id === familyId);
@@ -41,7 +41,7 @@ export function AddEditFamilyScreen({ navigation, route }: Props) {
     const childrenNum = parseInt(children, 10);
     if (isNaN(adultsNum) || adultsNum < 1) { setError('At least 1 adult required'); return; }
     if (isNaN(childrenNum) || childrenNum < 0) { setError('Children count cannot be negative'); return; }
-    if (!user) return;
+    if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Editing families is disabled in demo.'); return; }
     setError('');
     setLoading(true);
     if (isEdit && familyId) {

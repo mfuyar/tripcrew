@@ -24,7 +24,7 @@ const TYPES: { value: ItineraryType; label: string; emoji: string }[] = [
 
 export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   const { tripId, itemId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const isEdit = !!itemId;
 
   const [title, setTitle] = useState('');
@@ -37,6 +37,7 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (isDemoMode || !isEdit || !itemId) return;
     if (isEdit && itemId) {
       itineraryService.getItems(tripId).then(({ data }) => {
         const item = data?.find((i) => i.id === itemId);
@@ -56,7 +57,7 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   async function handleSave() {
     if (!title.trim()) { Alert.alert('Error', 'Title is required'); return; }
     if (!startDatetime) { Alert.alert('Error', 'Start date/time is required'); return; }
-    if (!user) return;
+    if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Editing itinerary is disabled in demo.'); return; }
     setLoading(true);
     const payload = {
       title: title.trim(),

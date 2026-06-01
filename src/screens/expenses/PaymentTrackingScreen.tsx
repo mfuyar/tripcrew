@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, FlatList, Alert, RefreshControl } from 'react-n
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, Settlement } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 import { settlementService } from '../../services/settlementService';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -13,16 +14,18 @@ type Props = NativeStackScreenProps<MainStackParamList, 'PaymentTracking'>;
 
 export function PaymentTrackingScreen({ route }: Props) {
   const { tripId } = route.params;
+  const { isDemoMode } = useAuth();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    if (isDemoMode) { setSettlements([]); setLoading(false); setRefreshing(false); return; }
     const { data } = await settlementService.getSettlements(tripId);
     setSettlements(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, isDemoMode]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 

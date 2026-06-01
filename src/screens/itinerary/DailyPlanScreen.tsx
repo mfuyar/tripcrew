@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, ItineraryItem, Announcement } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 import { itineraryService } from '../../services/itineraryService';
 import { announcementService } from '../../services/announcementService';
+import { demoItinerary, demoAnnouncements } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
@@ -11,11 +13,18 @@ type Props = NativeStackScreenProps<MainStackParamList, 'DailyPlan'>;
 
 export function DailyPlanScreen({ route }: Props) {
   const { tripId, date } = route.params;
+  const { isDemoMode } = useAuth();
   const [items, setItems] = useState<ItineraryItem[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setItems(demoItinerary.filter((i) => i.start_datetime.startsWith(date)));
+      setAnnouncements(demoAnnouncements.slice(0, 3) as Announcement[]);
+      setLoading(false);
+      return;
+    }
     Promise.all([
       itineraryService.getItems(tripId),
       announcementService.getAll(tripId),
@@ -27,7 +36,7 @@ export function DailyPlanScreen({ route }: Props) {
       setAnnouncements(ann.data?.slice(0, 3) ?? []);
       setLoading(false);
     });
-  }, [tripId, date]);
+  }, [tripId, date, isDemoMode]);
 
   if (loading) return <LoadingView />;
 

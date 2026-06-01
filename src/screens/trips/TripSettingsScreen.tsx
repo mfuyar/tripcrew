@@ -22,12 +22,13 @@ type Props = NativeStackScreenProps<MainStackParamList, 'TripSettings'>;
 export function TripSettingsScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
   const { currentTrip, members, isTripOrganizer, setCurrentTrip } = useTripContext();
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(currentTrip?.name ?? '');
   const [destination, setDestination] = useState(currentTrip?.destination ?? '');
 
   async function handleSave() {
+    if (isDemoMode) { Alert.alert('Demo Mode', 'Editing trip settings is disabled in demo.'); return; }
     setSaving(true);
     const { data, error } = await tripService.updateTrip(tripId, { name, destination });
     setSaving(false);

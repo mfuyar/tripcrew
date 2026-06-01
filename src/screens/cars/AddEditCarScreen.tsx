@@ -17,7 +17,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'AddEditCar'>;
 
 export function AddEditCarScreen({ navigation, route }: Props) {
   const { tripId, carId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { families } = useTripContext();
   const isEdit = !!carId;
 
@@ -32,6 +32,7 @@ export function AddEditCarScreen({ navigation, route }: Props) {
   const [passengerFamilyId, setPassengerFamilyId] = useState(families[0]?.id ?? '');
 
   useEffect(() => {
+    if (isDemoMode || !isEdit || !carId) return;
     if (isEdit && carId) {
       carService.getCars(tripId).then(({ data }) => {
         const car = data?.find((c) => c.id === carId);
@@ -47,7 +48,7 @@ export function AddEditCarScreen({ navigation, route }: Props) {
   }, [carId]);
 
   async function handleSave() {
-    if (!name.trim() || !user) return;
+    if (!name.trim() || !user || isDemoMode) { Alert.alert('Demo Mode', 'Editing cars is disabled in demo.'); return; }
     setLoading(true);
     const seats = parseInt(totalSeats, 10) || 5;
     if (isEdit && carId) {

@@ -22,7 +22,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'MediaDetail'>;
 
 export function MediaDetailScreen({ navigation, route }: Props) {
   const { tripId, mediaId } = route.params;
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const [media, setMedia] = useState<TripMedia | null>(null);
   const [loading, setLoading] = useState(true);
   const [caption, setCaption] = useState('');
@@ -34,6 +34,7 @@ export function MediaDetailScreen({ navigation, route }: Props) {
   }, [mediaId]);
 
   async function loadMedia() {
+    if (isDemoMode) { setLoading(false); return; }
     const { data } = await mediaService.getMedia(tripId);
     const item = data?.find((m) => m.id === mediaId) ?? null;
     setMedia(item);
