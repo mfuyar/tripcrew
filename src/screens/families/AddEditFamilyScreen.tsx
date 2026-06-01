@@ -41,8 +41,30 @@ export function AddEditFamilyScreen({ navigation, route }: Props) {
     const childrenNum = parseInt(children, 10);
     if (isNaN(adultsNum) || adultsNum < 1) { setError('At least 1 adult required'); return; }
     if (isNaN(childrenNum) || childrenNum < 0) { setError('Children count cannot be negative'); return; }
-    if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Editing families is disabled in demo.'); return; }
     setError('');
+
+    // Demo mode: update local context only, no Supabase
+    if (isDemoMode) {
+      const now = new Date().toISOString();
+      if (isEdit && familyId && existing) {
+        setFamilies(families.map((f) =>
+          f.id === familyId
+            ? { ...f, name: name.trim(), adults_count: adultsNum, children_count: childrenNum, notes: notes.trim() || undefined, color, updated_at: now }
+            : f
+        ));
+      } else {
+        setFamilies([...families, {
+          id: `demo-fam-${Date.now()}`, trip_id: tripId, name: name.trim(),
+          adults_count: adultsNum, children_count: childrenNum,
+          notes: notes.trim() || undefined, color,
+          created_by: 'demo-user-1', created_at: now, updated_at: now,
+        }]);
+      }
+      navigation.goBack();
+      return;
+    }
+
+    if (!user) return;
     setLoading(true);
     if (isEdit && familyId) {
       const { data, error: e } = await familyService.updateFamily(familyId, {
