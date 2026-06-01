@@ -1,0 +1,47 @@
+import { supabase } from '../lib/supabaseClient';
+import { Announcement, ServiceResult } from '../types';
+
+export const announcementService = {
+  async create(
+    tripId: string,
+    userId: string,
+    input: Pick<Announcement, 'title' | 'content' | 'priority'>
+  ): Promise<ServiceResult<Announcement>> {
+    const { data, error } = await supabase
+      .from('announcements')
+      .insert({ ...input, trip_id: tripId, created_by: userId })
+      .select('*, creator:profiles(*)')
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as Announcement, error: null };
+  },
+
+  async getAll(tripId: string): Promise<ServiceResult<Announcement[]>> {
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('*, creator:profiles(*), reads:announcement_reads(*)')
+      .eq('trip_id', tripId)
+      .order('created_at', { ascending: false });
+    if (error) return { data: null, error: error.message };
+    return { data: data as Announcement[], error: null };
+  },
+
+  async markRead(
+    announcementId: string,
+    userId: string
+  ): Promise<ServiceResult<null>> {
+    const { error } = await supabase.from('announcement_reads').upsert(
+      { announcement_id: announcementId, user_id: userId, read_at: new Date().toISOString() },
+      { onConflict: 'announcement_id,user_id' }
+    );
+    return { data: null, error: error?.message ?? null };
+  },
+
+  async delete(announcementId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('announcements')
+      .delete()
+      .eq('id', announcementId);
+    return { data: null, error: error?.message ?? null };
+  },
+};
