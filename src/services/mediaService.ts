@@ -13,12 +13,21 @@ export const mediaService = {
     // Convert URI to Blob for upload
     const response = await fetch(uri);
     const blob = await response.blob();
-    const ext = uri.split('.').pop() ?? 'jpg';
+    // Strip query params from URI before extracting extension
+    const cleanUri = uri.split('?')[0];
+    const ext = cleanUri.split('.').pop()?.toLowerCase() ?? 'jpg';
     const fileName = `${tripId}/${userId}/${Date.now()}.${ext}`;
+    // blob.type can be empty on some platforms — fall back to MIME from extension
+    const mimeMap: Record<string, string> = {
+      jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+      gif: 'image/gif', webp: 'image/webp', heic: 'image/heic',
+      mp4: 'video/mp4', mov: 'video/quicktime',
+    };
+    const contentType = blob.type || mimeMap[ext] || 'image/jpeg';
 
     const { error: uploadError } = await supabase.storage
       .from('trip-media')
-      .upload(fileName, blob, { contentType: blob.type });
+      .upload(fileName, blob, { contentType, upsert: false });
 
     if (uploadError) return { data: null, error: uploadError.message };
 

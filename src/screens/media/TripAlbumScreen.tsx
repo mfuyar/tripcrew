@@ -46,24 +46,33 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   useFocusEffect(useCallback(() => { loadMedia(); }, [loadMedia]));
 
   async function handleUpload() {
+    if (isDemoMode) {
+      Alert.alert('Demo Mode', 'Photo upload is disabled in demo.');
+      return;
+    }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Please allow photo library access.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images' as any,
       allowsMultipleSelection: true,
       quality: 0.7,
     });
     if (!result.canceled && result.assets.length > 0 && user) {
       setUploading(true);
+      let failed = 0;
       for (const asset of result.assets) {
-        await mediaService.uploadMedia(
+        const { error } = await mediaService.uploadMedia(
           tripId, user.id, userFamily?.id, asset.uri, 'photo'
         );
+        if (error) failed++;
       }
       setUploading(false);
+      if (failed > 0) {
+        Alert.alert('Upload failed', `${failed} photo(s) could not be uploaded. Make sure the storage bucket exists in Supabase.`);
+      }
       loadMedia();
     }
   }
