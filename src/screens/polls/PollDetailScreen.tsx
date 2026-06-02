@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch, Platform,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, Poll } from '../../types';
@@ -21,6 +21,7 @@ export function PollDetailScreen({ route }: Props) {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [loading, setLoading] = useState(true);
   const [voting, setVoting] = useState<string | null>(null);
+  const [togglingMultiple, setTogglingMultiple] = useState(false);
 
   async function load() {
     if (isDemoMode) { setLoading(false); return; }
@@ -38,16 +39,25 @@ export function PollDetailScreen({ route }: Props) {
   );
 
   async function handleVote(optionId: string) {
-    if (!user || !poll || poll.status === 'closed' || isDemoMode) { if (isDemoMode) Alert.alert('Demo Mode', 'Voting is disabled in demo.'); return; }
-    if (userVotedOption && !poll.allow_multiple) {
-      Alert.alert('Already voted', 'You have already voted on this poll.');
+    if (!user || !poll || poll.status === 'closed' || isDemoMode) {
+      if (isDemoMode) Alert.alert('Demo Mode', 'Voting is disabled in demo.');
       return;
     }
     setVoting(optionId);
-    const { error } = await pollService.vote(pollId, optionId, tripId, user.id, userFamily?.id);
+    const { error } = await pollService.vote(
+      pollId, optionId, tripId, user.id, userFamily?.id, poll.allow_multiple
+    );
     setVoting(null);
     if (error) Alert.alert('Error', error);
     else load();
+  }
+
+  async function handleToggleMultiple(value: boolean) {
+    if (!poll || isDemoMode) return;
+    setTogglingMultiple(true);
+    const { data } = await pollService.updatePollSettings(pollId, { allow_multiple: value });
+    if (data) setPoll({ ...poll, allow_multiple: value });
+    setTogglingMultiple(false);
   }
 
   async function handleClose() {
@@ -70,6 +80,12 @@ export function PollDetailScreen({ route }: Props) {
         <Text style={styles.question}>{poll.question}</Text>
         {poll.description ? <Text style={styles.desc}>{poll.description}</Text> : null}
         <Text style={styles.meta}>{totalVotes} total vote{totalVotes !== 1 ? 's' : ''}</Text>
+        {!poll.allow_multiple && userVotedOption && poll.status === 'active' && (
+          <Text style={styles.changeHint}>Tap another option to change your vote</Text>
+        )}
+        {poll.allow_multiple && poll.status === 'active' && (
+          <Text style={styles.changeHint}>Tap a selected option again to remove your vote</Text>
+        )}
         {poll.deadline && (
           <Text style={styles.deadline}>Deadline: {new Date(poll.deadline).toLocaleDateString()}</Text>
         )}
@@ -104,8 +120,31 @@ export function PollDetailScreen({ route }: Props) {
         })}
       </View>
 
+      {/* Creator controls */}
       {isCreator && poll.status === 'active' && (
-        <AppButton title="Close Poll" onPress={handleClose} variant="outline" fullWidth />
+        <View style={styles.creatorCard}>
+          <Text style={styles.creatorTitle}>Poll Settings</Text>
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Allow multiple choices</Text>
+              <Text style={styles.settingDesc}>Members can select more than one option</Text>
+            </View>
+            <Switch
+              value={poll.allow_multiple}
+              onValueChange={handleToggleMultiple}
+              disabled={togglingMultiple}
+              trackColor={{ false: Colors.border, true: Colors.primary }}
+              thumbColor={Colors.surface}
+            />
+          </View>
+          <AppButton
+            title="Close Poll"
+            onPress={handleClose}
+            variant="outline"
+            fullWidth
+            style={{ marginTop: Spacing.sm }}
+          />
+        </View>
       )}
     </ScrollView>
   );
@@ -130,4 +169,26 @@ const styles = StyleSheet.create({
   barBg: { height: 6, backgroundColor: Colors.border, borderRadius: 3, overflow: 'hidden', marginBottom: 4 },
   barFill: { height: '100%', borderRadius: 3 },
   pct: { fontSize: FontSize.xs, color: Colors.textSecondary, textAlign: 'right' },
+  changeHint: { fontSize: FontSize.xs, color: Colors.primary, fontStyle: 'italic' },
+  creatorCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginTop: Spacing.md,
+    ...Shadow.sm,
+  },
+  creatorTitle: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.text,
+    marginBottom: Spacing.md,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  settingInfo: { flex: 1, marginRight: Spacing.md },
+  settingLabel: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text },
+  settingDesc: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
 });

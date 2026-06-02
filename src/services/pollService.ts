@@ -76,17 +76,43 @@ export const pollService = {
     optionId: string,
     tripId: string,
     userId: string,
-    familyId?: string
-  ): Promise<ServiceResult<PollVote>> {
-    // Check if user already voted on this option
-    const { data: existing } = await supabase
-      .from('poll_votes')
-      .select('id')
-      .eq('poll_id', pollId)
-      .eq('poll_option_id', optionId)
-      .eq('user_id', userId)
-      .single();
-    if (existing) return { data: null, error: 'Already voted on this option' };
+    familyId?: string,
+    allowMultiple = false
+  ): Promise<ServiceResult<PollVote | null>> {
+    if (allowMultiple) {
+      // Multiple choice: toggle — clicking a voted option removes it
+      const { data: sameOption } = await supabase
+        .from('poll_votes')
+        .select('id')
+        .eq('poll_id', pollId)
+        .eq('poll_option_id', optionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (sameOption) {
+        await supabase.from('poll_votes').delete().eq('id', sameOption.id);
+        await supabase.rpc('decrement_poll_votes', { option_id: optionId });
+        return { data: null, error: null };
+      }
+    } else {
+      // Single choice: change vote if already voted on a different option
+      const { data: existingOnAny } = await supabase
+        .from('poll_votes')
+        .select('id, poll_option_id')
+        .eq('poll_id', pollId)
+        .eq('user_id', userId)
+        .limit(1)
+        .single();
+
+      if (existingOnAny) {
+        if (existingOnAny.poll_option_id === optionId) {
+          return { data: null, error: null }; // same option tapped — no-op
+        }
+        // Different option: remove old vote then cast new one
+        await supabase.from('poll_votes').delete().eq('id', existingOnAny.id);
+        await supabase.rpc('decrement_poll_votes', { option_id: existingOnAny.poll_option_id });
+      }
+    }
 
     const { data, error } = await supabase
       .from('poll_votes')
@@ -101,9 +127,22 @@ export const pollService = {
       .single();
     if (error) return { data: null, error: error.message };
 
-    // Increment votes_count
     await supabase.rpc('increment_poll_votes', { option_id: optionId });
     return { data: data as PollVote, error: null };
+  },
+
+  async updatePollSettings(
+    pollId: string,
+    updates: { allow_multiple?: boolean }
+  ): Promise<ServiceResult<Poll>> {
+    const { data, error } = await supabase
+      .from('polls')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', pollId)
+      .select()
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as Poll, error: null };
   },
 
   async closePoll(pollId: string): Promise<ServiceResult<Poll>> {
