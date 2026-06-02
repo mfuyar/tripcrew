@@ -91,8 +91,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Email / password ───────────────────────────────────────────────────────
 
   async function signIn(email: string, password: string): Promise<{ error: string | null }> {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: error.message };
+    // Ensure profile row exists — back-fills users created outside the app
+    if (data.user) {
+      await supabase.from('profiles').upsert({
+        id: data.user.id,
+        email: data.user.email ?? email,
+        full_name: data.user.user_metadata?.full_name ?? email.split('@')[0],
+      });
+    }
+    return { error: null };
   }
 
   async function signUp(email: string, password: string, fullName: string): Promise<{ error: string | null }> {
