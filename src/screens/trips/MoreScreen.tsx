@@ -34,6 +34,7 @@ const FEATURES: FeatureItem[] = [
   { emoji: '📢', title: 'Announcements', subtitle: 'Trip-wide messages', screen: 'Announcements' },
   { emoji: '📷', title: 'Scan Receipt', subtitle: 'AI receipt parsing', screen: 'ReceiptScanner' },
   { emoji: '📍', title: 'Live Location', subtitle: 'See where everyone is', screen: 'LiveLocation' },
+  { emoji: '⚙️', title: 'Trip Settings', subtitle: 'Invite code, members, danger zone', screen: 'TripSettings' },
 ];
 
 export function MoreScreen({ route }: { route: { params: { tripId: string } } }) {

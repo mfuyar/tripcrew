@@ -103,6 +103,15 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
             </View>
           )}
         </View>
+        {trip?.invite_code && (
+          <TouchableOpacity
+            style={styles.inviteCodeRow}
+            onPress={() => navigation.navigate('TripSettings', { tripId })}
+          >
+            <Text style={styles.inviteCodeLabel}>Invite code</Text>
+            <Text style={styles.inviteCode}>{trip.invite_code}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.settingsBtn}
           onPress={() => navigation.navigate('TripSettings', { tripId })}
@@ -253,6 +262,19 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   settingsBtnText: { color: Colors.surface, fontSize: FontSize.sm },
+  inviteCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  inviteCodeLabel: { fontSize: FontSize.xs, color: Colors.surface + 'AA' },
+  inviteCode: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    color: Colors.surface,
+    letterSpacing: 4,
+  },
   statsRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
