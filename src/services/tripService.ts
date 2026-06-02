@@ -10,15 +10,17 @@ export const tripService = {
     userId: string,
     input: Omit<Trip, 'id' | 'created_by' | 'invite_code' | 'is_active' | 'created_at' | 'updated_at'>
   ): Promise<ServiceResult<Trip>> {
-    // Reload session from storage — required on web where localStorage is async
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return { data: null, error: 'Session expired. Please sign out and sign in again.' };
+    // Validate token with server (getUser refreshes expired JWTs, getSession does not)
+    const { data: { user: currentUser }, error: authError } = await supabase.auth.getUser();
+    if (authError || !currentUser) {
+      return { data: null, error: 'Session expired. Please sign out and sign in again.' };
+    }
 
-    // Ensure profile exists before insert (trips.created_by FK → profiles.id)
+    // Ensure profile exists — prevents FK violation on trips.created_by
     await supabase.from('profiles').upsert({
-      id: session.user.id,
-      email: session.user.email ?? '',
-      full_name: session.user.user_metadata?.full_name ?? session.user.email?.split('@')[0] ?? '',
+      id: currentUser.id,
+      email: currentUser.email ?? '',
+      full_name: currentUser.user_metadata?.full_name ?? currentUser.email?.split('@')[0] ?? '',
     });
 
     const inviteCode = generateInviteCode();

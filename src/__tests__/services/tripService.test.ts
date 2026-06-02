@@ -27,9 +27,13 @@ const mockFrom = jest.fn(() => ({
 const mockGetSession = jest.fn().mockResolvedValue({
   data: { session: { user: { id: 'user-1', email: 'test@test.com', user_metadata: {} } } },
 });
+const mockGetUser = jest.fn().mockResolvedValue({
+  data: { user: { id: 'user-1', email: 'test@test.com', user_metadata: {} } },
+  error: null,
+});
 
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: mockFrom, auth: { getSession: mockGetSession } },
+  supabase: { from: mockFrom, auth: { getSession: mockGetSession, getUser: mockGetUser } },
 }));
 
 import { tripService } from '../../services/tripService';
