@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 import { Announcement, ServiceResult } from '../types';
+import { notificationService } from './notificationService';
 
 export const announcementService = {
   async create(
@@ -13,6 +14,17 @@ export const announcementService = {
       .select('*, creator:profiles(*)')
       .single();
     if (error) return { data: null, error: error.message };
+
+    const PRIORITY_ICON: Record<string, string> = {
+      urgent: '🔴', high: '🟠', normal: '📢', low: '🟢',
+    };
+    notificationService.notifyTripMembers(
+      tripId, userId, 'announcement',
+      `${PRIORITY_ICON[input.priority] ?? '📢'} ${input.title}`,
+      input.content.length > 80 ? input.content.slice(0, 77) + '…' : input.content,
+      { announcement_id: data.id }
+    );
+
     return { data: data as Announcement, error: null };
   },
 
