@@ -17,7 +17,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'FamilyDetail'>;
 export function FamilyDetailScreen({ navigation, route }: Props) {
   const { tripId, familyId } = route.params;
   const { user, profile, isDemoMode } = useAuth();
-  const { families } = useTripContext();
+  const { families, userFamily } = useTripContext();
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingPush, setSendingPush] = useState(false);
@@ -76,6 +76,16 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         </Text>
         {family.notes ? <Text style={styles.notes}>{family.notes}</Text> : null}
       </View>
+
+      {/* Join this family — shown to trip members who aren't in any family yet */}
+      {!userFamily && (
+        <AppButton
+          title="Join this Family"
+          onPress={() => navigation.navigate('JoinFamily', { tripId })}
+          fullWidth
+          style={styles.editBtn}
+        />
+      )}
 
       <AppButton
         title="Edit Family"

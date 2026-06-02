@@ -20,6 +20,7 @@ import { ProfileScreen } from '../screens/other/ProfileScreen';
 
 // Family Screens
 import { FamiliesScreen } from '../screens/families/FamiliesScreen';
+import { JoinFamilyScreen } from '../screens/families/JoinFamilyScreen';
 import { AddEditFamilyScreen } from '../screens/families/AddEditFamilyScreen';
 import { FamilyDetailScreen } from '../screens/families/FamilyDetailScreen';
 
@@ -219,6 +220,7 @@ function MainNavigator() {
       <MainStack.Screen name="CreateTrip" component={CreateTripScreen} options={{ title: 'New Trip' }} />
       <MainStack.Screen name="TripSettings" component={TripSettingsScreen} options={{ title: 'Trip Settings' }} />
       <MainStack.Screen name="Families" component={FamiliesScreen} options={{ title: 'Families' }} />
+      <MainStack.Screen name="JoinFamily" component={JoinFamilyScreen} options={{ title: 'Join a Family' }} />
       <MainStack.Screen name="AddEditFamily" component={AddEditFamilyScreen} options={{ title: 'Family' }} />
       <MainStack.Screen name="FamilyDetail" component={FamilyDetailScreen} options={{ title: 'Family Details' }} />
       <MainStack.Screen name="AddEditExpense" component={AddEditExpenseScreen} options={{ title: 'Expense' }} />

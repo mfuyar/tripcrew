@@ -492,6 +492,7 @@ export type MainStackParamList = {
   Tabs: undefined;
   TripStack: { tripId: string };
   Families: { tripId: string };
+  JoinFamily: { tripId: string };
   AddEditFamily: { tripId: string; familyId?: string };
   FamilyDetail: { tripId: string; familyId: string };
   AddEditExpense: { tripId: string; expenseId?: string };

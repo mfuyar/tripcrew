@@ -156,6 +156,25 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
         </View>
       )}
 
+      {/* Join-family prompt for users without a family */}
+      {families.length > 0 && !userFamily && !isTripOrganizer && (
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={[styles.setupBanner, { borderColor: Colors.warning, borderWidth: 1.5 }]}
+            onPress={() => navigation.navigate('JoinFamily', { tripId })}
+          >
+            <Text style={styles.setupBannerEmoji}>👤</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.setupBannerTitle}>Join your family</Text>
+              <Text style={styles.setupBannerSubtitle}>
+                Select which family you belong to so messages and expenses are attributed correctly
+              </Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Families section */}
       {families.length === 0 ? (
         <View style={styles.section}>
