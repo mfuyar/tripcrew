@@ -29,9 +29,16 @@ jest.mock('../../lib/supabaseClient', () => ({
   },
 }));
 
-global.fetch = jest.fn().mockResolvedValue({
-  blob: () => Promise.resolve({ type: 'image/jpeg' }),
-}) as jest.Mock;
+jest.mock('expo-file-system', () => ({
+  File: class MockFile {
+    uri: string;
+    type = 'image/jpeg';
+
+    constructor(uri: string) {
+      this.uri = uri;
+    }
+  },
+}));
 
 import { receiptService } from '../../services/receiptService';
 

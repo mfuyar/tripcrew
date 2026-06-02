@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import { supabase } from '../lib/supabaseClient';
 import { ReceiptScan, ServiceResult } from '../types';
 
@@ -8,13 +9,12 @@ export const receiptService = {
     imageUri: string
   ): Promise<ServiceResult<ReceiptScan>> {
     // Upload image to storage
-    const response = await fetch(imageUri);
-    const blob = await response.blob();
+    const file = new File(imageUri);
     const fileName = `receipts/${tripId}/${userId}/${Date.now()}.jpg`;
 
     const { error: uploadError } = await supabase.storage
       .from('trip-media')
-      .upload(fileName, blob, { contentType: 'image/jpeg' });
+      .upload(fileName, file as unknown as File, { contentType: file.type || 'image/jpeg' });
 
     if (uploadError) return { data: null, error: uploadError.message };
 
