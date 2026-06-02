@@ -33,6 +33,13 @@ export function ProfileScreen() {
   }
 
   async function handleSignOut() {
+    if (Platform.OS === 'web') {
+      // Alert.alert confirmation buttons don't work on web
+      if (window.confirm('Are you sure you want to sign out?')) {
+        await signOut();
+      }
+      return;
+    }
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: signOut },
