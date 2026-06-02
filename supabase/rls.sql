@@ -339,7 +339,8 @@ ALTER TABLE receipt_scans ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Trip members can manage receipt scans"
   ON receipt_scans FOR ALL
-  USING (is_trip_member(trip_id, auth.uid()));
+  USING (is_trip_member(trip_id, auth.uid()))
+  WITH CHECK (is_trip_member(trip_id, auth.uid()) AND scanned_by = auth.uid());
 
 -- ─── emergency_info ───────────────────────────────────────────────────────────
 ALTER TABLE emergency_info ENABLE ROW LEVEL SECURITY;
