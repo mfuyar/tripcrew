@@ -126,7 +126,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
       />
 
       <AppButton
-        title="Send Push Talk Ping"
+        title="🎙️ Send Push Talk Ping"
         onPress={handleSendPushTalk}
         loading={sendingPush}
         fullWidth

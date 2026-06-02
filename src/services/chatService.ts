@@ -48,14 +48,19 @@ export const chatService = {
     // Broadcast to all subscribers on this trip's chat channel
     chatService.broadcastMessage(tripId, data as Message);
 
-    // Notify other members (fire-and-forget — don't block the send)
-    const preview = content.length > 60 ? content.slice(0, 57) + '…' : content;
-    notificationService.notifyTripMembers(
-      tripId, userId, 'message',
-      '💬 New Message',
-      preview || 'Sent a photo or audio',
-      { trip_id: tripId }
-    );
+    if (isPushTalk) {
+      // Push talk: notify only opted-in family members
+      chatService.notifyPushTalkReceivers(tripId, userId, familyId);
+    } else {
+      // Regular message: notify all other trip members
+      const preview = content.length > 60 ? content.slice(0, 57) + '…' : content;
+      notificationService.notifyTripMembers(
+        tripId, userId, 'message',
+        '💬 New Message',
+        preview || 'Sent a photo or audio',
+        { trip_id: tripId }
+      );
+    }
 
     return { data: data as Message, error: null };
   },
@@ -72,6 +77,45 @@ export const chatService = {
       })
       .subscribe();
     return channel;
+  },
+
+  async notifyPushTalkReceivers(
+    tripId: string,
+    senderId: string,
+    familyId?: string
+  ): Promise<void> {
+    // Get family members who have push_talk_enabled
+    if (!familyId) return;
+    const { data: members } = await supabase
+      .from('family_members')
+      .select('user_id')
+      .eq('family_id', familyId)
+      .eq('push_talk_enabled', true)
+      .neq('user_id', senderId);
+
+    if (!members?.length) return;
+
+    const rows = members.map((m: { user_id: string }) => ({
+      user_id: m.user_id,
+      trip_id: tripId,
+      type: 'push_talk',
+      title: '🎙️ Push Talk',
+      body: 'A voice message was sent to your family',
+      data: { trip_id: tripId, family_id: familyId },
+      is_read: false,
+    }));
+
+    const { data: inserted } = await supabase
+      .from('notifications')
+      .insert(rows)
+      .select();
+
+    // Broadcast real-time to each recipient
+    (inserted ?? []).forEach((n: any) => {
+      supabase
+        .channel(`user-notifications:${n.user_id}`)
+        .send({ type: 'broadcast', event: 'notification', payload: n });
+    });
   },
 
   broadcastMessage(tripId: string, message: Message): void {
