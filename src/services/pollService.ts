@@ -91,7 +91,7 @@ export const pollService = {
 
       if (sameOption) {
         await supabase.from('poll_votes').delete().eq('id', sameOption.id);
-        await supabase.rpc('decrement_poll_votes', { option_id: optionId });
+        await pollService._decrementOption(optionId);
         return { data: null, error: null };
       }
     } else {
@@ -110,7 +110,7 @@ export const pollService = {
         }
         // Different option: remove old vote then cast new one
         await supabase.from('poll_votes').delete().eq('id', existingOnAny.id);
-        await supabase.rpc('decrement_poll_votes', { option_id: existingOnAny.poll_option_id });
+        await pollService._decrementOption(existingOnAny.poll_option_id);
       }
     }
 
@@ -143,6 +143,20 @@ export const pollService = {
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as Poll, error: null };
+  },
+
+  async _decrementOption(optionId: string): Promise<void> {
+    const { data } = await supabase
+      .from('poll_options')
+      .select('votes_count')
+      .eq('id', optionId)
+      .single();
+    if (data && data.votes_count > 0) {
+      await supabase
+        .from('poll_options')
+        .update({ votes_count: data.votes_count - 1 })
+        .eq('id', optionId);
+    }
   },
 
   async closePoll(pollId: string): Promise<ServiceResult<Poll>> {
