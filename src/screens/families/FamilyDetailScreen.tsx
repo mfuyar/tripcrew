@@ -138,38 +138,50 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
       {familyMembers.length === 0 ? (
         <Text style={styles.emptyText}>No members linked yet.</Text>
       ) : (
-        familyMembers.map((m) => (
-          <View key={m.id} style={styles.memberCard}>
-            <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
-            <View style={styles.memberInfo}>
-              <Text style={styles.memberName}>{m.profile?.full_name?.split(' ')[0] ?? 'Unknown'}</Text>
-              <Text style={styles.memberEmail}>{m.profile?.email ?? ''}</Text>
-              <Text style={styles.pushTalkLabel}>
-                {m.push_talk_enabled ? '🔔 Push talk on' : '🔕 Push talk off'}
-              </Text>
-            </View>
-            {m.is_admin && (
-              <View style={styles.adminBadge}>
-                <Text style={styles.adminText}>Admin</Text>
+        familyMembers.map((m) => {
+          const isMe = user?.id === m.user_id;
+          return (
+            <View key={m.id} style={styles.memberCard}>
+              <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
+              <View style={styles.memberInfo}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.memberName}>{m.profile?.full_name?.split(' ')[0] ?? 'Unknown'}</Text>
+                  {m.is_admin && (
+                    <View style={styles.adminBadge}>
+                      <Text style={styles.adminText}>Admin</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.memberEmail}>{m.profile?.email ?? ''}</Text>
               </View>
-            )}
-            <View style={styles.memberActions}>
-              {user?.id === m.user_id && (
-                <Switch
-                  value={m.push_talk_enabled}
-                  onValueChange={(v) => handleTogglePushTalk(m, v)}
-                  thumbColor={m.push_talk_enabled ? Colors.primary : Colors.surface}
-                  trackColor={{ false: Colors.border, true: Colors.primary + '40' }}
-                />
+
+              {/* Push talk toggle — only the member themselves can change it */}
+              {isMe ? (
+                <TouchableOpacity
+                  style={[styles.pushTalkBtn2, m.push_talk_enabled && styles.pushTalkBtnOn]}
+                  onPress={() => handleTogglePushTalk(m, !m.push_talk_enabled)}
+                >
+                  <Text style={[styles.pushTalkBtnText, m.push_talk_enabled && styles.pushTalkBtnTextOn]}>
+                    {m.push_talk_enabled ? '🔔 On' : '🔕 Off'}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.pushTalkStatus}>
+                  {m.push_talk_enabled ? '🔔' : '🔕'}
+                </Text>
               )}
-              {isAdmin && !m.is_admin && user?.id !== m.user_id && (
-                <TouchableOpacity onPress={() => handleRemoveMember(m.id, m.user_id)}>
+
+              {isAdmin && !m.is_admin && !isMe && (
+                <TouchableOpacity
+                  onPress={() => handleRemoveMember(m.id, m.user_id)}
+                  style={{ marginLeft: Spacing.sm }}
+                >
                   <Text style={styles.removeText}>Remove</Text>
                 </TouchableOpacity>
               )}
             </View>
-          </View>
-        ))
+          );
+        })
       )}
 
       {/* Add unassigned trip members — visible to family admin */}
@@ -229,8 +241,24 @@ const styles = StyleSheet.create({
   adminText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
   pushTalkBtn: { marginBottom: Spacing.lg },
   pushTalkLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   memberActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   removeText: { fontSize: FontSize.sm, color: Colors.danger },
+  pushTalkBtn2: {
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 5,
+    marginLeft: Spacing.sm,
+  },
+  pushTalkBtnOn: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  pushTalkBtnText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
+  pushTalkBtnTextOn: { color: Colors.primary },
+  pushTalkStatus: { fontSize: 18, marginLeft: Spacing.sm },
   addSection: { marginTop: Spacing.lg },
   addBtn: {
     backgroundColor: Colors.primary,
