@@ -14,18 +14,27 @@ const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
 
-const mockFrom = jest.fn(() => ({
+const mockFrom = jest.fn((table: string) => ({
   select: mockSelect.mockReturnThis(),
   insert: mockInsert.mockReturnThis(),
   update: mockUpdate.mockReturnThis(),
   delete: mockDelete.mockReturnThis(),
+  upsert: table === 'profiles' ? mockUpsert : jest.fn().mockReturnThis(),
   eq: mockEq.mockReturnThis(),
   order: mockOrder.mockReturnThis(),
   single: mockSingle,
 }));
 
+const mockGetSession = jest.fn().mockResolvedValue({
+  data: { session: { user: { id: 'user-1', email: 'test@test.com', user_metadata: {} } } },
+});
+const mockUpsert = jest.fn().mockResolvedValue({ error: null });
+
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: mockFrom },
+  supabase: {
+    from: mockFrom,
+    auth: { getSession: mockGetSession },
+  },
 }));
 
 import { tripService } from '../../services/tripService';

@@ -18,13 +18,18 @@ const mockFrom = jest.fn(() => ({
   insert: mockInsert.mockReturnThis(),
   update: mockUpdate.mockReturnThis(),
   delete: mockDelete.mockReturnThis(),
+  upsert: jest.fn().mockResolvedValue({ error: null }),
   eq: mockEq.mockReturnThis(),
   order: mockOrder.mockReturnThis(),
   single: mockSingle,
 }));
 
+const mockGetSession = jest.fn().mockResolvedValue({
+  data: { session: { user: { id: 'user-1', email: 'test@test.com', user_metadata: {} } } },
+});
+
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: mockFrom },
+  supabase: { from: mockFrom, auth: { getSession: mockGetSession } },
 }));
 
 import { tripService } from '../../services/tripService';

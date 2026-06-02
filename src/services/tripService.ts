@@ -10,6 +10,17 @@ export const tripService = {
     userId: string,
     input: Omit<Trip, 'id' | 'created_by' | 'invite_code' | 'is_active' | 'created_at' | 'updated_at'>
   ): Promise<ServiceResult<Trip>> {
+    // Reload session from storage — required on web where localStorage is async
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return { data: null, error: 'Session expired. Please sign out and sign in again.' };
+
+    // Ensure profile exists before insert (trips.created_by FK → profiles.id)
+    await supabase.from('profiles').upsert({
+      id: session.user.id,
+      email: session.user.email ?? '',
+      full_name: session.user.user_metadata?.full_name ?? session.user.email?.split('@')[0] ?? '',
+    });
+
     const inviteCode = generateInviteCode();
     const { data, error } = await supabase
       .from('trips')
