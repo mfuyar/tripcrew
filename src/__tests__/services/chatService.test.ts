@@ -24,9 +24,11 @@ const mockFrom = jest.fn(() => ({
 }));
 
 // Minimal Realtime channel stub
+const mockSend = jest.fn().mockResolvedValue({});
 const mockChannel = {
   on: jest.fn().mockReturnThis(),
   subscribe: jest.fn().mockReturnThis(),
+  send: mockSend,
 };
 const mockRemoveChannel = jest.fn();
 
@@ -204,7 +206,7 @@ describe('SPEC §8 — Realtime subscription', () => {
   it('creates a Realtime channel for the trip', () => {
     const { supabase } = require('../../lib/supabaseClient');
     chatService.subscribeToMessages(tripId, jest.fn());
-    expect(supabase.channel).toHaveBeenCalledWith(`messages:${tripId}`);
+    expect(supabase.channel).toHaveBeenCalledWith(`chat:${tripId}`);
   });
 
   it('unsubscribe removes the channel', () => {

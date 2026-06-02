@@ -82,7 +82,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     if (!content || !user || sending) return;
     setText('');
     setSending(true);
-    await chatService.sendMessage(tripId, user.id, content, userFamily?.id, 'text');
+    const { data } = await chatService.sendMessage(tripId, user.id, content, userFamily?.id, 'text');
+    // Optimistic: add sender's own message immediately (broadcast echo handles other users)
+    if (data) {
+      setMessages((prev) => prev.some((m) => m.id === data.id) ? prev : [...prev, data]);
+    }
     setSending(false);
   }
 

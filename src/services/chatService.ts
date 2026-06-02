@@ -44,6 +44,8 @@ export const chatService = {
       .select('*, profile:profiles(*), family:families(*)')
       .single();
     if (error) return { data: null, error: error.message };
+    // Broadcast to all subscribers on this trip's chat channel
+    chatService.broadcastMessage(tripId, data as Message);
     return { data: data as Message, error: null };
   },
 
@@ -51,28 +53,20 @@ export const chatService = {
     tripId: string,
     onMessage: (message: Message) => void
   ): RealtimeChannel {
+    // Use Broadcast — doesn't require REPLICA IDENTITY or JWT for RLS
     const channel = supabase
-      .channel(`messages:${tripId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `trip_id=eq.${tripId}`,
-        },
-        async (payload) => {
-          // Fetch full message with joined data
-          const { data } = await supabase
-            .from('messages')
-            .select('*, profile:profiles(*), family:families(*)')
-            .eq('id', payload.new.id)
-            .single();
-          if (data) onMessage(data as Message);
-        }
-      )
+      .channel(`chat:${tripId}`)
+      .on('broadcast', { event: 'new_message' }, ({ payload }) => {
+        onMessage(payload as Message);
+      })
       .subscribe();
     return channel;
+  },
+
+  broadcastMessage(tripId: string, message: Message): void {
+    supabase
+      .channel(`chat:${tripId}`)
+      .send({ type: 'broadcast', event: 'new_message', payload: message });
   },
 
   unsubscribe(channel: RealtimeChannel): void {
