@@ -12,7 +12,12 @@ import {
   Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Audio } from 'expo-av';
+import {
+  useAudioRecorder,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  RecordingPresets,
+} from 'expo-audio';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Message } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
@@ -32,9 +37,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const listRef = useRef<FlatList>(null);
 
@@ -137,36 +142,27 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   async function startRecording() {
     if (!user) return;
     try {
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted) {
+      const { granted } = await requestRecordingPermissionsAsync();
+      if (!granted) {
         Alert.alert('Permission needed', 'Please allow microphone access to record audio.');
         return;
       }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-      });
-
-      const recordingInstance = new Audio.Recording();
-      await recordingInstance.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await recordingInstance.startAsync();
-      setRecording(recordingInstance);
+      await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setRecordingInProgress(true);
-    } catch (error) {
+    } catch {
       Alert.alert('Recording failed', 'Could not start audio recording.');
     }
   }
 
   async function stopRecording() {
-    if (!recording || !user) return;
+    if (!user) return;
     try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      const durationMillis = recording.getStatusAsync ? (await recording.getStatusAsync()).durationMillis : null;
-      setRecording(null);
+      await recorder.stop();
       setRecordingInProgress(false);
+      const uri = recorder.uri;
+      const duration = recorder.currentTime; // seconds
 
       if (!uri) {
         Alert.alert('Recording failed', 'No audio was recorded.');
@@ -175,31 +171,17 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
 
       setUploadingMedia(true);
       const { data, error } = await mediaService.uploadMedia(
-        tripId,
-        user.id,
-        userFamily?.id,
-        uri,
-        'audio'
+        tripId, user.id, userFamily?.id, uri, 'audio'
       );
-
       if (error || !data) {
         Alert.alert('Upload failed', error ?? 'Unable to upload audio.');
-        setUploadingMedia(false);
         return;
       }
-
       await chatService.sendMessage(
-        tripId,
-        user.id,
-        'Audio message',
-        userFamily?.id,
-        'audio',
-        data.url,
-        'audio/m4a',
-        durationMillis ? durationMillis / 1000 : undefined,
-        true
+        tripId, user.id, 'Audio message', userFamily?.id,
+        'audio', data.url, 'audio/m4a', duration > 0 ? duration : undefined, true
       );
-    } catch (error) {
+    } catch {
       Alert.alert('Recording failed', 'Could not stop or upload the recording.');
     } finally {
       setUploadingMedia(false);

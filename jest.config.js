@@ -7,6 +7,7 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^expo-location$': '<rootDir>/src/__mocks__/expo-location.ts',
+    '^expo-audio$': '<rootDir>/src/__mocks__/expo-audio.ts',
     '^expo-.*': '<rootDir>/src/__mocks__/expo.ts',
     '^react-native$': '<rootDir>/src/__mocks__/react-native.ts',
     '^react-native-url-polyfill/auto$': '<rootDir>/src/__mocks__/expo.ts',

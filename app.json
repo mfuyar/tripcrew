@@ -48,7 +48,8 @@
           "cameraPermission": "TripCrew needs camera access to scan receipts."
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-audio"
     ],
     "extra": {
       "eas": {
