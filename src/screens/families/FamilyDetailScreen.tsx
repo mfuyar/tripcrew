@@ -139,7 +139,8 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         <Text style={styles.emptyText}>No members linked yet.</Text>
       ) : (
         familyMembers.map((m) => {
-          const isMe = user?.id === m.user_id;
+          // Match by UUID, with email fallback in case of session/profile ID mismatch
+          const isMe = user?.id === m.user_id || user?.email === m.profile?.email;
           return (
             <View key={m.id} style={styles.memberCard}>
               <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
