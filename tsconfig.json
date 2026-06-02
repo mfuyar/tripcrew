@@ -6,6 +6,7 @@
   "exclude": [
     "src/__tests__/**",
     "src/__mocks__/**",
+    "supabase/functions/**",
     "node_modules"
   ]
 }

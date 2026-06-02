@@ -12,7 +12,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tripcrew.app",
+      "bundleIdentifier": "com.muhemmet.tripcrew",
       "infoPlist": {
         "NSCameraUsageDescription": "TripCrew needs camera access to scan receipts and take trip photos.",
         "NSPhotoLibraryUsageDescription": "TripCrew needs photo library access to upload trip photos and scan receipts.",
@@ -29,7 +29,7 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE"
       ],
-      "package": "com.tripcrew.app"
+      "package": "com.muhemmet.tripcrew"
     },
     "web": {
       "favicon": "./assets/favicon.png"

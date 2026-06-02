@@ -61,6 +61,8 @@ export interface Trip {
   invite_code: string;
   created_at: string;
   updated_at: string;
+  family_count?: number;
+  member_count?: number;
 }
 
 export interface TripMember {
@@ -486,6 +488,8 @@ export type RootStackParamList = {
 export type AuthStackParamList = {
   Login: undefined;
   SignUp: undefined;
+  ForgotPassword: undefined;
+  UpdatePassword: { code?: string; access_token?: string; refresh_token?: string } | undefined;
 };
 
 export type MainStackParamList = {
@@ -495,11 +499,20 @@ export type MainStackParamList = {
   JoinFamily: { tripId: string };
   AddEditFamily: { tripId: string; familyId?: string };
   FamilyDetail: { tripId: string; familyId: string };
-  AddEditExpense: { tripId: string; expenseId?: string };
+  AddEditExpense: {
+    tripId: string;
+    expenseId?: string;
+    scannedExpense?: {
+      title?: string;
+      amount?: number;
+      date?: string;
+      notes?: string;
+    };
+  };
   Balances: { tripId: string };
   Settlements: { tripId: string };
   PaymentTracking: { tripId: string };
-  ReceiptScanner: { tripId: string };
+  ReceiptScanner: { tripId: string; returnToExpense?: boolean };
   MediaDetail: { tripId: string; mediaId: string };
   Itinerary: { tripId: string };
   AddEditItineraryItem: { tripId: string; itemId?: string };

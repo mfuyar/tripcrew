@@ -1,11 +1,22 @@
 import { supabase } from '../lib/supabaseClient';
 import { Settlement, PaymentStatus, ServiceResult } from '../types';
 
+const VALID_STATUS_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
+  pending: ['paid'],
+  paid: ['confirmed', 'disputed'],
+  disputed: ['paid'],
+  confirmed: [],
+};
+
 export const settlementService = {
   async createSettlement(
     tripId: string,
     input: Pick<Settlement, 'from_family_id' | 'to_family_id' | 'amount' | 'currency' | 'notes'>
   ): Promise<ServiceResult<Settlement>> {
+    if (input.from_family_id === input.to_family_id) {
+      return { data: null, error: 'A family cannot pay themselves' };
+    }
+
     const { data, error } = await supabase
       .from('settlements')
       .insert({ ...input, trip_id: tripId, status: 'pending' })
@@ -29,6 +40,22 @@ export const settlementService = {
     settlementId: string,
     status: PaymentStatus
   ): Promise<ServiceResult<Settlement>> {
+    const { data: current, error: currentError } = await supabase
+      .from('settlements')
+      .select('status')
+      .eq('id', settlementId)
+      .single();
+    if (currentError) return { data: null, error: currentError.message };
+
+    const currentStatus = current?.status as PaymentStatus | undefined;
+    if (!currentStatus) return { data: null, error: 'Settlement not found' };
+    if (!VALID_STATUS_TRANSITIONS[currentStatus].includes(status)) {
+      return {
+        data: null,
+        error: `Invalid payment status transition: ${currentStatus} to ${status}`,
+      };
+    }
+
     const updates: Partial<Settlement> = {
       status,
       updated_at: new Date().toISOString(),

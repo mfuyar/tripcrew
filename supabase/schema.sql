@@ -137,6 +137,58 @@ CREATE INDEX IF NOT EXISTS expense_splits_expense_id_idx ON expense_splits(expen
 CREATE INDEX IF NOT EXISTS expense_splits_trip_id_idx ON expense_splits(trip_id);
 CREATE INDEX IF NOT EXISTS expense_splits_family_id_idx ON expense_splits(family_id);
 
+CREATE OR REPLACE FUNCTION replace_expense_splits(
+  expense_uuid UUID,
+  trip_uuid UUID,
+  shares_json JSONB
+)
+RETURNS SETOF expense_splits AS $$
+DECLARE
+  expense_total NUMERIC;
+  split_total NUMERIC;
+BEGIN
+  IF jsonb_array_length(shares_json) = 0 THEN
+    RAISE EXCEPTION 'Expense must have at least one split';
+  END IF;
+
+  SELECT amount INTO expense_total
+  FROM expenses
+  WHERE id = expense_uuid AND trip_id = trip_uuid;
+
+  IF expense_total IS NULL THEN
+    RAISE EXCEPTION 'Expense not found';
+  END IF;
+
+  SELECT COALESCE(SUM((share_item->>'share_amount')::NUMERIC), 0)
+  INTO split_total
+  FROM jsonb_array_elements(shares_json) AS share_item;
+
+  IF ABS(split_total - expense_total) > 0.01 THEN
+    RAISE EXCEPTION 'Expense splits must sum to expense amount';
+  END IF;
+
+  DELETE FROM expense_splits
+  WHERE expense_id = expense_uuid;
+
+  RETURN QUERY
+  INSERT INTO expense_splits (
+    expense_id,
+    trip_id,
+    family_id,
+    share_amount,
+    percentage
+  )
+  SELECT
+    expense_uuid,
+    trip_uuid,
+    (share_item->>'family_id')::UUID,
+    (share_item->>'share_amount')::NUMERIC,
+    NULLIF(share_item->>'percentage', '')::NUMERIC
+  FROM jsonb_array_elements(shares_json) AS share_item
+  RETURNING *;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ─── Settlements ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS settlements (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -152,9 +204,53 @@ CREATE TABLE IF NOT EXISTS settlements (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'settlements_no_self_payment'
+  ) THEN
+    ALTER TABLE settlements
+      ADD CONSTRAINT settlements_no_self_payment CHECK (from_family_id <> to_family_id);
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS settlements_trip_id_idx ON settlements(trip_id);
 CREATE TRIGGER settlements_updated_at BEFORE UPDATE ON settlements
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE OR REPLACE FUNCTION enforce_settlement_status_flow()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.trip_id <> NEW.trip_id
+    OR OLD.from_family_id <> NEW.from_family_id
+    OR OLD.to_family_id <> NEW.to_family_id
+    OR OLD.amount <> NEW.amount
+    OR OLD.currency <> NEW.currency THEN
+    RAISE EXCEPTION 'Settlement payment details cannot be changed';
+  END IF;
+
+  IF OLD.status = NEW.status THEN
+    RETURN NEW;
+  END IF;
+
+  IF NOT (
+    (OLD.status = 'pending' AND NEW.status = 'paid')
+    OR (OLD.status = 'paid' AND NEW.status IN ('confirmed', 'disputed'))
+    OR (OLD.status = 'disputed' AND NEW.status = 'paid')
+  ) THEN
+    RAISE EXCEPTION 'Invalid payment status transition: % to %', OLD.status, NEW.status;
+  END IF;
+
+  IF NEW.status = 'confirmed' AND NEW.confirmed_at IS NULL THEN
+    NEW.confirmed_at = NOW();
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS settlements_status_flow ON settlements;
+CREATE TRIGGER settlements_status_flow BEFORE UPDATE ON settlements
+  FOR EACH ROW EXECUTE FUNCTION enforce_settlement_status_flow();
 
 -- ─── Messages ─────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS messages (
@@ -343,6 +439,57 @@ CREATE OR REPLACE FUNCTION increment_poll_votes(option_id UUID)
 RETURNS void AS $$
   UPDATE poll_options SET votes_count = votes_count + 1 WHERE id = option_id;
 $$ LANGUAGE sql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION decrement_poll_votes(option_id UUID)
+RETURNS void AS $$
+  UPDATE poll_options
+  SET votes_count = GREATEST(votes_count - 1, 0)
+  WHERE id = option_id;
+$$ LANGUAGE sql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION enforce_poll_vote_rules()
+RETURNS TRIGGER AS $$
+DECLARE
+  multiple_allowed BOOLEAN;
+  poll_status TEXT;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.poll_id::text || ':' || NEW.user_id::text, 0));
+
+  SELECT allow_multiple, status INTO multiple_allowed, poll_status
+  FROM polls
+  WHERE id = NEW.poll_id;
+
+  IF poll_status IS NULL THEN
+    RAISE EXCEPTION 'Poll not found';
+  END IF;
+
+  IF poll_status <> 'active' THEN
+    RAISE EXCEPTION 'Poll is closed';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM poll_options
+    WHERE id = NEW.poll_option_id
+      AND poll_id = NEW.poll_id
+      AND trip_id = NEW.trip_id
+  ) THEN
+    RAISE EXCEPTION 'Poll option does not belong to this poll';
+  END IF;
+
+  IF multiple_allowed IS DISTINCT FROM TRUE AND EXISTS (
+    SELECT 1 FROM poll_votes
+    WHERE poll_id = NEW.poll_id AND user_id = NEW.user_id
+  ) THEN
+    RAISE EXCEPTION 'User has already voted in this poll';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS poll_vote_rules ON poll_votes;
+CREATE TRIGGER poll_vote_rules BEFORE INSERT ON poll_votes
+  FOR EACH ROW EXECUTE FUNCTION enforce_poll_vote_rules();
 
 -- ─── Receipt Scans ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS receipt_scans (

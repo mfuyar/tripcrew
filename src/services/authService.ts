@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 import { Profile, ServiceResult } from '../types';
+import { offlineService } from './offlineService';
 
 export const authService = {
   async signUp(
@@ -46,7 +47,10 @@ export const authService = {
 
   async signOut(): Promise<ServiceResult<null>> {
     const { error } = await supabase.auth.signOut();
-    return { data: null, error: error?.message ?? null };
+    if (error) return { data: null, error: error.message };
+
+    await offlineService.clearAllCache();
+    return { data: null, error: null };
   },
 
   async getProfile(userId: string): Promise<ServiceResult<Profile>> {

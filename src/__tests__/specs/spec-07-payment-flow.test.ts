@@ -72,6 +72,20 @@ describe('SPEC §7 — createSettlement starts as pending', () => {
     expect(insertCalls.some((args) => args[0]?.status === 'pending')).toBe(true);
     expect(data?.status).toBe('pending');
   });
+
+  it('rejects settlements where a family pays itself', async () => {
+    const { data, error } = await settlementService.createSettlement(tripId, {
+      from_family_id: 'fam-a',
+      to_family_id: 'fam-a',
+      amount: 150,
+      currency: 'USD',
+      notes: undefined,
+    });
+
+    expect(data).toBeNull();
+    expect(error).toBe('A family cannot pay themselves');
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
 });
 
 // ─── pending → paid ───────────────────────────────────────────────────────────
@@ -79,6 +93,7 @@ describe('SPEC §7 — createSettlement starts as pending', () => {
 describe('SPEC §7 — pending → paid (payer action)', () => {
   it('updates status to paid', async () => {
     const paid = makeSettlement('paid');
+    mockSingle.mockResolvedValueOnce({ data: { status: 'pending' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: paid, error: null });
 
     const { data, error } = await settlementService.updatePaymentStatus(settlementId, 'paid');
@@ -89,6 +104,7 @@ describe('SPEC §7 — pending → paid (payer action)', () => {
 
   it('does not set confirmed_at when marking as paid', async () => {
     const paid = makeSettlement('paid');
+    mockSingle.mockResolvedValueOnce({ data: { status: 'pending' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: paid, error: null });
 
     await settlementService.updatePaymentStatus(settlementId, 'paid');
@@ -97,6 +113,16 @@ describe('SPEC §7 — pending → paid (payer action)', () => {
     const payload = updateCalls[0]?.[0];
     expect(payload?.confirmed_at).toBeUndefined();
   });
+
+  it('rejects pending → confirmed', async () => {
+    mockSingle.mockResolvedValueOnce({ data: { status: 'pending' }, error: null });
+
+    const { data, error } = await settlementService.updatePaymentStatus(settlementId, 'confirmed');
+
+    expect(data).toBeNull();
+    expect(error).toBe('Invalid payment status transition: pending to confirmed');
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
 });
 
 // ─── paid → confirmed ─────────────────────────────────────────────────────────
@@ -104,6 +130,7 @@ describe('SPEC §7 — pending → paid (payer action)', () => {
 describe('SPEC §7 — paid → confirmed (receiver action)', () => {
   it('updates status to confirmed', async () => {
     const confirmed = makeSettlement('confirmed', { confirmed_at: new Date().toISOString() });
+    mockSingle.mockResolvedValueOnce({ data: { status: 'paid' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: confirmed, error: null });
 
     const { data, error } = await settlementService.updatePaymentStatus(settlementId, 'confirmed');
@@ -114,6 +141,7 @@ describe('SPEC §7 — paid → confirmed (receiver action)', () => {
 
   it('sets confirmed_at timestamp when confirming', async () => {
     const confirmed = makeSettlement('confirmed', { confirmed_at: '2024-08-05T10:00:00Z' });
+    mockSingle.mockResolvedValueOnce({ data: { status: 'paid' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: confirmed, error: null });
 
     await settlementService.updatePaymentStatus(settlementId, 'confirmed');
@@ -126,6 +154,7 @@ describe('SPEC §7 — paid → confirmed (receiver action)', () => {
 
   it('confirmPayment() is a convenience alias for confirmed', async () => {
     const confirmed = makeSettlement('confirmed', { confirmed_at: new Date().toISOString() });
+    mockSingle.mockResolvedValueOnce({ data: { status: 'paid' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: confirmed, error: null });
 
     const { data } = await settlementService.confirmPayment(settlementId);
@@ -139,6 +168,7 @@ describe('SPEC §7 — paid → confirmed (receiver action)', () => {
 describe('SPEC §7 — paid → disputed (receiver action)', () => {
   it('updates status to disputed', async () => {
     const disputed = makeSettlement('disputed');
+    mockSingle.mockResolvedValueOnce({ data: { status: 'paid' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: disputed, error: null });
 
     const { data, error } = await settlementService.updatePaymentStatus(settlementId, 'disputed');
@@ -149,6 +179,7 @@ describe('SPEC §7 — paid → disputed (receiver action)', () => {
 
   it('does not set confirmed_at when disputing', async () => {
     const disputed = makeSettlement('disputed');
+    mockSingle.mockResolvedValueOnce({ data: { status: 'paid' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: disputed, error: null });
 
     await settlementService.updatePaymentStatus(settlementId, 'disputed');
@@ -164,6 +195,7 @@ describe('SPEC §7 — paid → disputed (receiver action)', () => {
 describe('SPEC §7 — disputed → paid (payer re-submits)', () => {
   it('allows re-marking a disputed settlement as paid', async () => {
     const repaid = makeSettlement('paid');
+    mockSingle.mockResolvedValueOnce({ data: { status: 'disputed' }, error: null });
     mockSingle.mockResolvedValueOnce({ data: repaid, error: null });
 
     const { data, error } = await settlementService.updatePaymentStatus(settlementId, 'paid');

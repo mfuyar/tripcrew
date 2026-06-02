@@ -19,9 +19,9 @@ TripCrew is a vacation coordination app for multiple families traveling together
 - **Emergency Info** — Medical, contacts, insurance, documents
 - **Announcements** — Trip-wide broadcast messages
 - **Fairness Dashboard** — Visual breakdown of spending per family
-- **Receipt Scanner** — Photo-based receipt parsing (OCR ready)
+- **Receipt Scanner** — Gemini-backed receipt OCR with manual review before saving
 - **Offline Support** — Queue operations when offline
-- **Invite Codes** — 6-character codes to join trips
+- **Invite Codes** — 8-character codes to join trips
 
 ---
 
@@ -62,6 +62,14 @@ npm install
 3. Then run `supabase/rls.sql` (enables Row Level Security with all policies)
 4. In Storage, create a bucket named `trip-media` (set to public)
 5. Enable Realtime for the `messages` table: Database > Replication > toggle `messages`
+6. Deploy the receipt scan Edge Function and set your Gemini secret:
+
+```bash
+supabase functions deploy scan-receipt
+supabase secrets set GEMINI_API_KEY=your_gemini_api_key
+```
+
+You can optionally set `GEMINI_MODEL`; it defaults to `gemini-3.5-flash`.
 
 ### 3. Environment Variables
 
@@ -153,7 +161,7 @@ const settlements = calculateSettlements(balances);
 
 ## TODOs for Production
 
-- [ ] **OCR Integration** — Replace `receiptService.scanReceiptPlaceholder()` with Google Vision API or AWS Textract
+- [ ] **Receipt OCR Hardening** — Add confidence scoring, better item normalization, and receipt-to-expense attachment
 - [ ] **Push Notifications** — Implement with Expo Notifications + Supabase Edge Functions
 - [ ] **Weather Widget** — Add OpenWeatherMap API integration in DailyPlanScreen
 - [ ] **Currency Conversion** — Add real-time exchange rates (e.g. fixer.io)

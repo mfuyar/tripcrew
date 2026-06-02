@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, Settlement } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTripContext } from '../../contexts/TripContext';
 import { settlementService } from '../../services/settlementService';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -15,6 +16,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'PaymentTracking'>;
 export function PaymentTrackingScreen({ route }: Props) {
   const { tripId } = route.params;
   const { isDemoMode } = useAuth();
+  const { userFamily } = useTripContext();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,6 +43,12 @@ export function PaymentTrackingScreen({ route }: Props) {
     else load();
   }
 
+  async function handleDispute(id: string) {
+    const { error } = await settlementService.updatePaymentStatus(id, 'disputed');
+    if (error) Alert.alert('Error', error);
+    else load();
+  }
+
   if (loading) return <LoadingView />;
 
   return (
@@ -57,8 +65,14 @@ export function PaymentTrackingScreen({ route }: Props) {
       renderItem={({ item }) => (
         <SettlementCard
           settlement={item}
+          showActions={
+            (item.status === 'pending' || item.status === 'disputed')
+              ? item.from_family_id === userFamily?.id
+              : item.status === 'paid' && item.to_family_id === userFamily?.id
+          }
           onMarkPaid={() => handleMarkPaid(item.id)}
           onConfirm={() => handleConfirm(item.id)}
+          onDispute={() => handleDispute(item.id)}
         />
       )}
     />

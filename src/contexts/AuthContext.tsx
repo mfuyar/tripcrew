@@ -10,6 +10,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../lib/supabaseClient';
 import { Profile } from '../types';
 import { demoProfile, DEMO_USER_ID } from '../lib/mockData';
+import { offlineService } from '../services/offlineService';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -156,9 +157,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setProfile(null);
       setIsDemoMode(false);
+      await offlineService.clearAllCache();
       return;
     }
     await supabase.auth.signOut();
+    await offlineService.clearAllCache();
   }
 
   return (

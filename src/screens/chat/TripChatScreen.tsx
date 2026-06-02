@@ -147,7 +147,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         Alert.alert('Permission needed', 'Please allow microphone access to record audio.');
         return;
       }
-      await setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
       setRecordingInProgress(true);

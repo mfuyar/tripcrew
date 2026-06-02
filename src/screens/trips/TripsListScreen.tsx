@@ -43,6 +43,9 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
           <Text style={styles.tripName} numberOfLines={1}>{trip.name}</Text>
           <Text style={styles.tripDest} numberOfLines={1}>📍 {trip.destination}</Text>
           <Text style={styles.tripDates}>{start} – {end}</Text>
+          <Text style={styles.tripCounts}>
+            {trip.family_count ?? 0} families · {trip.member_count ?? 0} members
+          </Text>
         </View>
         <View style={styles.tripMeta}>
           {isActive && (
@@ -188,13 +191,13 @@ export function TripsListScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Join a Trip</Text>
-            <Text style={styles.modalSubtitle}>Enter the 6-character invite code</Text>
+            <Text style={styles.modalSubtitle}>Enter the 8-character invite code</Text>
             <TextInput
               style={styles.codeInput}
               value={inviteCode}
               onChangeText={(t) => setInviteCode(t.toUpperCase())}
-              placeholder="e.g. ABC123"
-              maxLength={6}
+              placeholder="e.g. ABC12345"
+              maxLength={8}
               autoCapitalize="characters"
               placeholderTextColor={Colors.textSecondary}
             />
@@ -279,6 +282,7 @@ const styles = StyleSheet.create({
   },
   tripDest: { fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: 2 },
   tripDates: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  tripCounts: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   tripMeta: { alignItems: 'flex-end', gap: Spacing.xs },
   activePill: {
     backgroundColor: Colors.success + '20',

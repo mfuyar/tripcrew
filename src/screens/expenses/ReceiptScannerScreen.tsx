@@ -19,7 +19,7 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 type Props = NativeStackScreenProps<MainStackParamList, 'ReceiptScanner'>;
 
 export function ReceiptScannerScreen({ navigation, route }: Props) {
-  const { tripId } = route.params;
+  const { tripId, returnToExpense } = route.params;
   const { user } = useAuth();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -69,8 +69,10 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
       return;
     }
     if (receipt) {
-      const { data: scanned } = await receiptService.scanReceiptPlaceholder(receipt.id, imageUri);
-      if (scanned) {
+      const { data: scanned, error: scanError } = await receiptService.scanReceipt(receipt.id, receipt.image_url);
+      if (scanError) {
+        Alert.alert('Scan Error', scanError);
+      } else if (scanned) {
         setResult({
           amount: scanned.parsed_amount,
           merchant: scanned.parsed_merchant,
@@ -83,17 +85,19 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
   }
 
   function handleCreateExpense() {
-    navigation.navigate('AddEditExpense', { tripId });
+    navigation.navigate('AddEditExpense', {
+      tripId,
+      scannedExpense: {
+        title: result?.merchant ? `${result.merchant} receipt` : undefined,
+        amount: result?.amount,
+        date: result?.date,
+        notes: imageUri ? 'Prefilled from scanned receipt. Review details before saving.' : undefined,
+      },
+    });
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.note}>
-        <Text style={styles.noteText}>
-          📝 Note: OCR scanning is mocked in MVP. Connect a real OCR API for production.
-        </Text>
-      </View>
-
       {/* Image picker area */}
       <TouchableOpacity style={styles.imageArea} onPress={pickImage}>
         {imageUri ? (
@@ -155,7 +159,7 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
             </View>
           )}
           <AppButton
-            title="Create Expense from Scan"
+            title={returnToExpense ? 'Use These Details' : 'Create Expense from Scan'}
             onPress={handleCreateExpense}
             fullWidth
             style={styles.createBtn}
@@ -169,13 +173,6 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.md },
-  note: {
-    backgroundColor: Colors.warning + '20',
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    marginBottom: Spacing.md,
-  },
-  noteText: { fontSize: FontSize.sm, color: Colors.warning },
   imageArea: {
     height: 240,
     backgroundColor: Colors.surface,

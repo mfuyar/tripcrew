@@ -34,6 +34,11 @@ jest.mock('../../lib/supabaseClient', () => ({
   },
 }));
 
+const mockClearAllCache = jest.fn();
+jest.mock('../../services/offlineService', () => ({
+  offlineService: { clearAllCache: mockClearAllCache },
+}));
+
 import { authService } from '../../services/authService';
 
 beforeEach(() => jest.clearAllMocks());
@@ -130,10 +135,12 @@ describe('authService', () => {
     // SPEC §1.3: Clears session
     it('calls auth signOut and returns no error', async () => {
       mockAuthSignOut.mockResolvedValueOnce({ error: null });
+      mockClearAllCache.mockResolvedValueOnce(undefined);
 
       const { error } = await authService.signOut();
 
       expect(mockAuthSignOut).toHaveBeenCalled();
+      expect(mockClearAllCache).toHaveBeenCalled();
       expect(error).toBeNull();
     });
   });

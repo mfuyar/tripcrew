@@ -60,7 +60,7 @@ const tripInput = {
 
 describe('SPEC §2.1 — Create Trip', () => {
   it('inserts trip with all required fields', async () => {
-    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'ABC123', is_active: true };
+    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'ABC12345', is_active: true };
     mockSingle.mockResolvedValueOnce({ data: created, error: null });
 
     const { data, error } = await tripService.createTrip(userId, tripInput);
@@ -73,17 +73,17 @@ describe('SPEC §2.1 — Create Trip', () => {
   });
 
   it('auto-generates an invite_code', async () => {
-    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'XY9Z2K', is_active: true };
+    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'XY9Z2K8Q', is_active: true };
     mockSingle.mockResolvedValueOnce({ data: created, error: null });
 
     const { data } = await tripService.createTrip(userId, tripInput);
 
     expect(data?.invite_code).toBeDefined();
-    expect(data?.invite_code.length).toBeGreaterThan(0);
+    expect(data?.invite_code).toHaveLength(8);
   });
 
   it('automatically adds creator to trip_members after creation', async () => {
-    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'ABC123', is_active: true };
+    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'ABC12345', is_active: true };
     mockSingle.mockResolvedValueOnce({ data: created, error: null });
 
     await tripService.createTrip(userId, tripInput);
@@ -94,7 +94,7 @@ describe('SPEC §2.1 — Create Trip', () => {
   });
 
   it('creator is inserted with trip_organizer role', async () => {
-    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'ABC123', is_active: true };
+    const created = { id: tripId, ...tripInput, created_by: userId, invite_code: 'ABC12345', is_active: true };
     mockSingle.mockResolvedValueOnce({ data: created, error: null });
 
     await tripService.createTrip(userId, tripInput);
@@ -120,14 +120,14 @@ describe('SPEC §2.1 — Create Trip', () => {
 // ─── §2.2 Join Trip ───────────────────────────────────────────────────────────
 
 describe('SPEC §2.2 — Join Trip', () => {
-  const mockTrip = { id: tripId, ...tripInput, created_by: 'other-user', invite_code: 'ABC123' };
+  const mockTrip = { id: tripId, ...tripInput, created_by: 'other-user', invite_code: 'ABC12345' };
 
   it('returns trip on valid invite code for new member', async () => {
     mockSingle
       .mockResolvedValueOnce({ data: mockTrip, error: null })       // trip lookup
       .mockResolvedValueOnce({ data: null, error: { message: 'No rows' } }); // not yet member
 
-    const { data, error } = await tripService.joinTrip(userId, 'ABC123');
+    const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
 
     expect(error).toBeNull();
     expect(data?.id).toBe(tripId);
@@ -138,7 +138,7 @@ describe('SPEC §2.2 — Join Trip', () => {
       .mockResolvedValueOnce({ data: mockTrip, error: null })
       .mockResolvedValueOnce({ data: null, error: { message: 'No rows' } });
 
-    await tripService.joinTrip(userId, 'ABC123');
+    await tripService.joinTrip(userId, 'ABC12345');
 
     const insertCalls = (mockInsert as jest.Mock).mock.calls;
     const memberInsert = insertCalls.find((args) =>
@@ -152,17 +152,17 @@ describe('SPEC §2.2 — Join Trip', () => {
       .mockResolvedValueOnce({ data: mockTrip, error: null })
       .mockResolvedValueOnce({ data: null, error: { message: 'No rows' } });
 
-    await tripService.joinTrip(userId, 'abc123'); // lowercase input
+    await tripService.joinTrip(userId, 'abc12345'); // lowercase input
 
     const eqCalls = (mockEq as jest.Mock).mock.calls;
-    const inviteCodeCall = eqCalls.find(([col, val]) => col === 'invite_code' && val === 'ABC123');
+    const inviteCodeCall = eqCalls.find(([col, val]) => col === 'invite_code' && val === 'ABC12345');
     expect(inviteCodeCall).toBeDefined();
   });
 
   it('returns error on invalid invite code', async () => {
     mockSingle.mockResolvedValueOnce({ data: null, error: { message: 'Not found' } });
 
-    const { data, error } = await tripService.joinTrip(userId, 'XXXXXX');
+    const { data, error } = await tripService.joinTrip(userId, 'XXXXXXXX');
 
     expect(data).toBeNull();
     expect(error).toBe('Invalid invite code');
@@ -173,7 +173,7 @@ describe('SPEC §2.2 — Join Trip', () => {
       .mockResolvedValueOnce({ data: mockTrip, error: null })
       .mockResolvedValueOnce({ data: { id: 'mem-1' }, error: null }); // already member
 
-    const { data, error } = await tripService.joinTrip(userId, 'ABC123');
+    const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
 
     expect(error).toBeNull();
     expect(data?.id).toBe(tripId);
@@ -199,7 +199,7 @@ describe('SPEC §2.3 — Trip List', () => {
     expect(eqCalls.some(([col, val]) => col === 'user_id' && val === userId)).toBe(true);
   });
 
-  it('orders by created_at descending', async () => {
+  it('requests memberships and sorts extracted trips by start_date descending', async () => {
     mockOrder.mockResolvedValueOnce({ data: [], error: null });
 
     await tripService.getMyTrips(userId);
@@ -210,15 +210,15 @@ describe('SPEC §2.3 — Trip List', () => {
 
   it('returns extracted trips from membership rows', async () => {
     const rows = [
-      { trips: { id: 'trip-1', name: 'Beach Week' } },
-      { trips: { id: 'trip-2', name: 'Alps Trip' } },
+      { trips: { id: 'trip-1', name: 'Beach Week', start_date: '2024-07-01' } },
+      { trips: { id: 'trip-2', name: 'Alps Trip', start_date: '2024-08-01' } },
     ];
     mockOrder.mockResolvedValueOnce({ data: rows, error: null });
 
     const { data } = await tripService.getMyTrips(userId);
 
     expect(data).toHaveLength(2);
-    expect(data![0].name).toBe('Beach Week');
-    expect(data![1].name).toBe('Alps Trip');
+    expect(data![0].name).toBe('Alps Trip');
+    expect(data![1].name).toBe('Beach Week');
   });
 });

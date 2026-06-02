@@ -77,9 +77,19 @@ export const pollService = {
     tripId: string,
     userId: string,
     familyId?: string,
-    allowMultiple = false
+    _allowMultiple?: boolean
   ): Promise<ServiceResult<PollVote | null>> {
-    if (allowMultiple) {
+    const { data: poll, error: pollError } = await supabase
+      .from('polls')
+      .select('allow_multiple, status')
+      .eq('id', pollId)
+      .single();
+    if (pollError) return { data: null, error: pollError.message };
+    if (poll?.status === 'closed') return { data: null, error: 'Poll is closed' };
+
+    const isMultipleChoice = Boolean(poll?.allow_multiple);
+
+    if (isMultipleChoice) {
       // Multiple choice: toggle — clicking a voted option removes it
       const { data: sameOption } = await supabase
         .from('poll_votes')
@@ -146,17 +156,7 @@ export const pollService = {
   },
 
   async _decrementOption(optionId: string): Promise<void> {
-    const { data } = await supabase
-      .from('poll_options')
-      .select('votes_count')
-      .eq('id', optionId)
-      .single();
-    if (data && data.votes_count > 0) {
-      await supabase
-        .from('poll_options')
-        .update({ votes_count: data.votes_count - 1 })
-        .eq('id', optionId);
-    }
+    await supabase.rpc('decrement_poll_votes', { option_id: optionId });
   },
 
   async closePoll(pollId: string): Promise<ServiceResult<Poll>> {

@@ -53,7 +53,7 @@ describe('tripService', () => {
     currency: 'USD',
     created_by: userId,
     is_active: true,
-    invite_code: 'ABC123',
+    invite_code: 'ABC12345',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   };
@@ -134,7 +134,7 @@ describe('tripService', () => {
       mockSingle.mockResolvedValueOnce({ data: null, error: { message: 'No rows' } });
       // Call 3: insert member → uses default mock (result ignored)
 
-      const { data, error } = await tripService.joinTrip(userId, 'ABC123');
+      const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
 
       expect(mockFrom).toHaveBeenCalledWith('trips');
       expect(mockFrom).toHaveBeenCalledWith('trip_members');
@@ -147,7 +147,7 @@ describe('tripService', () => {
       mockSingle.mockResolvedValueOnce({ data: mockTrip, error: null }); // trip lookup
       mockSingle.mockResolvedValueOnce({ data: { id: 'mem-1' }, error: null }); // existing member
 
-      const { data, error } = await tripService.joinTrip(userId, 'ABC123');
+      const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
 
       expect(error).toBeNull();
       expect(data?.id).toBe(tripId);

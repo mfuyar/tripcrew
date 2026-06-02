@@ -31,6 +31,22 @@ beforeEach(() => jest.clearAllMocks());
 describe('settlementService', () => {
   const tripId = 'trip-1';
 
+  describe('createSettlement', () => {
+    it('rejects self-settlements', async () => {
+      const { data, error } = await settlementService.createSettlement(tripId, {
+        from_family_id: 'f1',
+        to_family_id: 'f1',
+        amount: 10,
+        currency: 'USD',
+        notes: undefined,
+      });
+
+      expect(data).toBeNull();
+      expect(error).toBe('A family cannot pay themselves');
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getSettlements', () => {
     // SPEC: Returns all settlements for a trip
     it('returns settlements for a trip', async () => {
@@ -60,6 +76,7 @@ describe('settlementService', () => {
     // SPEC: Payer can mark payment as 'paid'
     it('updates payment status to paid', async () => {
       const updated = { id: 's1', status: 'paid', paid_at: new Date().toISOString() };
+      mockSingle.mockResolvedValueOnce({ data: { status: 'pending' }, error: null });
       mockSingle.mockResolvedValueOnce({ data: updated, error: null });
 
       const { data, error } = await settlementService.updatePaymentStatus('s1', 'paid');
@@ -71,6 +88,7 @@ describe('settlementService', () => {
     // SPEC: Receiver can confirm payment
     it('updates payment status to confirmed', async () => {
       const updated = { id: 's1', status: 'confirmed', confirmed_at: new Date().toISOString() };
+      mockSingle.mockResolvedValueOnce({ data: { status: 'paid' }, error: null });
       mockSingle.mockResolvedValueOnce({ data: updated, error: null });
 
       const { data, error } = await settlementService.updatePaymentStatus('s1', 'confirmed');
@@ -82,12 +100,23 @@ describe('settlementService', () => {
     // SPEC: Payment can be disputed
     it('updates payment status to disputed', async () => {
       const updated = { id: 's1', status: 'disputed' };
+      mockSingle.mockResolvedValueOnce({ data: { status: 'paid' }, error: null });
       mockSingle.mockResolvedValueOnce({ data: updated, error: null });
 
       const { data, error } = await settlementService.updatePaymentStatus('s1', 'disputed');
 
       expect(error).toBeNull();
       expect(data?.status).toBe('disputed');
+    });
+
+    it('rejects invalid status transitions', async () => {
+      mockSingle.mockResolvedValueOnce({ data: { status: 'pending' }, error: null });
+
+      const { data, error } = await settlementService.updatePaymentStatus('s1', 'confirmed');
+
+      expect(data).toBeNull();
+      expect(error).toBe('Invalid payment status transition: pending to confirmed');
+      expect(mockUpdate).not.toHaveBeenCalled();
     });
   });
 });

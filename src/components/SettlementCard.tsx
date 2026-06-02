@@ -10,10 +10,11 @@ interface Props {
   settlement: Settlement;
   onMarkPaid?: () => void;
   onConfirm?: () => void;
+  onDispute?: () => void;
   showActions?: boolean;
 }
 
-export function SettlementCard({ settlement, onMarkPaid, onConfirm, showActions = true }: Props) {
+export function SettlementCard({ settlement, onMarkPaid, onConfirm, onDispute, showActions = true }: Props) {
   return (
     <View style={styles.card}>
       <View style={styles.row}>
@@ -40,15 +41,22 @@ export function SettlementCard({ settlement, onMarkPaid, onConfirm, showActions 
         {' owes '}
         <Text style={styles.bold}>{settlement.to_family?.name}</Text>
       </Text>
-      {showActions && settlement.status === 'pending' && onMarkPaid ? (
+      {showActions && (settlement.status === 'pending' || settlement.status === 'disputed') && onMarkPaid ? (
         <TouchableOpacity onPress={onMarkPaid} style={styles.actionBtn}>
           <Text style={styles.actionText}>Mark as Paid</Text>
         </TouchableOpacity>
       ) : null}
       {showActions && settlement.status === 'paid' && onConfirm ? (
-        <TouchableOpacity onPress={onConfirm} style={[styles.actionBtn, styles.confirmBtn]}>
-          <Text style={styles.actionText}>Confirm Receipt</Text>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity onPress={onConfirm} style={[styles.actionBtn, styles.confirmBtn, styles.actionHalf]}>
+            <Text style={styles.actionText}>Confirm Receipt</Text>
+          </TouchableOpacity>
+          {onDispute ? (
+            <TouchableOpacity onPress={onDispute} style={[styles.actionBtn, styles.disputeBtn, styles.actionHalf]}>
+              <Text style={styles.actionText}>Dispute</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -103,6 +111,16 @@ const styles = StyleSheet.create({
   },
   confirmBtn: {
     backgroundColor: Colors.success,
+  },
+  disputeBtn: {
+    backgroundColor: Colors.danger,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  actionHalf: {
+    flex: 1,
   },
   actionText: {
     color: Colors.surface,

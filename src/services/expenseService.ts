@@ -69,20 +69,20 @@ export const expenseService = {
     tripId: string,
     shares: FamilySplitShare[]
   ): Promise<ServiceResult<ExpenseSplit[]>> {
-    // Delete existing splits
-    await supabase.from('expense_splits').delete().eq('expense_id', expenseId);
-    // Insert new splits
+    if (!shares.length) {
+      return { data: null, error: 'Expense must have at least one split' };
+    }
+
     const rows = shares.map((s) => ({
-      expense_id: expenseId,
-      trip_id: tripId,
       family_id: s.familyId,
       share_amount: s.shareAmount,
       percentage: s.percentage,
     }));
-    const { data, error } = await supabase
-      .from('expense_splits')
-      .insert(rows)
-      .select();
+    const { data, error } = await supabase.rpc('replace_expense_splits', {
+      expense_uuid: expenseId,
+      trip_uuid: tripId,
+      shares_json: rows,
+    });
     if (error) return { data: null, error: error.message };
     return { data: data as ExpenseSplit[], error: null };
   },

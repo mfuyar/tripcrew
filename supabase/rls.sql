@@ -185,9 +185,26 @@ CREATE POLICY "Trip members can create settlements"
   ON settlements FOR INSERT
   WITH CHECK (is_trip_member(trip_id, auth.uid()));
 
-CREATE POLICY "Trip members can update settlement status"
+DROP POLICY IF EXISTS "Trip members can update settlement status" ON settlements;
+DROP POLICY IF EXISTS "Settlement payer or receiver can update status" ON settlements;
+
+CREATE POLICY "Settlement payer or receiver can update status"
   ON settlements FOR UPDATE
-  USING (is_trip_member(trip_id, auth.uid()));
+  USING (
+    is_trip_member(trip_id, auth.uid())
+    AND (
+      (status IN ('pending', 'disputed') AND EXISTS (
+        SELECT 1 FROM family_members
+        WHERE family_members.family_id = settlements.from_family_id
+          AND family_members.user_id = auth.uid()
+      ))
+      OR (status = 'paid' AND EXISTS (
+        SELECT 1 FROM family_members
+        WHERE family_members.family_id = settlements.to_family_id
+          AND family_members.user_id = auth.uid()
+      ))
+    )
+  );
 
 -- ─── messages ─────────────────────────────────────────────────────────────────
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;

@@ -38,7 +38,7 @@ const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
 ];
 
 export function AddEditExpenseScreen({ navigation, route }: Props) {
-  const { tripId, expenseId } = route.params;
+  const { tripId, expenseId, scannedExpense } = route.params;
   const { families, currentTrip, userFamily } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const isEdit = !!expenseId;
@@ -65,6 +65,14 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (isEdit) loadExpense();
   }, [expenseId]);
+
+  useEffect(() => {
+    if (!scannedExpense || isEdit) return;
+    if (scannedExpense.title) setTitle(scannedExpense.title);
+    if (scannedExpense.amount !== undefined) setAmount(scannedExpense.amount.toFixed(2));
+    if (scannedExpense.date) setDate(scannedExpense.date);
+    if (scannedExpense.notes) setNotes(scannedExpense.notes);
+  }, [scannedExpense, isEdit]);
 
   async function loadExpense() {
     if (isDemoMode) { setFetching(false); return; }
@@ -118,16 +126,22 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     if (isEdit) {
       const { error } = await expenseService.updateExpense(expenseId!, payload);
       if (!error) {
-        await expenseService.saveExpenseSplits(expenseId!, tripId, splits);
-        navigation.goBack();
+        const splitResult = await expenseService.saveExpenseSplits(expenseId!, tripId, splits);
+        if (splitResult.error) Alert.alert('Error', splitResult.error);
+        else navigation.goBack();
       } else {
         Alert.alert('Error', error);
       }
     } else {
       const { data, error } = await expenseService.createExpense(tripId, user.id, payload);
       if (!error && data) {
-        await expenseService.saveExpenseSplits(data.id, tripId, splits);
-        navigation.goBack();
+        const splitResult = await expenseService.saveExpenseSplits(data.id, tripId, splits);
+        if (splitResult.error) {
+          await expenseService.deleteExpense(data.id);
+          Alert.alert('Error', splitResult.error);
+        } else {
+          navigation.goBack();
+        }
       } else {
         Alert.alert('Error', error ?? 'Unknown error');
       }
@@ -155,6 +169,22 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        {!isEdit && (
+          <View style={styles.scanPanel}>
+            <View style={styles.scanCopy}>
+              <Text style={styles.scanTitle}>Manual expense</Text>
+              <Text style={styles.scanText}>Scan can prefill receipt details, then you review and save.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.scanButton}
+              onPress={() => navigation.navigate('ReceiptScanner', { tripId, returnToExpense: true })}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.scanButtonText}>Scan receipt</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <AppTextInput label="Title *" value={title} onChangeText={setTitle} placeholder="Grocery run at Mercado..." />
         <AppTextInput
           label="Amount *"
@@ -282,6 +312,39 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.md },
+  scanPanel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    gap: Spacing.md,
+  },
+  scanCopy: { flex: 1 },
+  scanTitle: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.text,
+    marginBottom: Spacing.xs,
+  },
+  scanText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+  },
+  scanButton: {
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  scanButtonText: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
   label: {
     fontSize: FontSize.sm,
     fontWeight: FontWeight.medium,

@@ -73,21 +73,25 @@ describe('expenseService', () => {
     // SPEC: Creates an expense and returns the created record
     it('creates a new expense successfully', async () => {
       const newExpense = {
-        trip_id: tripId,
         title: 'Hotel',
         amount: 500,
         currency: 'USD',
         paid_by_family_id: 'f1',
-        paid_by_user_id: 'u1',
         date: '2024-07-04',
         category: 'lodging' as const,
         notes: null,
         receipt_url: null,
       };
-      const created = { ...newExpense, id: expenseId, created_at: '2024-07-04T10:00:00Z' };
+      const created = {
+        ...newExpense,
+        trip_id: tripId,
+        paid_by_user_id: 'u1',
+        id: expenseId,
+        created_at: '2024-07-04T10:00:00Z',
+      };
       mockSingle.mockResolvedValueOnce({ data: created, error: null });
 
-      const { data, error } = await expenseService.createExpense(newExpense);
+      const { data, error } = await expenseService.createExpense(tripId, 'u1', newExpense);
 
       expect(mockFrom).toHaveBeenCalledWith('expenses');
       expect(error).toBeNull();
