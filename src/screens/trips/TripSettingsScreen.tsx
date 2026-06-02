@@ -14,6 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { tripService } from '../../services/tripService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { displayName } from '../../utils/displayName';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
@@ -103,7 +104,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
           <View key={m.id} style={styles.memberRow}>
             <FamilyAvatar name={m.profile?.full_name ?? '?'} size={36} />
             <View style={styles.memberInfo}>
-              <Text style={styles.memberName}>{m.profile?.full_name ?? 'Unknown'}</Text>
+              <Text style={styles.memberName}>{displayName(m.profile?.full_name, m.family?.name)}</Text>
               <Text style={styles.memberRole}>{m.role.replace('_', ' ')}</Text>
             </View>
             {isTripOrganizer && m.user_id !== user?.id && (

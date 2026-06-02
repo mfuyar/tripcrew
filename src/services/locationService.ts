@@ -37,38 +37,42 @@ export const locationService = {
   ): Promise<() => void> {
     const channel = supabase.channel(CHANNEL(tripId));
 
+    // Subscribe with a 6-second timeout so the UI never hangs indefinitely
     await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 6000); // resolve anyway after 6s
       channel.subscribe((status) => {
-        if (status === 'SUBSCRIBED') resolve();
+        if (status === 'SUBSCRIBED' || status === 'CHANNEL_ERROR') {
+          clearTimeout(timer);
+          resolve();
+        }
       });
     });
 
+    const broadcast = (pos: Location.LocationObject) => {
+      const payload: LiveLocation = {
+        userId, familyId, userName, familyName,
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy ?? undefined,
+        heading: pos.coords.heading ?? undefined,
+        timestamp: new Date(pos.timestamp).toISOString(),
+        isLive: true,
+      };
+      channel.send({ type: 'broadcast', event: BROADCAST_EVENT, payload });
+    };
+
+    // Send current position immediately — don't wait for the 8s interval
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      .then(broadcast)
+      .catch(() => {});
+
     const locationSub = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 8000,   // every 8 seconds
-        distanceInterval: 5,  // or every 5 metres moved
-      },
-      (pos) => {
-        const payload: LiveLocation = {
-          userId,
-          familyId,
-          userName,
-          familyName,
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy ?? undefined,
-          heading: pos.coords.heading ?? undefined,
-          timestamp: new Date(pos.timestamp).toISOString(),
-          isLive: true,
-        };
-        channel.send({ type: 'broadcast', event: BROADCAST_EVENT, payload });
-      }
+      { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 5 },
+      broadcast
     );
 
     return () => {
       locationSub.remove();
-      // Notify others this user stopped sharing
       channel.send({ type: 'broadcast', event: STOP_EVENT, payload: { userId } });
       supabase.removeChannel(channel);
     };

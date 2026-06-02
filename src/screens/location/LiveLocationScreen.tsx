@@ -85,16 +85,21 @@ export function LiveLocationScreen({ route }: Props) {
         );
         return;
       }
-      const stop = await locationService.startSharing(
-        tripId,
-        user!.id,
-        userFamily?.id,
-        profile?.full_name ?? 'Unknown',
-        userFamily?.name
-      );
-      stopSharingRef.current = stop;
-      setIsSharing(true);
-      setStarting(false);
+      try {
+        const stop = await locationService.startSharing(
+          tripId,
+          user!.id,
+          userFamily?.id,
+          profile?.full_name ?? 'Unknown',
+          userFamily?.name
+        );
+        stopSharingRef.current = stop;
+        setIsSharing(true);
+      } catch (e: any) {
+        Alert.alert('Location error', e?.message ?? 'Could not start sharing.');
+      } finally {
+        setStarting(false);
+      }
     } else {
       stopSharingRef.current?.();
       stopSharingRef.current = null;

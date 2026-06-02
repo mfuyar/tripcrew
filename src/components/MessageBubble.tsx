@@ -19,15 +19,16 @@ export function MessageBubble({ message, isOwn }: Props) {
       {!isOwn && (
         <View style={styles.avatarPlaceholder}>
           <Text style={styles.avatarText}>
-            {(message.profile?.full_name ?? '?').charAt(0).toUpperCase()}
+            {(message.family?.name ?? message.profile?.full_name ?? '?').charAt(0).toUpperCase()}
           </Text>
         </View>
       )}
       <View style={styles.contentWrapper}>
         {!isOwn && (
           <Text style={styles.senderName}>
-            {message.profile?.full_name ?? 'Unknown'}
-            {message.family ? ` · ${message.family.name}` : ''}
+            {message.family
+              ? `${message.family.name} (${message.profile?.full_name?.split(' ')[0] ?? '?'})`
+              : (message.profile?.full_name ?? 'Unknown')}
           </Text>
         )}
         <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther]}>

@@ -8,6 +8,7 @@ import { Announcement, AnnouncementPriority } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { announcementService } from '../../services/announcementService';
+import { displayName } from '../../utils/displayName';
 import { demoAnnouncements } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -22,7 +23,7 @@ const PRIORITY_COLORS: Record<AnnouncementPriority, string> = {
 export function AnnouncementsScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { isTripOrganizer } = useTripContext();
+  const { isTripOrganizer, members } = useTripContext();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -93,7 +94,10 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
               </View>
               <Text style={styles.cardContent}>{item.content}</Text>
               <Text style={styles.cardMeta}>
-                By {item.creator?.full_name ?? 'Unknown'} •{' '}
+                By {displayName(
+                  item.creator?.full_name,
+                  members.find(m => m.user_id === item.created_by)?.family?.name
+                )} •{' '}
                 {new Date(item.created_at).toLocaleDateString()}
               </Text>
             </TouchableOpacity>

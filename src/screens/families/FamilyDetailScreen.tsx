@@ -8,6 +8,7 @@ import { familyService } from '../../services/familyService';
 import { notificationService } from '../../services/notificationService';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { AppButton } from '../../components/AppButton';
+import { displayName } from '../../utils/displayName';
 import { LoadingView } from '../../components/LoadingView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
@@ -101,7 +102,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
           <View key={m.id} style={styles.memberCard}>
             <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
             <View style={styles.memberInfo}>
-              <Text style={styles.memberName}>{m.profile?.full_name ?? 'Unknown'}</Text>
+              <Text style={styles.memberName}>{m.profile?.full_name?.split(' ')[0] ?? 'Unknown'}</Text>
               <Text style={styles.memberEmail}>{m.profile?.email ?? ''}</Text>
               <View style={styles.pushTalkRow}>
                 <Text style={styles.pushTalkLabel}>
