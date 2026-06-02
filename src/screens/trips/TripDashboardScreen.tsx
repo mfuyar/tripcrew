@@ -36,7 +36,7 @@ const QUICK_LINKS: QuickLink[] = [
 export function TripDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip, families, members } = useTripContext();
+  const { currentTrip, families, members, userFamily, isTripOrganizer } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<{ title: string; priority: string }[]>([]);
