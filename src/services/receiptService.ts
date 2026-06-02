@@ -1,6 +1,9 @@
 import { File } from 'expo-file-system';
-import { supabase } from '../lib/supabaseClient';
+import { fetch as expoFetch } from 'expo/fetch';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { ReceiptScan, ServiceResult } from '../types';
+
+const RECEIPT_BUCKET = 'trip-media';
 
 export const receiptService = {
   async uploadReceipt(
@@ -11,15 +14,30 @@ export const receiptService = {
     // Upload image to storage
     const file = new File(imageUri);
     const fileName = `receipts/${tripId}/${userId}/${Date.now()}.jpg`;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token ?? supabaseAnonKey;
 
-    const { error: uploadError } = await supabase.storage
-      .from('trip-media')
-      .upload(fileName, file as unknown as File, { contentType: file.type || 'image/jpeg' });
+    const uploadResponse = await expoFetch(
+      `${supabaseUrl}/storage/v1/object/${RECEIPT_BUCKET}/${fileName}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: supabaseAnonKey,
+          'Content-Type': file.type || 'image/jpeg',
+          'x-upsert': 'false',
+        },
+        body: file,
+      }
+    );
 
-    if (uploadError) return { data: null, error: uploadError.message };
+    if (!uploadResponse.ok) {
+      const uploadError = await uploadResponse.text();
+      return { data: null, error: uploadError || 'Receipt upload failed' };
+    }
 
     const { data: urlData } = supabase.storage
-      .from('trip-media')
+      .from(RECEIPT_BUCKET)
       .getPublicUrl(fileName);
 
     // Create receipt record
