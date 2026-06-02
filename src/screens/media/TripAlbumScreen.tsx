@@ -9,6 +9,7 @@ import {
   Dimensions,
   Alert,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
@@ -165,6 +166,28 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
                 <Text style={styles.captionText} numberOfLines={1}>{item.caption}</Text>
               </View>
             ) : null}
+            {/* Delete button — visible for uploader's own photos */}
+            {item.uploaded_by === user?.id && (
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={async () => {
+                  const confirmed = Platform.OS === 'web'
+                    ? window.confirm('Delete this photo?')
+                    : await new Promise<boolean>((resolve) =>
+                        Alert.alert('Delete Photo', 'Remove this photo?', [
+                          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                          { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+                        ])
+                      );
+                  if (!confirmed) return;
+                  await mediaService.deleteMedia(item.id);
+                  loadMedia();
+                }}
+                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              >
+                <Text style={styles.deleteBtnText}>🗑</Text>
+              </TouchableOpacity>
+            )}
           </TouchableOpacity>
         )}
       />
@@ -202,6 +225,18 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   thumbnail: { width: '100%', height: '100%' },
+  deleteBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteBtnText: { fontSize: 12 },
   captionOverlay: {
     position: 'absolute',
     bottom: 0,

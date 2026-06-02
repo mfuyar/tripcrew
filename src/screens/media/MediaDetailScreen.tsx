@@ -12,7 +12,9 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, TripMedia } from '../../types';
+import { Platform } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTripContext } from '../../contexts/TripContext';
 import { mediaService } from '../../services/mediaService';
 import { LoadingView } from '../../components/LoadingView';
 import { AppButton } from '../../components/AppButton';
@@ -23,6 +25,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'MediaDetail'>;
 export function MediaDetailScreen({ navigation, route }: Props) {
   const { tripId, mediaId } = route.params;
   const { user, isDemoMode } = useAuth();
+  const { isTripOrganizer } = useTripContext();
   const [media, setMedia] = useState<TripMedia | null>(null);
   const [loading, setLoading] = useState(true);
   const [caption, setCaption] = useState('');
@@ -52,23 +55,24 @@ export function MediaDetailScreen({ navigation, route }: Props) {
 
   async function handleDelete() {
     if (!media) return;
-    Alert.alert('Delete Photo', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await mediaService.deleteMedia(media.id);
-          navigation.goBack();
-        },
-      },
-    ]);
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('Delete this photo? This cannot be undone.')
+      : await new Promise<boolean>((resolve) =>
+          Alert.alert('Delete Photo', 'This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+          ])
+        );
+    if (!confirmed) return;
+    await mediaService.deleteMedia(media.id);
+    navigation.goBack();
   }
 
   if (loading) return <LoadingView />;
   if (!media) return null;
 
-  const canModify = media.uploaded_by === user?.id;
+  // Uploader or trip organizer can modify/delete
+  const canModify = media.uploaded_by === user?.id || isTripOrganizer;
   const { width } = Dimensions.get('window');
 
   return (
