@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 import { Poll, PollOption, PollVote, ServiceResult } from '../types';
+import { notificationService } from './notificationService';
 
 export const pollService = {
   async createPoll(
@@ -37,7 +38,17 @@ export const pollService = {
       .insert(optionRows);
     if (optError) return { data: null, error: optError.message };
 
-    return pollService.getPollById(poll.id);
+    const result = await pollService.getPollById(poll.id);
+
+    // Notify all other trip members
+    notificationService.notifyTripMembers(
+      tripId, userId, 'poll',
+      '🗳️ New Poll',
+      question,
+      { poll_id: poll.id }
+    );
+
+    return result;
   },
 
   async getPolls(tripId: string): Promise<ServiceResult<Poll[]>> {

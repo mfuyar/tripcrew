@@ -15,6 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, Trip } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
+import { useNotifications } from '../../contexts/NotificationsContext';
 import { tripService } from '../../services/tripService';
 import { familyService } from '../../services/familyService';
 import { demoTrip, demoFamilies } from '../../lib/mockData';
@@ -64,6 +65,7 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
 export function TripsListScreen() {
   const navigation = useNavigation<Nav>();
   const { user, isDemoMode } = useAuth();
+  const { unreadCount } = useNotifications();
   const { setCurrentTrip, setFamilies, setMembers } = useTripContext();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,6 +136,14 @@ export function TripsListScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Trips</Text>
         <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => navigation.navigate('Notifications')}
+          >
+            <Text style={styles.headerBtnText}>
+              🔔{unreadCount > 0 ? ` ${unreadCount > 99 ? '99+' : unreadCount}` : ''}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerBtn}
             onPress={() => setShowJoin(true)}

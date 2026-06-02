@@ -71,6 +71,7 @@ import {
   TabParamList,
   TripTabParamList,
 } from '../types';
+import { useNotifications } from '../contexts/NotificationsContext';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -87,15 +88,28 @@ function AuthNavigator() {
   );
 }
 
-function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
+function TabIcon({ emoji, focused, badge }: { emoji: string; focused: boolean; badge?: number }) {
   return (
     <View style={{ opacity: focused ? 1 : 0.55 }}>
       <Text style={{ fontSize: 22 }}>{emoji}</Text>
+      {badge && badge > 0 ? (
+        <View style={{
+          position: 'absolute', top: -4, right: -8,
+          backgroundColor: Colors.danger, borderRadius: 999,
+          minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center',
+          paddingHorizontal: 3,
+        }}>
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+            {badge > 99 ? '99+' : badge}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 function MainTabs() {
+  const { unreadCount } = useNotifications();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -119,7 +133,7 @@ function MainTabs() {
         component={ProfileScreen}
         options={{
           tabBarLabel: 'Profile',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} badge={unreadCount} />,
         }}
       />
     </Tab.Navigator>

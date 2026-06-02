@@ -5,6 +5,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { Notification } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationsContext';
 import { notificationService } from '../../services/notificationService';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -18,6 +19,7 @@ const TYPE_ICONS: Record<string, string> = {
 
 export function NotificationCenterScreen() {
   const { user, isDemoMode } = useAuth();
+  const { refreshUnread } = useNotifications();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,6 +43,7 @@ export function NotificationCenterScreen() {
     if (!user) return;
     await notificationService.markAllRead(user.id);
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    refreshUnread(); // clear badge
   }
 
   if (loading) return <LoadingView />;

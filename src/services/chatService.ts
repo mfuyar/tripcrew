@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabaseClient';
 import { Message, ServiceResult } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { notificationService } from './notificationService';
 
 export const chatService = {
   async getMessages(
@@ -46,6 +47,16 @@ export const chatService = {
     if (error) return { data: null, error: error.message };
     // Broadcast to all subscribers on this trip's chat channel
     chatService.broadcastMessage(tripId, data as Message);
+
+    // Notify other members (fire-and-forget — don't block the send)
+    const preview = content.length > 60 ? content.slice(0, 57) + '…' : content;
+    notificationService.notifyTripMembers(
+      tripId, userId, 'message',
+      '💬 New Message',
+      preview || 'Sent a photo or audio',
+      { trip_id: tripId }
+    );
+
     return { data: data as Message, error: null };
   },
 

@@ -14,10 +14,12 @@ const mockLimit = jest.fn();
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 
+const mockNeq = jest.fn();
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
   insert: mockInsert.mockReturnThis(),
   eq: mockEq.mockReturnThis(),
+  neq: mockNeq.mockReturnThis(),
   order: mockOrder.mockReturnThis(),
   limit: mockLimit.mockReturnThis(),
   single: mockSingle,
@@ -39,6 +41,12 @@ jest.mock('../../lib/supabaseClient', () => ({
     removeChannel: mockRemoveChannel,
   },
 }));
+
+// notificationService uses the same supabase mock — make member query return empty
+// so notifyTripMembers is a no-op in these tests
+beforeAll(() => {
+  mockNeq.mockResolvedValue({ data: [], error: null });
+});
 
 import { chatService } from '../../services/chatService';
 
