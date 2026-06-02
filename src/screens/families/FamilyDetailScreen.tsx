@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch, Platform } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, FamilyMember } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
@@ -17,20 +17,50 @@ type Props = NativeStackScreenProps<MainStackParamList, 'FamilyDetail'>;
 export function FamilyDetailScreen({ navigation, route }: Props) {
   const { tripId, familyId } = route.params;
   const { user, profile, isDemoMode } = useAuth();
-  const { families, userFamily } = useTripContext();
-  const [members, setMembers] = useState<FamilyMember[]>([]);
+  const { families, userFamily, members: tripMembers } = useTripContext();
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingPush, setSendingPush] = useState(false);
+  const [adding, setAdding] = useState<string | null>(null);
 
   const family = families.find((f) => f.id === familyId);
 
-  useEffect(() => {
+  // Trip members not yet assigned to any family
+  const unassigned = tripMembers.filter((m) => !m.family_id && m.user_id !== user?.id);
+  // Is the current user an admin of this family?
+  const isMyFamily = familyMembers.some((m) => m.user_id === user?.id);
+  const isAdmin = familyMembers.some((m) => m.user_id === user?.id && m.is_admin);
+
+  async function refresh() {
     if (isDemoMode) { setLoading(false); return; }
-    familyService.getFamilyMembers(familyId).then(({ data }) => {
-      setMembers(data ?? []);
-      setLoading(false);
-    });
-  }, [familyId, isDemoMode]);
+    const { data } = await familyService.getFamilyMembers(familyId);
+    setFamilyMembers(data ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => { refresh(); }, [familyId, isDemoMode]);
+
+  async function handleAddMember(tripMemberId: string, name: string) {
+    setAdding(tripMemberId);
+    const { error } = await familyService.addFamilyMember(familyId, tripId, tripMemberId);
+    setAdding(null);
+    if (error) { Alert.alert('Error', error); return; }
+    refresh();
+  }
+
+  async function handleRemoveMember(memberId: string, memberUserId: string) {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('Remove this member from the family?')
+      : await new Promise<boolean>((resolve) =>
+          Alert.alert('Remove Member', 'Remove from this family?', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
+          ])
+        );
+    if (!confirmed) return;
+    await familyService.removeFamilyMember(familyId, memberUserId);
+    setFamilyMembers((prev) => prev.filter((m) => m.id !== memberId));
+  }
 
   if (loading) return <LoadingView />;
   if (!family) return null;
@@ -38,12 +68,12 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
   async function handleTogglePushTalk(member: FamilyMember, enabled: boolean) {
     const { data, error } = await familyService.updateFamilyMemberPushTalk(member.id, enabled);
     if (error) return Alert.alert('Unable to update push talk setting', error);
-    setMembers((prev) => prev.map((m) => (m.id === member.id ? data ?? m : m)));
+    setFamilyMembers((prev) => prev.map((m) => (m.id === member.id ? data ?? m : m)));
   }
 
   async function handleSendPushTalk() {
     if (!user || !family) return;
-    const recipients = members.filter((m) => m.push_talk_enabled && m.user_id !== user.id);
+    const recipients = familyMembers.filter((m) => m.push_talk_enabled && m.user_id !== user.id);
     if (recipients.length === 0) {
       return Alert.alert('No recipients', 'No family members have opted in to receive push talk messages.');
     }
@@ -103,38 +133,66 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         style={styles.pushTalkBtn}
       />
 
-      {/* Members */}
-      <Text style={styles.sectionTitle}>Members ({members.length})</Text>
-      {members.length === 0 ? (
+      {/* Current Members */}
+      <Text style={styles.sectionTitle}>Members ({familyMembers.length})</Text>
+      {familyMembers.length === 0 ? (
         <Text style={styles.emptyText}>No members linked yet.</Text>
       ) : (
-        members.map((m) => (
+        familyMembers.map((m) => (
           <View key={m.id} style={styles.memberCard}>
             <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
             <View style={styles.memberInfo}>
               <Text style={styles.memberName}>{m.profile?.full_name?.split(' ')[0] ?? 'Unknown'}</Text>
               <Text style={styles.memberEmail}>{m.profile?.email ?? ''}</Text>
-              <View style={styles.pushTalkRow}>
-                <Text style={styles.pushTalkLabel}>
-                  {m.push_talk_enabled ? 'Receiving push talk' : 'Not receiving push talk'}
-                </Text>
-              </View>
+              <Text style={styles.pushTalkLabel}>
+                {m.push_talk_enabled ? '🔔 Push talk on' : '🔕 Push talk off'}
+              </Text>
             </View>
             {m.is_admin && (
               <View style={styles.adminBadge}>
                 <Text style={styles.adminText}>Admin</Text>
               </View>
             )}
-            {user?.id === m.user_id && (
-              <Switch
-                value={m.push_talk_enabled}
-                onValueChange={(value) => handleTogglePushTalk(m, value)}
-                thumbColor={m.push_talk_enabled ? Colors.primary : Colors.surface}
-                trackColor={{ false: Colors.border, true: Colors.primary + '40' }}
-              />
-            )}
+            <View style={styles.memberActions}>
+              {user?.id === m.user_id && (
+                <Switch
+                  value={m.push_talk_enabled}
+                  onValueChange={(v) => handleTogglePushTalk(m, v)}
+                  thumbColor={m.push_talk_enabled ? Colors.primary : Colors.surface}
+                  trackColor={{ false: Colors.border, true: Colors.primary + '40' }}
+                />
+              )}
+              {isAdmin && !m.is_admin && user?.id !== m.user_id && (
+                <TouchableOpacity onPress={() => handleRemoveMember(m.id, m.user_id)}>
+                  <Text style={styles.removeText}>Remove</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         ))
+      )}
+
+      {/* Add unassigned trip members — visible to family admin */}
+      {isAdmin && unassigned.length > 0 && (
+        <View style={styles.addSection}>
+          <Text style={styles.sectionTitle}>Add trip members to this family</Text>
+          {unassigned.map((m) => (
+            <View key={m.id} style={styles.memberCard}>
+              <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
+              <View style={styles.memberInfo}>
+                <Text style={styles.memberName}>{m.profile?.full_name ?? 'Unknown'}</Text>
+                <Text style={styles.memberEmail}>{m.profile?.email ?? ''}</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.addBtn, adding === m.user_id && styles.addBtnDisabled]}
+                onPress={() => handleAddMember(m.user_id, m.profile?.full_name ?? '')}
+                disabled={adding !== null}
+              >
+                <Text style={styles.addBtnText}>{adding === m.user_id ? '…' : '+ Add'}</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
       )}
     </ScrollView>
   );
@@ -170,6 +228,16 @@ const styles = StyleSheet.create({
   },
   adminText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
   pushTalkBtn: { marginBottom: Spacing.lg },
-  pushTalkRow: { marginTop: Spacing.xs, flexDirection: 'row', alignItems: 'center' },
-  pushTalkLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginRight: Spacing.sm },
+  pushTalkLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  memberActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  removeText: { fontSize: FontSize.sm, color: Colors.danger },
+  addSection: { marginTop: Spacing.lg },
+  addBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  addBtnDisabled: { opacity: 0.5 },
+  addBtnText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
 });
