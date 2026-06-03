@@ -584,3 +584,7 @@ CREATE INDEX IF NOT EXISTS live_locations_trip_id_idx ON live_locations(trip_id)
 -- ─── Supabase Storage Bucket ──────────────────────────────────────────────────
 -- Run this separately in Supabase dashboard > Storage, or via CLI:
 -- supabase storage create trip-media --public
+-- The trip-media bucket must allow:
+-- image/jpeg, image/png, image/gif, image/webp, image/heic,
+-- video/mp4, video/quicktime,
+-- audio/mp4, audio/m4a, audio/x-m4a, audio/mpeg, audio/aac, audio/wav, audio/x-caf
