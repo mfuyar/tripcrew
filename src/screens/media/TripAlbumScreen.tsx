@@ -110,14 +110,15 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
     }
   }
 
-  async function processUploads(uris: string[]) {
-    if (!user || !uris.length) return;
+  async function processUploads(assets: { uri: string; width?: number; height?: number }[]) {
+    if (!user || !assets.length) return;
     setUploading(true);
     try {
       const errors: string[] = [];
-      for (const uri of uris) {
+      for (const asset of assets) {
         const { error } = await mediaService.uploadMedia(
-          tripId, user.id, userFamily?.id, uri, 'photo'
+          tripId, user.id, userFamily?.id, asset.uri, 'photo',
+          undefined, asset.width, asset.height
         );
         if (error) errors.push(error);
       }
@@ -136,9 +137,10 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   async function handleWebFileChange(e: any) {
     const files: File[] = Array.from(e.target.files ?? []);
     e.target.value = '';
-    const uris = files.map((f) => URL.createObjectURL(f));
-    await processUploads(uris);
-    uris.forEach((u) => URL.revokeObjectURL(u));
+    // Web: no dimension info available, service will always resize
+    const assets = files.map((f) => ({ uri: URL.createObjectURL(f) }));
+    await processUploads(assets);
+    assets.forEach((a) => URL.revokeObjectURL(a.uri));
   }
 
   function handleUploadWeb() {
@@ -156,10 +158,10 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
-      quality: 0.7,
+      quality: 1, // resize handled in uploadMedia via expo-image-manipulator
     });
     if (!result.canceled && result.assets.length > 0) {
-      await processUploads(result.assets.map((a) => a.uri));
+      await processUploads(result.assets.map((a) => ({ uri: a.uri, width: a.width, height: a.height })));
     }
   }
 

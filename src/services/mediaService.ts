@@ -1,7 +1,24 @@
 import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { TripMedia, MediaType, ServiceResult } from '../types';
+
+const MAX_PHOTO_PX = 1920;
+
+// Resize a photo so neither dimension exceeds MAX_PHOTO_PX, keeping aspect ratio.
+// Returns the original URI unchanged for non-photo or already-small files.
+async function resizePhoto(uri: string, width: number, height: number): Promise<string> {
+  if (width <= MAX_PHOTO_PX && height <= MAX_PHOTO_PX) return uri;
+  const landscape = width >= height;
+  const resize = landscape ? { width: MAX_PHOTO_PX } : { height: MAX_PHOTO_PX };
+  const result = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ resize }],
+    { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+  );
+  return result.uri;
+}
 
 const MEDIA_BUCKET = 'trip-media';
 
@@ -55,10 +72,15 @@ export const mediaService = {
     familyId: string | undefined,
     uri: string,
     mediaType: MediaType,
-    caption?: string
+    caption?: string,
+    originalWidth?: number,
+    originalHeight?: number
   ): Promise<ServiceResult<TripMedia>> {
-    const file = new File(uri);
-    const ext = getExtension(uri, mediaType);
+    const finalUri = mediaType === 'photo'
+      ? await resizePhoto(uri, originalWidth ?? MAX_PHOTO_PX + 1, originalHeight ?? MAX_PHOTO_PX + 1)
+      : uri;
+    const file = new File(finalUri);
+    const ext = getExtension(finalUri, mediaType);
     const fileName = `${tripId}/${userId}/${Date.now()}.${ext}`;
     const contentType = getContentType(file, ext, mediaType);
     const { data: sessionData } = await supabase.auth.getSession();
