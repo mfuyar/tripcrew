@@ -103,7 +103,15 @@ export const mediaService = {
       .single();
 
     if (error) return { data: null, error: error.message };
-    return { data: data as TripMedia, error: null };
+
+    // DB stores the public URL (used as a path marker for signed-URL regeneration).
+    // Return a signed URL to callers so the file is immediately accessible
+    // regardless of bucket visibility (e.g. for messages.media_url in chat).
+    const { data: signed } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrl(fileName, 60 * 60 * 24 * 365);
+    const result = data as TripMedia;
+    return { data: signed ? { ...result, url: signed.signedUrl } : result, error: null };
   },
 
   async getMedia(tripId: string): Promise<ServiceResult<TripMedia[]>> {
@@ -191,8 +199,16 @@ export const mediaService = {
       return { data: null, error: uploadError || 'Audio upload failed' };
     }
 
-    const { data: urlData } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
-    return { data: { url: urlData.publicUrl, mime_type: contentType }, error: null };
+    // Use a signed URL so the file is accessible regardless of bucket visibility.
+    // 1-year expiry is sufficient for chat context.
+    const { data: signed, error: signErr } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrl(fileName, 60 * 60 * 24 * 365);
+    if (signErr || !signed) {
+      const { data: urlData } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
+      return { data: { url: urlData.publicUrl, mime_type: contentType }, error: null };
+    }
+    return { data: { url: signed.signedUrl, mime_type: contentType }, error: null };
   },
 
   async updateCaption(
