@@ -25,8 +25,8 @@ interface FeatureItem {
 const FEATURES: FeatureItem[] = [
   { emoji: '👨‍👩‍👧‍👦', title: 'Families', subtitle: 'Manage families & members', screen: 'Families' },
   { emoji: '🤝', title: 'Join a Family', subtitle: 'Select which family you belong to', screen: 'JoinFamily' },
-  { emoji: '⚖️', title: 'Balances', subtitle: 'See who owes what', screen: 'Balances' },
-  { emoji: '💸', title: 'Settlements', subtitle: 'Settle up easily', screen: 'Settlements' },
+  { emoji: '⚖️', title: 'Balances', subtitle: 'See who owes what', screen: 'Balances', adminOnly: true },
+  { emoji: '💸', title: 'Settlements', subtitle: 'Settle up easily', screen: 'Settlements', adminOnly: true },
   { emoji: '📊', title: 'Fairness', subtitle: 'Expense fairness metrics', screen: 'Fairness' },
   { emoji: '🗓️', title: 'Itinerary', subtitle: 'Day-by-day plan', screen: 'Itinerary' },
   { emoji: '🛒', title: 'Grocery List', subtitle: 'Shared shopping list', screen: 'GroceryList' },

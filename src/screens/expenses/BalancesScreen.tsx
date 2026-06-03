@@ -24,7 +24,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'Balances'>;
 
 export function BalancesScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
-  const { families, currentTrip } = useTripContext();
+  const { families, currentTrip, canManageTrip } = useTripContext();
   const { isDemoMode } = useAuth();
   const [balances, setBalances] = useState<FamilyBalance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,12 +106,14 @@ export function BalancesScreen({ navigation, route }: Props) {
         );
       })}
 
-      <AppButton
-        title="Calculate Settlements"
-        onPress={() => navigation.navigate('Settlements', { tripId })}
-        fullWidth
-        style={styles.settleBtn}
-      />
+      {canManageTrip && (
+        <AppButton
+          title="Calculate Settlements"
+          onPress={() => navigation.navigate('Settlements', { tripId })}
+          fullWidth
+          style={styles.settleBtn}
+        />
+      )}
     </ScrollView>
   );
 }

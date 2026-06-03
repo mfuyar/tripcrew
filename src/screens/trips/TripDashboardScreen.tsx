@@ -30,8 +30,8 @@ interface QuickLink {
 
 const ALL_QUICK_LINKS: (QuickLink & { adminOnly?: boolean })[] = [
   { emoji: '👨‍👩‍👧‍👦', label: 'Families', screen: 'Families' },
-  { emoji: '⚖️', label: 'Balances', screen: 'Balances' },
-  { emoji: '💸', label: 'Settlements', screen: 'Settlements' },
+  { emoji: '⚖️', label: 'Balances', screen: 'Balances', adminOnly: true },
+  { emoji: '💸', label: 'Settlements', screen: 'Settlements', adminOnly: true },
   { emoji: '📷', label: 'Receipt Scan', screen: 'ReceiptScanner', adminOnly: true },
 ];
 

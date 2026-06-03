@@ -25,7 +25,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'Settlements'>;
 
 export function SettlementScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
-  const { families, currentTrip } = useTripContext();
+  const { families, currentTrip, canManageTrip } = useTripContext();
   const { isDemoMode } = useAuth();
   const [settlements, setSettlements] = useState<SettlementCalculation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,13 +121,17 @@ export function SettlementScreen({ navigation, route }: Props) {
               {' pays '}
               <Text style={styles.bold}>{item.toFamilyName}</Text>
             </Text>
-            <AppButton
-              title="Record Payment"
-              onPress={() => handleMarkPaid(item)}
-              loading={saving === key}
-              fullWidth
-              style={styles.payBtn}
-            />
+            {canManageTrip ? (
+              <AppButton
+                title="Record Payment"
+                onPress={() => handleMarkPaid(item)}
+                loading={saving === key}
+                fullWidth
+                style={styles.payBtn}
+              />
+            ) : (
+              <Text style={styles.viewOnlyNote}>Only admins can record payments</Text>
+            )}
           </View>
         );
       }}
@@ -156,4 +160,5 @@ const styles = StyleSheet.create({
   desc: { fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center', marginBottom: Spacing.sm },
   bold: { fontWeight: FontWeight.semiBold, color: Colors.text },
   payBtn: { marginTop: Spacing.xs },
+  viewOnlyNote: { fontSize: FontSize.xs, color: Colors.textSecondary, textAlign: 'center', marginTop: Spacing.sm },
 });

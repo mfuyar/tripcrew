@@ -22,7 +22,7 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
 export function FamiliesScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { families, setFamilies } = useTripContext();
+  const { families, setFamilies, canManageTrip } = useTripContext();
   const { isDemoMode } = useAuth();
   const [refreshing, setRefreshing] = React.useState(false);
 
@@ -44,21 +44,21 @@ export function FamiliesScreen({ route }: { route: { params: { tripId: string } 
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadFamilies(); }} tintColor={Colors.primary} />
         }
-        ListHeaderComponent={
+        ListHeaderComponent={canManageTrip ? (
           <TouchableOpacity
             style={styles.addBtn}
             onPress={() => navigation.navigate('AddEditFamily', { tripId })}
           >
             <Text style={styles.addBtnText}>+ Add Family</Text>
           </TouchableOpacity>
-        }
+        ) : null}
         ListEmptyComponent={
           <EmptyState
             icon="👨‍👩‍👧‍👦"
             title="No families yet"
-            subtitle="Add your family to start tracking expenses."
-            actionLabel="Add Family"
-            onAction={() => navigation.navigate('AddEditFamily', { tripId })}
+            subtitle={canManageTrip ? 'Add your family to start tracking expenses.' : 'Families set up by the organizer will appear here.'}
+            actionLabel={canManageTrip ? 'Add Family' : undefined}
+            onAction={canManageTrip ? () => navigation.navigate('AddEditFamily', { tripId }) : undefined}
           />
         }
         renderItem={({ item }) => (
