@@ -18,7 +18,6 @@ const mockStorageFrom = jest.fn(() => ({
   getPublicUrl: mockGetPublicUrl,
 }));
 
-const mockInvoke = jest.fn();
 const mockExpoFetch = jest.fn();
 
 jest.mock('../../lib/supabaseClient', () => ({
@@ -28,7 +27,6 @@ jest.mock('../../lib/supabaseClient', () => ({
     auth: { getSession: mockGetSession },
     from: mockFrom,
     storage: { from: mockStorageFrom },
-    functions: { invoke: mockInvoke },
   },
 }));
 
@@ -131,21 +129,32 @@ describe('receiptService', () => {
         parsed_merchant: 'Market',
         parsed_date: '2026-06-02',
       });
-      mockInvoke.mockResolvedValueOnce({ data: { data: scanned }, error: null });
+      mockExpoFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: scanned }),
+      });
 
       const { data, error } = await receiptService.scanReceipt(receiptId, imageUrl);
 
-      expect(mockInvoke).toHaveBeenCalledWith('scan-receipt', {
-        body: { receiptId },
-      });
+      expect(mockExpoFetch).toHaveBeenCalledWith(
+        'https://project.supabase.co/functions/v1/scan-receipt',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer user-token',
+            apikey: 'anon-key',
+          }),
+          body: JSON.stringify({ receiptId }),
+        })
+      );
       expect(error).toBeNull();
       expect(data?.parsed_merchant).toBe('Market');
     });
 
     it('returns function errors', async () => {
-      mockInvoke.mockResolvedValueOnce({
-        data: { error: 'GEMINI_API_KEY is not configured' },
-        error: null,
+      mockExpoFetch.mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: 'GEMINI_API_KEY is not configured' }),
       });
 
       const { data, error } = await receiptService.scanReceipt(receiptId, imageUrl);

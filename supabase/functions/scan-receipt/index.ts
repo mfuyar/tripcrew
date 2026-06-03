@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
     const updateResponse = await fetch(`${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}`, {
       method: 'PATCH',
       headers: {
-        Authorization: authHeader,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
         apikey: supabaseServiceRoleKey,
         'Content-Type': 'application/json',
         Prefer: 'return=representation',

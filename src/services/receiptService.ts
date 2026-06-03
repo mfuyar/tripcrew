@@ -55,11 +55,26 @@ export const receiptService = {
   },
 
   async scanReceipt(receiptId: string, imageUrl: string): Promise<ServiceResult<ReceiptScan>> {
-    const { data, error } = await supabase.functions.invoke('scan-receipt', {
-      body: { receiptId },
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+
+    if (!token) return { data: null, error: 'You must be signed in to scan receipts.' };
+
+    const response = await expoFetch(`${supabaseUrl}/functions/v1/scan-receipt`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: supabaseAnonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ receiptId }),
     });
 
-    if (error) return { data: null, error: error.message };
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return { data: null, error: data?.error ?? 'Receipt scan failed' };
+    }
     if (data?.error) return { data: null, error: data.error };
     if (!data?.data) return { data: null, error: 'Receipt scan returned no data' };
 
