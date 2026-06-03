@@ -9,6 +9,8 @@ import {
   Alert,
   TextInput,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -196,7 +198,11 @@ export function TripsListScreen() {
 
       {/* Join Trip Modal */}
       <Modal visible={showJoin} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={20}
+        >
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Join a Trip</Text>
             <Text style={styles.modalSubtitle}>Enter the 8-character invite code</Text>
@@ -207,6 +213,7 @@ export function TripsListScreen() {
               placeholder="e.g. ABC12345"
               maxLength={8}
               autoCapitalize="characters"
+              autoFocus
               placeholderTextColor={Colors.textSecondary}
             />
             <AppButton title="Join Trip" onPress={handleJoin} loading={joining} fullWidth />
@@ -218,7 +225,7 @@ export function TripsListScreen() {
               style={{ marginTop: Spacing.sm }}
             />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
