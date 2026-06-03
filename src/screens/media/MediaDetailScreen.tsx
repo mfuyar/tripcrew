@@ -64,7 +64,7 @@ export function MediaDetailScreen({ navigation, route }: Props) {
           ])
         );
     if (!confirmed) return;
-    await mediaService.deleteMedia(media.id);
+    await mediaService.deleteMedia(media);
     navigation.goBack();
   }
 

@@ -14,6 +14,19 @@ function getExtension(uri: string, mediaType: MediaType): string {
   return 'jpg';
 }
 
+// Extract storage object path from a public or signed URL
+function extractStoragePath(url: string): string | null {
+  // Public URL: .../storage/v1/object/public/trip-media/<path>
+  const pub = `/public/${MEDIA_BUCKET}/`;
+  const pubIdx = url.indexOf(pub);
+  if (pubIdx >= 0) return decodeURIComponent(url.substring(pubIdx + pub.length).split('?')[0]);
+  // Signed URL: .../storage/v1/object/sign/trip-media/<path>?token=...
+  const sign = `/sign/${MEDIA_BUCKET}/`;
+  const signIdx = url.indexOf(sign);
+  if (signIdx >= 0) return decodeURIComponent(url.substring(signIdx + sign.length).split('?')[0]);
+  return null;
+}
+
 function getContentType(file: File, ext: string, mediaType: MediaType): string {
   const mimeMap: Record<string, string> = {
     jpg: 'image/jpeg',
@@ -100,14 +113,47 @@ export const mediaService = {
       .eq('trip_id', tripId)
       .order('created_at', { ascending: false });
     if (error) return { data: null, error: error.message };
-    return { data: data as TripMedia[], error: null };
+
+    const items = data as TripMedia[];
+    const paths = items.map((item) => extractStoragePath(item.url)).filter(Boolean) as string[];
+
+    if (paths.length > 0) {
+      const { data: signed } = await supabase.storage
+        .from(MEDIA_BUCKET)
+        .createSignedUrls(paths, 3600);
+
+      if (signed) {
+        const signedMap = new Map(signed.map((s) => [s.path, s.signedUrl]));
+        return {
+          data: items.map((item) => {
+            const path = extractStoragePath(item.url);
+            const signedUrl = path ? signedMap.get(path) : undefined;
+            return signedUrl ? { ...item, url: signedUrl } : item;
+          }),
+          error: null,
+        };
+      }
+    }
+
+    return { data: items, error: null };
   },
 
-  async deleteMedia(mediaId: string): Promise<ServiceResult<null>> {
-    const { error } = await supabase
-      .from('trip_media')
-      .delete()
-      .eq('id', mediaId);
+  async deleteMedia(item: Pick<TripMedia, 'id' | 'url'>): Promise<ServiceResult<null>> {
+    const path = extractStoragePath(item.url);
+    if (path) {
+      await supabase.storage.from(MEDIA_BUCKET).remove([path]);
+    }
+    const { error } = await supabase.from('trip_media').delete().eq('id', item.id);
+    return { data: null, error: error?.message ?? null };
+  },
+
+  async deleteMultipleMedia(items: Pick<TripMedia, 'id' | 'url'>[]): Promise<ServiceResult<null>> {
+    const paths = items.map((i) => extractStoragePath(i.url)).filter(Boolean) as string[];
+    if (paths.length > 0) {
+      await supabase.storage.from(MEDIA_BUCKET).remove(paths);
+    }
+    const ids = items.map((i) => i.id);
+    const { error } = await supabase.from('trip_media').delete().in('id', ids);
     return { data: null, error: error?.message ?? null };
   },
 

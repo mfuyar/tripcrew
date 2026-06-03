@@ -20,23 +20,30 @@ import { useTripContext } from '../../contexts/TripContext';
 import { mediaService } from '../../services/mediaService';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
-import { Colors, Spacing, Radius } from '../../constants/theme';
+import { Colors, Spacing, Radius, FontSize, FontWeight } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 const COLS = 3;
 const CELL = (Dimensions.get('window').width - Spacing.sm * (COLS + 1)) / COLS;
 
+const MEDIA_ICON: Record<string, string> = {
+  audio: '🎵',
+  video: '🎬',
+  document: '📄',
+};
+
 export function TripAlbumScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { userFamily } = useTripContext();
+  const { userFamily, isTripOrganizer } = useTripContext();
   const [media, setMedia] = useState<TripMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
-  // Web-only ref to a hidden <input type="file"> — bypasses expo-image-picker's
-  // dispatchEvent(new MouseEvent) which Chrome blocks for file inputs (isTrusted:false)
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const webFileInputRef = useRef<any>(null);
 
   const loadMedia = useCallback(async () => {
@@ -49,7 +56,60 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
 
   useFocusEffect(useCallback(() => { loadMedia(); }, [loadMedia]));
 
-  // Shared upload logic used by both web and native paths
+  function enterSelectMode() {
+    setSelectMode(true);
+    setSelectedIds(new Set());
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function handleSelectAll() {
+    if (selectedIds.size === media.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(media.map((m) => m.id)));
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(`Delete ${count} item${count > 1 ? 's' : ''}? This cannot be undone.`)
+      : await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            'Delete Items',
+            `Remove ${count} item${count > 1 ? 's' : ''}? This cannot be undone.`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+            ]
+          )
+        );
+    if (!confirmed) return;
+    setDeleting(true);
+    const toDelete = media.filter((m) => selectedIds.has(m.id));
+    const { error } = await mediaService.deleteMultipleMedia(toDelete);
+    setDeleting(false);
+    if (error) {
+      Alert.alert('Error', error);
+    } else {
+      exitSelectMode();
+      loadMedia();
+    }
+  }
+
   async function processUploads(uris: string[]) {
     if (!user || !uris.length) return;
     setUploading(true);
@@ -73,23 +133,19 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
     }
   }
 
-  // Web: called from onChange on the hidden <input type="file">
   async function handleWebFileChange(e: any) {
     const files: File[] = Array.from(e.target.files ?? []);
-    e.target.value = ''; // allow re-selecting the same file
+    e.target.value = '';
     const uris = files.map((f) => URL.createObjectURL(f));
     await processUploads(uris);
     uris.forEach((u) => URL.revokeObjectURL(u));
   }
 
-  // Web: called when Upload button is pressed — directly clicks the hidden input
-  // (synchronous .click() from user gesture = trusted = file dialog opens)
   function handleUploadWeb() {
     if (isDemoMode) { Alert.alert('Demo Mode', 'Photo upload is disabled in demo.'); return; }
     webFileInputRef.current?.click();
   }
 
-  // Native: uses expo-image-picker
   async function handleUploadNative() {
     if (isDemoMode) { Alert.alert('Demo Mode', 'Photo upload is disabled in demo.'); return; }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -98,7 +154,7 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images' as any,
+      mediaTypes: ['images'],
       allowsMultipleSelection: true,
       quality: 0.7,
     });
@@ -109,11 +165,15 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
 
   const handleUpload = Platform.OS === 'web' ? handleUploadWeb : handleUploadNative;
 
+  const canDelete = (item: TripMedia) =>
+    item.uploaded_by === user?.id || isTripOrganizer;
+
   if (loading) return <LoadingView />;
+
+  const allSelected = media.length > 0 && selectedIds.size === media.length;
 
   return (
     <View style={styles.container}>
-      {/* Hidden native file input for web — clicked directly so isTrusted=true */}
       {Platform.OS === 'web' && (
         <input
           ref={webFileInputRef}
@@ -124,17 +184,39 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
           onChange={handleWebFileChange}
         />
       )}
+
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.count}>{media.length} photos</Text>
-        <TouchableOpacity
-          style={[styles.uploadBtn, uploading && styles.uploadBtnDisabled]}
-          onPress={handleUpload}
-          disabled={uploading}
-        >
-          <Text style={styles.uploadBtnText}>
-            {uploading ? 'Uploading...' : '+ Upload'}
-          </Text>
-        </TouchableOpacity>
+        {selectMode ? (
+          <>
+            <Text style={styles.count}>
+              {selectedIds.size} selected
+            </Text>
+            <TouchableOpacity onPress={exitSelectMode} style={styles.cancelBtn}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.count}>{media.length} photos</Text>
+            <View style={styles.headerActions}>
+              {media.length > 0 && (
+                <TouchableOpacity onPress={enterSelectMode} style={styles.selectBtn}>
+                  <Text style={styles.selectBtnText}>Select</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.uploadBtn, uploading && styles.uploadBtnDisabled]}
+                onPress={handleUpload}
+                disabled={uploading}
+              >
+                <Text style={styles.uploadBtnText}>
+                  {uploading ? 'Uploading...' : '+ Upload'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </View>
 
       <FlatList
@@ -142,7 +224,13 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
         keyExtractor={(item) => item.id}
         numColumns={COLS}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadMedia(); }} tintColor={Colors.primary} />
+          !selectMode
+            ? <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => { setRefreshing(true); loadMedia(); }}
+                tintColor={Colors.primary}
+              />
+            : undefined
         }
         contentContainerStyle={styles.grid}
         ListEmptyComponent={
@@ -154,42 +242,103 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
             onAction={handleUpload}
           />
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.cell}
-            onPress={() => navigation.navigate('MediaDetail', { tripId, mediaId: item.id })}
-          >
-            <Image source={{ uri: item.url }} style={styles.thumbnail} />
-            {item.caption ? (
-              <View style={styles.captionOverlay}>
-                <Text style={styles.captionText} numberOfLines={1}>{item.caption}</Text>
-              </View>
-            ) : null}
-            {/* Delete button — visible for uploader's own photos */}
-            {item.uploaded_by === user?.id && (
-              <TouchableOpacity
-                style={styles.deleteBtn}
-                onPress={async () => {
-                  const confirmed = Platform.OS === 'web'
-                    ? window.confirm('Delete this photo?')
-                    : await new Promise<boolean>((resolve) =>
-                        Alert.alert('Delete Photo', 'Remove this photo?', [
-                          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                          { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
-                        ])
-                      );
-                  if (!confirmed) return;
-                  await mediaService.deleteMedia(item.id);
-                  loadMedia();
-                }}
-                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-              >
-                <Text style={styles.deleteBtnText}>🗑</Text>
-              </TouchableOpacity>
-            )}
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const isSelected = selectedIds.has(item.id);
+          const isPhoto = item.media_type === 'photo';
+
+          return (
+            <TouchableOpacity
+              style={[styles.cell, isSelected && styles.cellSelected]}
+              onPress={() => {
+                if (selectMode) {
+                  toggleSelect(item.id);
+                } else {
+                  navigation.navigate('MediaDetail', { tripId, mediaId: item.id });
+                }
+              }}
+              onLongPress={() => {
+                if (!selectMode) {
+                  enterSelectMode();
+                  toggleSelect(item.id);
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              {isPhoto ? (
+                <Image source={{ uri: item.url }} style={styles.thumbnail} />
+              ) : (
+                <View style={styles.mediaPlaceholder}>
+                  <Text style={styles.mediaIcon}>{MEDIA_ICON[item.media_type] ?? '📎'}</Text>
+                  <Text style={styles.mediaTypeLabel}>{item.media_type}</Text>
+                </View>
+              )}
+
+              {item.caption && !selectMode ? (
+                <View style={styles.captionOverlay}>
+                  <Text style={styles.captionText} numberOfLines={1}>{item.caption}</Text>
+                </View>
+              ) : null}
+
+              {/* Delete button — normal mode, own items only */}
+              {!selectMode && canDelete(item) && (
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={async () => {
+                    const confirmed = Platform.OS === 'web'
+                      ? window.confirm('Delete this item?')
+                      : await new Promise<boolean>((resolve) =>
+                          Alert.alert('Delete', 'Remove this item?', [
+                            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+                          ])
+                        );
+                    if (!confirmed) return;
+                    await mediaService.deleteMedia(item);
+                    loadMedia();
+                  }}
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                >
+                  <Text style={styles.deleteBtnText}>✕</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Selection checkmark */}
+              {selectMode && (
+                <View style={[styles.checkCircle, isSelected && styles.checkCircleSelected]}>
+                  {isSelected && <Text style={styles.checkMark}>✓</Text>}
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        }}
       />
+
+      {/* Bottom bar in select mode */}
+      {selectMode && (
+        <View style={styles.bottomBar}>
+          <TouchableOpacity
+            style={styles.bottomBarBtn}
+            onPress={handleSelectAll}
+          >
+            <Text style={styles.bottomBarBtnText}>
+              {allSelected ? 'Deselect All' : 'Select All'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.bottomBarBtn,
+              styles.deleteBarBtn,
+              (selectedIds.size === 0 || deleting) && styles.bottomBarBtnDisabled,
+            ]}
+            onPress={handleDeleteSelected}
+            disabled={selectedIds.size === 0 || deleting}
+          >
+            <Text style={[styles.bottomBarBtnText, styles.deleteBarBtnText]}>
+              {deleting ? 'Deleting...' : `Delete${selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -205,7 +354,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  count: { fontSize: 14, color: Colors.textSecondary },
+  count: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  selectBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  selectBtnText: { color: Colors.primary, fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
+  cancelBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  cancelBtnText: { color: Colors.primary, fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
   uploadBtn: {
     backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.md,
@@ -213,7 +376,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
   },
   uploadBtnDisabled: { opacity: 0.5 },
-  uploadBtnText: { color: Colors.surface, fontWeight: '600', fontSize: 14 },
+  uploadBtnText: { color: Colors.surface, fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
   grid: { padding: Spacing.sm, flexGrow: 1 },
   cell: {
     width: CELL,
@@ -223,19 +386,33 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: Colors.border,
   },
+  cellSelected: {
+    opacity: 0.75,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+  },
   thumbnail: { width: '100%', height: '100%' },
+  mediaPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0F0F5',
+    gap: 4,
+  },
+  mediaIcon: { fontSize: 28 },
+  mediaTypeLabel: { fontSize: 10, color: Colors.textSecondary, textTransform: 'capitalize' },
   deleteBtn: {
     position: 'absolute',
     top: 4,
     right: 4,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deleteBtnText: { fontSize: 12 },
+  deleteBtnText: { fontSize: 11, color: '#fff', fontWeight: '700', lineHeight: 14 },
   captionOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -245,4 +422,42 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   captionText: { color: '#fff', fontSize: 10 },
+  checkCircle: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkCircleSelected: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  checkMark: { color: '#fff', fontSize: 13, fontWeight: '700', lineHeight: 16 },
+  bottomBar: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  bottomBarBtn: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bottomBarBtnDisabled: { opacity: 0.4 },
+  deleteBarBtn: { borderLeftWidth: 1, borderLeftColor: Colors.border },
+  bottomBarBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.primary,
+  },
+  deleteBarBtnText: { color: Colors.danger },
 });
