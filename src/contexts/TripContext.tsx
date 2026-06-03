@@ -18,6 +18,8 @@ interface TripContextValue {
   userFamily: Family | null;
   userRole: TripRole | null;
   isTripOrganizer: boolean;
+  isTripAdmin: boolean;
+  canManageAnnouncements: boolean;
   getFamilyById: (id: string) => Family | undefined;
   refreshTripData: (() => void) | null;
   setRefreshTripData: (fn: (() => void) | null) => void;
@@ -39,6 +41,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
     : null;
   const userRole: TripRole | null = currentMember?.role ?? null;
   const isTripOrganizer = userRole === 'trip_organizer';
+  const isTripAdmin = userRole === 'trip_admin';
+  const canManageAnnouncements = isTripOrganizer || isTripAdmin;
 
   const getFamilyById = useCallback(
     (id: string) => families.find((f) => f.id === id),
@@ -57,6 +61,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
         userFamily,
         userRole,
         isTripOrganizer,
+        isTripAdmin,
+        canManageAnnouncements,
         getFamilyById,
         refreshTripData,
         setRefreshTripData,

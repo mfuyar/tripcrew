@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Alert,
   TouchableOpacity,
 } from 'react-native';
@@ -12,17 +11,28 @@ import { MainStackParamList } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { tripService } from '../../services/tripService';
+import { familyService } from '../../services/familyService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { displayName } from '../../utils/displayName';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
+import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'TripSettings'>;
 
 export function TripSettingsScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
-  const { currentTrip, members, isTripOrganizer, setCurrentTrip } = useTripContext();
+  const {
+    currentTrip,
+    members,
+    setMembers,
+    families,
+    setFamilies,
+    isTripOrganizer,
+    setCurrentTrip,
+  } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(currentTrip?.name ?? '');
@@ -76,8 +86,28 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     );
   }
 
+  async function handleDeleteFamily(familyId: string, familyName: string) {
+    Alert.alert('Delete Family', `Delete ${familyName}? Members will stay in the trip but become unassigned.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await familyService.deleteFamily(familyId);
+          if (error) { Alert.alert('Error', error); return; }
+          setFamilies(families.filter((family) => family.id !== familyId));
+          setMembers(members.map((member) => (
+            member.family_id === familyId
+              ? { ...member, family_id: undefined, family: undefined }
+              : member
+          )));
+        },
+      },
+    ]);
+  }
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormKeyboardView contentContainerStyle={styles.content}>
       {/* Invite Code */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Invite Code</Text>
@@ -87,44 +117,140 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         </View>
       </View>
 
+      {currentTrip?.destination ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Destination / Address</Text>
+          <View style={styles.destinationBox}>
+            <Text style={styles.destinationText}>{currentTrip.destination}</Text>
+            <View style={styles.directionRow}>
+              <TouchableOpacity
+                style={styles.directionBtn}
+                onPress={() => openAppleMapsDirections(currentTrip.destination)}
+              >
+                <Text style={styles.directionBtnText}>Maps</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.directionBtn, styles.googleDirectionBtn]}
+                onPress={() => openGoogleMapsDirections(currentTrip.destination)}
+              >
+                <Text style={[styles.directionBtnText, styles.googleDirectionBtnText]}>Google Maps</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       {/* Edit Trip */}
       {isTripOrganizer && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Trip Details</Text>
           <AppTextInput label="Trip Name" value={name} onChangeText={setName} />
-          <AppTextInput label="Destination" value={destination} onChangeText={setDestination} />
+          <AppTextInput
+            label="Destination / Address"
+            value={destination}
+            onChangeText={setDestination}
+            placeholder="Hotel, venue, street address, or city"
+          />
           <AppButton title="Save Changes" onPress={handleSave} loading={saving} fullWidth />
         </View>
       )}
 
-      {/* Members */}
+      {/* Families */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Members ({members.length})</Text>
-        {members.map((m) => (
-          <View key={m.id} style={styles.memberRow}>
-            <FamilyAvatar name={m.profile?.full_name ?? '?'} size={36} />
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, styles.sectionTitleInHeader]}>Families ({families.length})</Text>
+          {isTripOrganizer && (
+            <TouchableOpacity onPress={() => navigation.navigate('AddEditFamily', { tripId })}>
+              <Text style={styles.addFamilyText}>+ Add</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {families.map((family) => (
+          <View key={family.id} style={styles.memberRow}>
+            <FamilyAvatar name={family.name} color={family.color} size={36} />
             <View style={styles.memberInfo}>
-              <Text style={styles.memberName}>{displayName(m.profile?.full_name, m.family?.name)}</Text>
-              <Text style={styles.memberRole}>{m.role.replace('_', ' ')}</Text>
+              <Text style={styles.memberName}>{family.name}</Text>
+              <Text style={styles.memberRole}>
+                {family.adults_count} adult{family.adults_count !== 1 ? 's' : ''}
+                {family.children_count > 0
+                  ? `, ${family.children_count} kid${family.children_count !== 1 ? 's' : ''}`
+                  : ''}
+              </Text>
             </View>
-            {isTripOrganizer && m.user_id !== user?.id && (
-              <TouchableOpacity
-                onPress={() =>
-                  Alert.alert('Remove Member', `Remove ${m.profile?.full_name}?`, [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Remove',
-                      style: 'destructive',
-                      onPress: () => tripService.removeMember(tripId, m.user_id),
-                    },
-                  ])
-                }
-              >
-                <Text style={styles.removeText}>Remove</Text>
-              </TouchableOpacity>
+            {isTripOrganizer && (
+              <View style={styles.familyActions}>
+                <TouchableOpacity onPress={() => navigation.navigate('FamilyDetail', { tripId, familyId: family.id })}>
+                  <Text style={styles.manageText}>Manage</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleDeleteFamily(family.id, family.name)}>
+                  <Text style={styles.removeText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         ))}
+      </View>
+
+      {/* Members */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Trip Members ({members.length})</Text>
+        {members.map((m) => {
+          const isAdmin = m.role === 'trip_admin';
+          const canPromote = isTripOrganizer && m.user_id !== user?.id && m.role !== 'trip_organizer';
+          return (
+            <View key={m.id} style={styles.memberRow}>
+              <FamilyAvatar name={m.profile?.full_name ?? '?'} size={36} />
+              <View style={styles.memberInfo}>
+                <Text style={styles.memberName}>{displayName(m.profile?.full_name, m.family?.name)}</Text>
+                <Text style={styles.memberRole}>{m.role.replace(/_/g, ' ')}</Text>
+              </View>
+              {canPromote && (
+                <View style={styles.memberActions}>
+                  <TouchableOpacity
+                    style={[styles.roleBtn, isAdmin && styles.roleBtnActive]}
+                    onPress={() => {
+                      const newRole = isAdmin ? 'member' : 'trip_admin';
+                      const label = isAdmin ? 'Remove Admin' : 'Make Admin';
+                      const msg = isAdmin
+                        ? `Remove admin privileges from ${m.profile?.full_name}?`
+                        : `Give ${m.profile?.full_name} admin rights (can post/delete announcements)?`;
+                      Alert.alert(label, msg, [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: label,
+                          onPress: async () => {
+                            await tripService.setMemberRole(tripId, m.user_id, newRole);
+                            setMembers(members.map((x) =>
+                              x.user_id === m.user_id ? { ...x, role: newRole } : x
+                            ));
+                          },
+                        },
+                      ]);
+                    }}
+                  >
+                    <Text style={[styles.roleBtnText, isAdmin && styles.roleBtnActiveText]}>
+                      {isAdmin ? 'Admin ✓' : 'Make Admin'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert('Remove Member', `Remove ${m.profile?.full_name}?`, [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Remove',
+                          style: 'destructive',
+                          onPress: () => tripService.removeMember(tripId, m.user_id),
+                        },
+                      ])
+                    }
+                  >
+                    <Text style={styles.removeText}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          );
+        })}
       </View>
 
       {/* Danger Zone */}
@@ -141,12 +267,11 @@ export function TripSettingsScreen({ navigation, route }: Props) {
           />
         )}
       </View>
-    </ScrollView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.md },
   section: { marginBottom: Spacing.lg },
   sectionTitle: {
@@ -155,6 +280,14 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: Spacing.md,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  sectionTitleInHeader: { marginBottom: 0 },
+  addFamilyText: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.primary },
   codeBox: {
     backgroundColor: Colors.primaryLight,
     borderRadius: Radius.lg,
@@ -169,6 +302,39 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   codeHint: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  destinationBox: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    ...Shadow.sm,
+  },
+  destinationText: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.medium,
+    color: Colors.text,
+    lineHeight: 22,
+    marginBottom: Spacing.md,
+  },
+  directionRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  directionBtn: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  directionBtnText: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
+  googleDirectionBtn: { backgroundColor: Colors.primary },
+  googleDirectionBtnText: { color: Colors.surface },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -189,5 +355,18 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textTransform: 'capitalize',
   },
+  familyActions: { alignItems: 'flex-end', gap: Spacing.xs },
+  manageText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
   removeText: { fontSize: FontSize.sm, color: Colors.danger },
+  memberActions: { alignItems: 'flex-end', gap: Spacing.xs },
+  roleBtn: {
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+  },
+  roleBtnActive: { backgroundColor: Colors.primary },
+  roleBtnText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  roleBtnActiveText: { color: Colors.surface },
 });

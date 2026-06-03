@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput,
-  RefreshControl, Alert,
+  RefreshControl, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Announcement, AnnouncementPriority } from '../../types';
@@ -23,7 +23,7 @@ const PRIORITY_COLORS: Record<AnnouncementPriority, string> = {
 export function AnnouncementsScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { isTripOrganizer, members } = useTripContext();
+  const { canManageAnnouncements, members } = useTripContext();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -70,7 +70,7 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.primary} />
         }
-        ListHeaderComponent={isTripOrganizer ? (
+        ListHeaderComponent={canManageAnnouncements ? (
           <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)}>
             <Text style={styles.addBtnText}>📢 Post Announcement</Text>
           </TouchableOpacity>
@@ -91,6 +91,26 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
                   {item.title}
                 </Text>
                 {!isRead && <View style={styles.unreadDot} />}
+                {canManageAnnouncements && (
+                  <TouchableOpacity
+                    hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                    onPress={() =>
+                      Alert.alert('Delete Announcement', 'Permanently delete this announcement?', [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Delete',
+                          style: 'destructive',
+                          onPress: async () => {
+                            await announcementService.delete(item.id);
+                            load();
+                          },
+                        },
+                      ])
+                    }
+                  >
+                    <Text style={styles.deleteIcon}>🗑</Text>
+                  </TouchableOpacity>
+                )}
               </View>
               <Text style={styles.cardContent}>{item.content}</Text>
               <Text style={styles.cardMeta}>
@@ -107,7 +127,8 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
 
       <Modal visible={showAdd} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={24}>
+            <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Post Announcement</Text>
             <View style={styles.priorityRow}>
               {(['low', 'normal', 'high', 'urgent'] as AnnouncementPriority[]).map((p) => (
@@ -124,7 +145,8 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
             <TextInput style={[styles.modalInput, { minHeight: 80, textAlignVertical: 'top' }]} value={content} onChangeText={setContent} placeholder="Write your announcement..." placeholderTextColor={Colors.textSecondary} multiline />
             <AppButton title="Post" onPress={handleCreate} loading={saving} fullWidth />
             <AppButton title="Cancel" onPress={() => setShowAdd(false)} variant="outline" fullWidth style={{ marginTop: Spacing.sm }} />
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>
@@ -144,6 +166,7 @@ const styles = StyleSheet.create({
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.primary },
   cardContent: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 20, marginBottom: Spacing.sm },
   cardMeta: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  deleteIcon: { fontSize: 16, marginLeft: Spacing.xs },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl },
   modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.text, marginBottom: Spacing.md },

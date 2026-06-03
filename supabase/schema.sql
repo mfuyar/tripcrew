@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS trip_members (
   user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   family_id   UUID,
   role        TEXT NOT NULL DEFAULT 'member'
-                CHECK (role IN ('trip_organizer','family_admin','member','viewer')),
+                CHECK (role IN ('trip_organizer','trip_admin','family_admin','member','viewer')),
   joined_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (trip_id, user_id)
 );
@@ -532,6 +532,7 @@ CREATE TABLE IF NOT EXISTS announcements (
   content     TEXT NOT NULL,
   priority    TEXT NOT NULL DEFAULT 'normal'
     CHECK (priority IN ('low','normal','high','urgent')),
+  is_archived BOOLEAN NOT NULL DEFAULT false,
   created_by  UUID NOT NULL REFERENCES profiles(id),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -563,6 +564,21 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS notifications_user_id_idx ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS notifications_is_read_idx ON notifications(is_read);
+
+CREATE TABLE IF NOT EXISTS push_tokens (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  token       TEXT NOT NULL UNIQUE,
+  platform    TEXT NOT NULL CHECK (platform IN ('ios','android','web','unknown')),
+  device_id   TEXT,
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS push_tokens_user_id_idx ON push_tokens(user_id);
+CREATE INDEX IF NOT EXISTS push_tokens_active_idx ON push_tokens(is_active);
+CREATE TRIGGER push_tokens_updated_at BEFORE UPDATE ON push_tokens
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ─── Live Locations ───────────────────────────────────────────────────────────
 -- Stores each user's last-known position per trip (upserted on every broadcast).

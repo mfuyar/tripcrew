@@ -19,6 +19,25 @@ RETURNS boolean AS $$
   );
 $$ LANGUAGE sql SECURITY DEFINER;
 
+-- Helper function: checks if user is trip admin
+CREATE OR REPLACE FUNCTION is_trip_admin(trip_uuid uuid, user_uuid uuid)
+RETURNS boolean AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM trip_members
+    WHERE trip_id = trip_uuid AND user_id = user_uuid AND role = 'trip_admin'
+  );
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- Helper function: checks if user can manage announcements (organizer or admin)
+CREATE OR REPLACE FUNCTION can_manage_announcements(trip_uuid uuid, user_uuid uuid)
+RETURNS boolean AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM trip_members
+    WHERE trip_id = trip_uuid AND user_id = user_uuid
+      AND role IN ('trip_organizer','trip_admin')
+  );
+$$ LANGUAGE sql SECURITY DEFINER;
+
 -- ─── profiles ─────────────────────────────────────────────────────────────────
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
@@ -368,20 +387,20 @@ CREATE POLICY "Trip members can view announcements"
   ON announcements FOR SELECT
   USING (is_trip_member(trip_id, auth.uid()));
 
-CREATE POLICY "Organizers can create announcements"
+CREATE POLICY "Organizers and admins can create announcements"
   ON announcements FOR INSERT
   WITH CHECK (
-    is_trip_organizer(trip_id, auth.uid())
+    can_manage_announcements(trip_id, auth.uid())
     AND created_by = auth.uid()
   );
 
-CREATE POLICY "Organizers can manage announcements"
+CREATE POLICY "Organizers and admins can manage announcements"
   ON announcements FOR UPDATE
-  USING (is_trip_organizer(trip_id, auth.uid()));
+  USING (can_manage_announcements(trip_id, auth.uid()));
 
-CREATE POLICY "Organizers can delete announcements"
+CREATE POLICY "Organizers and admins can delete announcements"
   ON announcements FOR DELETE
-  USING (is_trip_organizer(trip_id, auth.uid()));
+  USING (can_manage_announcements(trip_id, auth.uid()));
 
 -- ─── announcement_reads ───────────────────────────────────────────────────────
 ALTER TABLE announcement_reads ENABLE ROW LEVEL SECURITY;
@@ -400,6 +419,40 @@ CREATE POLICY "Users can view their own notifications"
 CREATE POLICY "Users can update their own notifications"
   ON notifications FOR UPDATE
   USING (user_id = auth.uid());
+
+CREATE POLICY "Trip members can create notifications"
+  ON notifications FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM trip_members viewer
+      JOIN trip_members recipient ON recipient.trip_id = viewer.trip_id
+      WHERE viewer.user_id = auth.uid()
+        AND recipient.user_id = notifications.user_id
+        AND (notifications.trip_id IS NULL OR notifications.trip_id = viewer.trip_id)
+    )
+  );
+
+-- ─── push_tokens ──────────────────────────────────────────────────────────────
+ALTER TABLE push_tokens ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own push tokens"
+  ON push_tokens FOR ALL
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Trip members can view recipient push tokens"
+  ON push_tokens FOR SELECT
+  USING (
+    is_active = true AND
+    EXISTS (
+      SELECT 1
+      FROM trip_members viewer
+      JOIN trip_members recipient ON recipient.trip_id = viewer.trip_id
+      WHERE viewer.user_id = auth.uid()
+        AND recipient.user_id = push_tokens.user_id
+    )
+  );
 
 -- ─── live_locations ───────────────────────────────────────────────────────────
 ALTER TABLE live_locations ENABLE ROW LEVEL SECURITY;

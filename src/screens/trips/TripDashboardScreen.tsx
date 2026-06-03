@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -17,6 +18,7 @@ import { announcementService } from '../../services/announcementService';
 import { demoExpenses, demoAnnouncements } from '../../lib/mockData';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 import { LoadingView } from '../../components/LoadingView';
+import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -36,10 +38,10 @@ const QUICK_LINKS: QuickLink[] = [
 export function TripDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip, families, members, userFamily, isTripOrganizer } = useTripContext();
+  const { currentTrip, families, members, userFamily, isTripOrganizer, canManageAnnouncements } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
-  const [announcements, setAnnouncements] = useState<{ title: string; priority: string }[]>([]);
+  const [announcements, setAnnouncements] = useState<{ id: string; title: string; priority: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -120,6 +122,34 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
         </TouchableOpacity>
       </View>
 
+      {trip?.destination ? (
+        <View style={styles.destinationCard}>
+          <View style={styles.destinationHeader}>
+            <Text style={styles.destinationIcon}>📍</Text>
+            <View style={styles.destinationCopy}>
+              <Text style={styles.destinationLabel}>Destination / address</Text>
+              <Text style={styles.destinationText}>{trip.destination}</Text>
+            </View>
+          </View>
+          <View style={styles.directionRow}>
+            <TouchableOpacity
+              style={styles.directionBtn}
+              onPress={() => openAppleMapsDirections(trip.destination)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.directionBtnText}>Maps</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.directionBtn, styles.googleDirectionBtn]}
+              onPress={() => openGoogleMapsDirections(trip.destination)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.directionBtnText, styles.googleDirectionBtnText]}>Google Maps</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
       {/* Stats Row */}
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
@@ -145,12 +175,43 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
               <Text style={styles.seeAll}>See all</Text>
             </TouchableOpacity>
           </View>
-          {announcements.map((ann, i) => (
-            <View key={i} style={styles.announcementRow}>
+          {announcements.map((ann) => (
+            <View key={ann.id} style={styles.announcementRow}>
               <Text style={styles.annPriority}>
                 {ann.priority === 'urgent' ? '🔴' : ann.priority === 'high' ? '🟠' : '🟢'}
               </Text>
               <Text style={styles.annTitle} numberOfLines={2}>{ann.title}</Text>
+              {canManageAnnouncements && (
+                <TouchableOpacity
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                  onPress={() =>
+                    Alert.alert(
+                      ann.title,
+                      'What would you like to do?',
+                      [
+                        {
+                          text: 'Archive',
+                          onPress: async () => {
+                            await announcementService.archive(ann.id);
+                            setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
+                          },
+                        },
+                        {
+                          text: 'Delete',
+                          style: 'destructive',
+                          onPress: async () => {
+                            await announcementService.delete(ann.id);
+                            setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
+                          },
+                        },
+                        { text: 'Cancel', style: 'cancel' },
+                      ]
+                    )
+                  }
+                >
+                  <Text style={styles.annAction}>⋯</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
         </View>
@@ -281,6 +342,54 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   settingsBtnText: { color: Colors.surface, fontSize: FontSize.sm },
+  destinationCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    ...Shadow.sm,
+  },
+  destinationHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  destinationIcon: { fontSize: 24 },
+  destinationCopy: { flex: 1 },
+  destinationLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.textSecondary,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  destinationText: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.medium,
+    color: Colors.text,
+    lineHeight: 22,
+  },
+  directionRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  directionBtn: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  directionBtnText: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
+  googleDirectionBtn: { backgroundColor: Colors.primary },
+  googleDirectionBtnText: { color: Colors.surface },
   inviteCodeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -339,6 +448,7 @@ const styles = StyleSheet.create({
   },
   annPriority: { fontSize: 16 },
   annTitle: { flex: 1, fontSize: FontSize.sm, color: Colors.text },
+  annAction: { fontSize: 20, color: Colors.textSecondary, paddingLeft: Spacing.sm },
   setupBanner: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -169,4 +169,17 @@ export const tripService = {
       .eq('user_id', userId);
     return { data: null, error: error?.message ?? null };
   },
+
+  async setMemberRole(
+    tripId: string,
+    userId: string,
+    role: import('../types').TripRole
+  ): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('trip_members')
+      .update({ role })
+      .eq('trip_id', tripId)
+      .eq('user_id', userId);
+    return { data: null, error: error?.message ?? null };
+  },
 };

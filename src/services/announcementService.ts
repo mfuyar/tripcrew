@@ -33,9 +33,18 @@ export const announcementService = {
       .from('announcements')
       .select('*, creator:profiles(*), reads:announcement_reads(*)')
       .eq('trip_id', tripId)
+      .eq('is_archived', false)
       .order('created_at', { ascending: false });
     if (error) return { data: null, error: error.message };
     return { data: data as Announcement[], error: null };
+  },
+
+  async archive(announcementId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('announcements')
+      .update({ is_archived: true })
+      .eq('id', announcementId);
+    return { data: null, error: error?.message ?? null };
   },
 
   async markRead(

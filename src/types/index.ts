@@ -21,7 +21,7 @@ export type ExpenseCategory =
   | 'supplies'
   | 'other';
 
-export type TripRole = 'trip_organizer' | 'family_admin' | 'member' | 'viewer';
+export type TripRole = 'trip_organizer' | 'trip_admin' | 'family_admin' | 'member' | 'viewer';
 
 export type PaymentStatus = 'pending' | 'paid' | 'confirmed' | 'disputed';
 
@@ -381,6 +381,7 @@ export interface Announcement {
   title: string;
   content: string;
   priority: AnnouncementPriority;
+  is_archived: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;
