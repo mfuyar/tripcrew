@@ -73,9 +73,9 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
     <View style={styles.container}>
       {/* Summary header */}
       <View style={styles.header}>
-        <View>
+        <View style={styles.totalBlock}>
           <Text style={styles.totalLabel}>Total Expenses</Text>
-          <Text style={styles.totalAmount}>
+          <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>
             {currentTrip?.currency} {total.toFixed(2)}
           </Text>
         </View>
@@ -156,9 +156,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     padding: Spacing.lg,
   },
+  totalBlock: { flex: 1, marginRight: Spacing.sm },
   totalLabel: { fontSize: FontSize.sm, color: Colors.surface + 'CC' },
   totalAmount: { fontSize: FontSize.xxl, fontWeight: FontWeight.bold, color: Colors.surface },
-  headerActions: { flexDirection: 'row', gap: Spacing.sm },
+  headerActions: { flexDirection: 'row', gap: Spacing.sm, flexShrink: 0 },
   balanceBtn: {
     backgroundColor: Colors.surface + '22',
     borderRadius: Radius.md,
