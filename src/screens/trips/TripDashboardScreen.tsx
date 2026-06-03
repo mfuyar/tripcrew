@@ -28,17 +28,17 @@ interface QuickLink {
   screen: keyof MainStackParamList;
 }
 
-const QUICK_LINKS: QuickLink[] = [
+const ALL_QUICK_LINKS: (QuickLink & { adminOnly?: boolean })[] = [
   { emoji: '👨‍👩‍👧‍👦', label: 'Families', screen: 'Families' },
   { emoji: '⚖️', label: 'Balances', screen: 'Balances' },
   { emoji: '💸', label: 'Settlements', screen: 'Settlements' },
-  { emoji: '📷', label: 'Receipt Scan', screen: 'ReceiptScanner' },
+  { emoji: '📷', label: 'Receipt Scan', screen: 'ReceiptScanner', adminOnly: true },
 ];
 
 export function TripDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip, families, members, userFamily, isTripOrganizer, canManageAnnouncements } = useTripContext();
+  const { currentTrip, families, members, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<{ id: string; title: string; priority: string }[]>([]);
@@ -282,7 +282,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Access</Text>
         <View style={styles.linksGrid}>
-          {QUICK_LINKS.map((link) => (
+          {ALL_QUICK_LINKS.filter((l) => !l.adminOnly || canManageTrip).map((link) => (
             <TouchableOpacity
               key={link.label}
               style={styles.linkCard}

@@ -35,7 +35,7 @@ const FILTERS: { label: string; value: ExpenseCategory | 'all' }[] = [
 export function ExpensesListScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip } = useTripContext();
+  const { currentTrip, canManageTrip } = useTripContext();
   const { isDemoMode } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,12 +86,14 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
           >
             <Text style={styles.balanceBtnText}>⚖️ Balances</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.addBtn}
-            onPress={() => navigation.navigate('AddEditExpense', { tripId })}
-          >
-            <Text style={styles.addBtnText}>+ Add</Text>
-          </TouchableOpacity>
+          {canManageTrip && (
+            <TouchableOpacity
+              style={styles.addBtn}
+              onPress={() => navigation.navigate('AddEditExpense', { tripId })}
+            >
+              <Text style={styles.addBtnText}>+ Add</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -137,9 +139,9 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
           <EmptyState
             icon="💰"
             title="No expenses yet"
-            subtitle="Add your first expense to start tracking costs fairly."
-            actionLabel="Add Expense"
-            onAction={() => navigation.navigate('AddEditExpense', { tripId })}
+            subtitle={canManageTrip ? 'Add your first expense to start tracking costs fairly.' : 'Expenses added by admins will appear here.'}
+            actionLabel={canManageTrip ? 'Add Expense' : undefined}
+            onAction={canManageTrip ? () => navigation.navigate('AddEditExpense', { tripId }) : undefined}
           />
         }
       />

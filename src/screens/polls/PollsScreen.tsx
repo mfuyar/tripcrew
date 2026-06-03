@@ -4,6 +4,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, Poll } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTripContext } from '../../contexts/TripContext';
 import { pollService } from '../../services/pollService';
 import { demoPolls } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
@@ -17,6 +18,7 @@ export function PollsScreen({ route }: { route: { params: { tripId: string } } }
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
   const { isDemoMode } = useAuth();
+  const { canManageTrip } = useTripContext();
   const [polls, setPolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,13 +43,19 @@ export function PollsScreen({ route }: { route: { params: { tripId: string } } }
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.primary} />
       }
-      ListHeaderComponent={
+      ListHeaderComponent={canManageTrip ? (
         <TouchableOpacity style={styles.createBtn} onPress={() => navigation.navigate('CreatePoll', { tripId })}>
           <Text style={styles.createBtnText}>+ Create Poll</Text>
         </TouchableOpacity>
-      }
+      ) : null}
       ListEmptyComponent={
-        <EmptyState icon="🗳️" title="No polls yet" subtitle="Create a poll to help your group decide." actionLabel="Create Poll" onAction={() => navigation.navigate('CreatePoll', { tripId })} />
+        <EmptyState
+          icon="🗳️"
+          title="No polls yet"
+          subtitle={canManageTrip ? 'Create a poll to help your group decide.' : 'Polls created by admins will appear here.'}
+          actionLabel={canManageTrip ? 'Create Poll' : undefined}
+          onAction={canManageTrip ? () => navigation.navigate('CreatePoll', { tripId }) : undefined}
+        />
       }
       renderItem={({ item }) => {
         const totalVotes = item.options?.reduce((s, o) => s + o.votes_count, 0) ?? 0;

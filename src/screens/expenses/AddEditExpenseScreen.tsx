@@ -39,7 +39,7 @@ const SPLIT_METHODS: { value: SplitMethod; label: string; desc: string }[] = [
 
 export function AddEditExpenseScreen({ navigation, route }: Props) {
   const { tripId, expenseId, scannedExpense } = route.params;
-  const { families, currentTrip, userFamily } = useTripContext();
+  const { families, currentTrip, userFamily, canManageTrip } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const isEdit = !!expenseId;
 
@@ -55,6 +55,8 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   const [splits, setSplits] = useState<FamilySplitShare[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(isEdit);
+  // For edit mode: whether the current user can modify this expense
+  const [canEdit, setCanEdit] = useState(!isEdit); // new expenses: always editable by creator
 
   useEffect(() => {
     if (families.length > 0 && !paidByFamilyId) {
@@ -99,6 +101,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setSplitMethod(data.split_method);
       setDate(data.date);
       setNotes(data.notes ?? '');
+      setCanEdit(canManageTrip || data.paid_by_user_id === user?.id);
       if (data.split_method === 'selected_families_only' && data.expense_splits?.length) {
         const included = data.expense_splits.filter((s) => s.share_amount > 0).map((s) => s.family_id);
         setSelectedFamilies(included);
@@ -394,15 +397,23 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           multiline
         />
 
-        <AppButton title={isEdit ? 'Save Changes' : 'Add Expense'} onPress={handleSave} loading={loading} fullWidth />
-        {isEdit && (
-          <AppButton
-            title="Delete Expense"
-            onPress={handleDelete}
-            variant="danger"
-            fullWidth
-            style={{ marginTop: Spacing.sm }}
-          />
+        {canEdit ? (
+          <>
+            <AppButton title={isEdit ? 'Save Changes' : 'Add Expense'} onPress={handleSave} loading={loading} fullWidth />
+            {isEdit && (
+              <AppButton
+                title="Delete Expense"
+                onPress={handleDelete}
+                variant="danger"
+                fullWidth
+                style={{ marginTop: Spacing.sm }}
+              />
+            )}
+          </>
+        ) : (
+          <View style={styles.readOnlyBanner}>
+            <Text style={styles.readOnlyText}>View only — only the expense creator or an admin can edit this.</Text>
+          </View>
         )}
     </FormKeyboardView>
   );
@@ -549,4 +560,11 @@ const styles = StyleSheet.create({
   previewOwesIcon: { fontSize: 22 },
   previewOwesTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.warning },
   previewOwesSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  readOnlyBanner: {
+    backgroundColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    alignItems: 'center',
+  },
+  readOnlyText: { fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center' },
 });

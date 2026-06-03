@@ -164,9 +164,9 @@ CREATE POLICY "Trip members can view expenses"
   ON expenses FOR SELECT
   USING (is_trip_member(trip_id, auth.uid()));
 
-CREATE POLICY "Trip members can create expenses"
+CREATE POLICY "Admins can create expenses"
   ON expenses FOR INSERT
-  WITH CHECK (is_trip_member(trip_id, auth.uid()) AND paid_by_user_id = auth.uid());
+  WITH CHECK (can_manage_announcements(trip_id, auth.uid()) AND paid_by_user_id = auth.uid());
 
 CREATE POLICY "Expense creators and organizers can update expenses"
   ON expenses FOR UPDATE
@@ -331,9 +331,9 @@ CREATE POLICY "Trip members can view polls"
   ON polls FOR SELECT
   USING (is_trip_member(trip_id, auth.uid()));
 
-CREATE POLICY "Trip members can create polls"
+CREATE POLICY "Admins can create polls"
   ON polls FOR INSERT
-  WITH CHECK (is_trip_member(trip_id, auth.uid()));
+  WITH CHECK (can_manage_announcements(trip_id, auth.uid()));
 
 CREATE POLICY "Poll creators and organizers can update polls"
   ON polls FOR UPDATE

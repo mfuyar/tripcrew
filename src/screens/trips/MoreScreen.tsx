@@ -9,6 +9,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../../types';
+import { useTripContext } from '../../contexts/TripContext';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -18,6 +19,7 @@ interface FeatureItem {
   title: string;
   subtitle: string;
   screen: keyof MainStackParamList;
+  adminOnly?: boolean;
 }
 
 const FEATURES: FeatureItem[] = [
@@ -33,7 +35,7 @@ const FEATURES: FeatureItem[] = [
   { emoji: '🗳️', title: 'Polls', subtitle: 'Group decision making', screen: 'Polls' },
   { emoji: '🚨', title: 'Emergency Info', subtitle: 'Medical & contacts', screen: 'EmergencyInfo' },
   { emoji: '📢', title: 'Announcements', subtitle: 'Trip-wide messages', screen: 'Announcements' },
-  { emoji: '📷', title: 'Scan Receipt', subtitle: 'AI receipt parsing', screen: 'ReceiptScanner' },
+  { emoji: '📷', title: 'Scan Receipt', subtitle: 'AI receipt parsing', screen: 'ReceiptScanner', adminOnly: true },
   { emoji: '📍', title: 'Live Location', subtitle: 'See where everyone is', screen: 'LiveLocation' },
   { emoji: '⚙️', title: 'Trip Settings', subtitle: 'Invite code, members, danger zone', screen: 'TripSettings' },
 ];
@@ -41,11 +43,12 @@ const FEATURES: FeatureItem[] = [
 export function MoreScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
+  const { canManageTrip } = useTripContext();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.header}>All Features</Text>
-      {FEATURES.map((item) => (
+      {FEATURES.filter((f) => !f.adminOnly || canManageTrip).map((item) => (
         <TouchableOpacity
           key={item.title}
           style={styles.row}
