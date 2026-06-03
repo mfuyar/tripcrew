@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Alert, Platform, Linking,
 } from 'react-native';
+import * as Location from 'expo-location';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { authService } from '../../services/authService';
@@ -19,6 +20,14 @@ export function ProfileScreen() {
   const [phone, setPhone] = useState(profile?.phone ?? '');
   const [saving, setSaving] = useState(false);
   const [enablingNotifications, setEnablingNotifications] = useState(false);
+  const [locationEnabled, setLocationEnabled] = useState(false);
+  const [enablingLocation, setEnablingLocation] = useState(false);
+
+  useEffect(() => {
+    Location.getForegroundPermissionsAsync().then(({ status }) =>
+      setLocationEnabled(status === 'granted')
+    );
+  }, []);
 
   async function handleSave() {
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Profile editing is disabled in demo.'); return; }
@@ -74,6 +83,21 @@ export function ProfileScreen() {
     }
 
     Alert.alert('Notifications', error ?? 'Notifications could not be enabled.');
+  }
+
+  async function handleEnableLocation() {
+    if (isDemoMode) { Alert.alert('Demo Mode', 'Location is disabled in demo.'); return; }
+    setEnablingLocation(true);
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    setEnablingLocation(false);
+    if (status === 'granted') {
+      setLocationEnabled(true);
+    } else {
+      Alert.alert('Location Disabled', 'Enable location access in Settings to use live location sharing.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      ]);
+    }
   }
 
   return (
@@ -143,6 +167,28 @@ export function ProfileScreen() {
                 style={styles.notificationBtn}
               />
             </>
+          )}
+        </View>
+
+        {/* Location Services */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Location Services</Text>
+          <Text style={styles.appInfo}>
+            Required for live location sharing with your trip group.
+          </Text>
+          {locationEnabled ? (
+            <View style={styles.notifEnabledRow}>
+              <Text style={styles.notifEnabledIcon}>📍</Text>
+              <Text style={styles.notifEnabledText}>Location access is enabled</Text>
+            </View>
+          ) : (
+            <AppButton
+              title="Enable Location"
+              onPress={handleEnableLocation}
+              loading={enablingLocation}
+              fullWidth
+              style={styles.notificationBtn}
+            />
           )}
         </View>
 
