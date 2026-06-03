@@ -111,6 +111,7 @@ export const mediaService = {
       .from('trip_media')
       .select('*, uploader:profiles(*), family:families(*)')
       .eq('trip_id', tripId)
+      .in('media_type', ['photo', 'video'])
       .order('created_at', { ascending: false });
     if (error) return { data: null, error: error.message };
 
@@ -155,6 +156,43 @@ export const mediaService = {
     const ids = items.map((i) => i.id);
     const { error } = await supabase.from('trip_media').delete().in('id', ids);
     return { data: null, error: error?.message ?? null };
+  },
+
+  // Upload a file to storage only — no trip_media row. Used for chat voice messages.
+  async uploadChatAudio(
+    tripId: string,
+    userId: string,
+    uri: string,
+    mediaType: MediaType
+  ): Promise<ServiceResult<{ url: string; mime_type: string }>> {
+    const file = new File(uri);
+    const ext = getExtension(uri, mediaType);
+    const fileName = `${tripId}/${userId}/${Date.now()}.${ext}`;
+    const contentType = getContentType(file, ext, mediaType);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token ?? supabaseAnonKey;
+
+    const uploadResponse = await expoFetch(
+      `${supabaseUrl}/storage/v1/object/${MEDIA_BUCKET}/${fileName}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: supabaseAnonKey,
+          'Content-Type': contentType,
+          'x-upsert': 'false',
+        },
+        body: file,
+      }
+    );
+
+    if (!uploadResponse.ok) {
+      const uploadError = await uploadResponse.text().catch(() => '');
+      return { data: null, error: uploadError || 'Audio upload failed' };
+    }
+
+    const { data: urlData } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
+    return { data: { url: urlData.publicUrl, mime_type: contentType }, error: null };
   },
 
   async updateCaption(

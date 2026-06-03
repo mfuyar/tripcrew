@@ -16,6 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import {
   useAudioRecorder,
   useAudioPlayer,
+  useAudioPlayerStatus,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   RecordingPresets,
@@ -41,14 +42,17 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [sending, setSending] = useState(false);
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
-  const [autoPlayPushTalk, setAutoPlayPushTalk] = useState<{ id: string; url: string } | null>(null);
+  const [pendingPushTalks, setPendingPushTalks] = useState<{ id: string; url: string }[]>([]);
+  const [playingPushTalk, setPlayingPushTalk] = useState<{ id: string; url: string } | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const pushTalkPlayer = useAudioPlayer(null, { updateInterval: 250 });
+  const pushTalkStatus = useAudioPlayerStatus(pushTalkPlayer);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const listRef = useRef<FlatList>(null);
   const holdingPushTalkRef = useRef(false);
   const recordingRef = useRef(false);
   const stoppingRecordingRef = useRef(false);
+  const queuedPushTalkIdsRef = useRef<Set<string>>(new Set());
 
   const loadMessages = useCallback(async () => {
     if (isDemoMode) {
@@ -72,8 +76,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         return [...prev, msg];
       });
 
-      if (msg.is_push_talk && msg.media_url && msg.user_id !== user?.id) {
-        setAutoPlayPushTalk({ id: msg.id, url: msg.media_url });
+      if (msg.is_push_talk && msg.media_url && msg.user_id !== user?.id && !queuedPushTalkIdsRef.current.has(msg.id)) {
+        queuedPushTalkIdsRef.current.add(msg.id);
+        setPendingPushTalks((prev) => [...prev, { id: msg.id, url: msg.media_url! }]);
       }
     });
 
@@ -91,10 +96,18 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   }, [messages.length]);
 
   useEffect(() => {
-    if (!autoPlayPushTalk) return;
+    if (playingPushTalk || recordingInProgress || pendingPushTalks.length === 0) return;
+
+    const [next, ...rest] = pendingPushTalks;
+    setPendingPushTalks(rest);
+    setPlayingPushTalk(next);
+  }, [pendingPushTalks, playingPushTalk, recordingInProgress]);
+
+  useEffect(() => {
+    if (!playingPushTalk) return;
 
     let canceled = false;
-    const pushTalk = autoPlayPushTalk;
+    const pushTalk = playingPushTalk;
     async function playIncomingPushTalk() {
       try {
         await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
@@ -102,6 +115,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         pushTalkPlayer.replace(pushTalk.url);
         pushTalkPlayer.play();
       } catch {
+        setPlayingPushTalk(null);
         // Keep chat quiet; the message still appears with a manual play button.
       }
     }
@@ -110,7 +124,13 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     return () => {
       canceled = true;
     };
-  }, [autoPlayPushTalk, pushTalkPlayer]);
+  }, [playingPushTalk, pushTalkPlayer]);
+
+  useEffect(() => {
+    if (playingPushTalk && pushTalkStatus.didJustFinish) {
+      setPlayingPushTalk(null);
+    }
+  }, [playingPushTalk, pushTalkStatus.didJustFinish]);
 
   async function handleSend() {
     const content = text.trim();
@@ -134,7 +154,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsMultipleSelection: false,
       quality: 0.7,
     });
@@ -212,8 +232,8 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       }
 
       setUploadingMedia(true);
-      const { data, error } = await mediaService.uploadMedia(
-        tripId, user.id, userFamily?.id, uri, 'audio'
+      const { data, error } = await mediaService.uploadChatAudio(
+        tripId, user.id, uri, 'audio'
       );
       if (error || !data) {
         Alert.alert('Upload failed', error ?? 'Unable to upload audio.');
