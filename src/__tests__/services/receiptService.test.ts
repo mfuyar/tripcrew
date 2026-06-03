@@ -136,7 +136,7 @@ describe('receiptService', () => {
       const { data, error } = await receiptService.scanReceipt(receiptId, imageUrl);
 
       expect(mockInvoke).toHaveBeenCalledWith('scan-receipt', {
-        body: { receiptId, imageUrl },
+        body: { receiptId },
       });
       expect(error).toBeNull();
       expect(data?.parsed_merchant).toBe('Market');

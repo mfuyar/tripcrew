@@ -60,8 +60,6 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
   async function handleScan() {
     if (!imageUri || !user) return;
     setScanning(true);
-    // TODO: Integrate with real OCR API (Google Vision, AWS Textract)
-    // For now, upload and use mock OCR
     const { data: receipt, error } = await receiptService.uploadReceipt(tripId, user.id, imageUri);
     if (error) {
       Alert.alert('Upload Error', error);

@@ -56,7 +56,7 @@ export const receiptService = {
 
   async scanReceipt(receiptId: string, imageUrl: string): Promise<ServiceResult<ReceiptScan>> {
     const { data, error } = await supabase.functions.invoke('scan-receipt', {
-      body: { receiptId, imageUrl },
+      body: { receiptId },
     });
 
     if (error) return { data: null, error: error.message };

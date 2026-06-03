@@ -12,6 +12,11 @@ type ParsedReceipt = {
   items: ReceiptLineItem[];
 };
 
+type ReceiptScanRow = {
+  id: string;
+  image_url: string;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -115,17 +120,37 @@ Deno.serve(async (req) => {
     const geminiApiKey = getRequiredEnv('GEMINI_API_KEY');
     const supabaseUrl = getRequiredEnv('SUPABASE_URL');
     const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
+    const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
     const geminiModel = Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.5-flash';
     const authHeader = req.headers.get('Authorization');
 
     if (!authHeader) return jsonResponse({ error: 'Missing authorization header' }, 401);
 
-    const { receiptId, imageUrl } = await req.json();
-    if (!receiptId || !imageUrl) {
-      return jsonResponse({ error: 'receiptId and imageUrl are required' }, 400);
+    const { receiptId } = await req.json();
+    if (!receiptId) {
+      return jsonResponse({ error: 'receiptId is required' }, 400);
     }
 
-    const imageResponse = await fetch(imageUrl);
+    const receiptResponse = await fetch(
+      `${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}&select=id,image_url&limit=1`,
+      {
+        headers: {
+          Authorization: authHeader,
+          apikey: supabaseAnonKey,
+        },
+      }
+    );
+
+    if (!receiptResponse.ok) {
+      const errorText = await receiptResponse.text();
+      return jsonResponse({ error: `Could not verify receipt access: ${errorText}` }, 403);
+    }
+
+    const receiptRows = (await receiptResponse.json()) as ReceiptScanRow[];
+    const receipt = receiptRows[0];
+    if (!receipt) return jsonResponse({ error: 'Receipt scan not found or not accessible' }, 404);
+
+    const imageResponse = await fetch(receipt.image_url);
     if (!imageResponse.ok) {
       return jsonResponse({ error: 'Could not download receipt image' }, 400);
     }
@@ -186,7 +211,7 @@ Deno.serve(async (req) => {
       method: 'PATCH',
       headers: {
         Authorization: authHeader,
-        apikey: supabaseAnonKey,
+        apikey: supabaseServiceRoleKey,
         'Content-Type': 'application/json',
         Prefer: 'return=representation',
       },
