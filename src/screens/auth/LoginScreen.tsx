@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, KeyboardAvoidingView,
-  Platform, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
@@ -41,16 +41,12 @@ export function LoginScreen({ navigation }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <FormKeyboardView contentContainerStyle={styles.container} keyboardVerticalOffset={0}>
 
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.logo}>✈️</Text>
-          <Text style={styles.appName}>TripCrew</Text>
+          <Text style={styles.appName}>Travel Crew</Text>
           <Text style={styles.slogan}>Plan together. Pay fairly. Remember everything.</Text>
         </View>
 
@@ -85,6 +81,14 @@ export function LoginScreen({ navigation }: Props) {
 
           <AppButton title="Sign In" onPress={handleSignIn} loading={loading} fullWidth />
 
+          <TouchableOpacity
+            style={styles.forgotButton}
+            onPress={() => navigation.navigate('ForgotPassword')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.link}>Forgot password?</Text>
+          </TouchableOpacity>
+
           {/* Divider */}
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
@@ -118,13 +122,11 @@ export function LoginScreen({ navigation }: Props) {
           </View>
         </View>
 
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { flexGrow: 1, padding: Spacing.lg, justifyContent: 'center' },
   header: { alignItems: 'center', marginBottom: Spacing.xl },
   logo: { fontSize: 56, marginBottom: Spacing.sm },
@@ -168,6 +170,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   errorText: { color: Colors.danger, fontSize: FontSize.sm },
+  forgotButton: { alignItems: 'flex-end', marginTop: Spacing.sm },
 
   // Divider
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: Spacing.md },

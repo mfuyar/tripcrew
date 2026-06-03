@@ -3,9 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   TouchableOpacity,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -13,6 +10,7 @@ import { AuthStackParamList } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'SignUp'>;
@@ -68,22 +66,15 @@ export function SignUpScreen({ navigation }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
+    <FormKeyboardView contentContainerStyle={styles.container} keyboardVerticalOffset={0}>
         <View style={styles.header}>
           <Text style={styles.logo}>✈️</Text>
-          <Text style={styles.appName}>TripCrew</Text>
+          <Text style={styles.appName}>Travel Crew</Text>
         </View>
 
         <View style={styles.form}>
           <Text style={styles.title}>Create an account</Text>
-          <Text style={styles.subtitle}>Join TripCrew and plan your next adventure</Text>
+          <Text style={styles.subtitle}>Join Travel Crew and plan your next adventure</Text>
 
           {error ? (
             <View style={styles.errorBox}>
@@ -130,13 +121,11 @@ export function SignUpScreen({ navigation }: Props) {
             </TouchableOpacity>
           </View>
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: {
     flexGrow: 1,
     padding: Spacing.lg,

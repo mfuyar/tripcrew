@@ -167,6 +167,15 @@ describe('SPEC §3 — deleteFamily', () => {
     expect(mockFrom).toHaveBeenCalledWith('families');
     expect(error).toBeNull();
   });
+
+  it('clears trip member family assignment after deleting a family', async () => {
+    mockEq.mockResolvedValueOnce({ data: null, error: null });
+
+    await familyService.deleteFamily(familyId);
+
+    expect(mockFrom).toHaveBeenCalledWith('trip_members');
+    expect(mockUpdate).toHaveBeenCalledWith({ family_id: null });
+  });
 });
 
 // ─── §3.2 Family Members ──────────────────────────────────────────────────────
@@ -220,5 +229,13 @@ describe('SPEC §3.2 — Family Members', () => {
 
     expect(mockFrom).toHaveBeenCalledWith('family_members');
     expect(error).toBeNull();
+  });
+
+  it('removeFamilyMember clears trip member family assignment', async () => {
+    const { error } = await familyService.removeFamilyMember(familyId, userId);
+
+    expect(error).toBeNull();
+    expect(mockFrom).toHaveBeenCalledWith('trip_members');
+    expect(mockUpdate).toHaveBeenCalledWith({ family_id: null });
   });
 });

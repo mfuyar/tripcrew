@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal,
-  Alert, RefreshControl,
+  Alert, RefreshControl, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { PackingItem, PackingStatus } from '../../types';
@@ -131,7 +131,8 @@ export function PackingListScreen({ route }: { route: { params: { tripId: string
 
       <Modal visible={showAdd} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={24}>
+            <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Add Packing Item</Text>
             <TextInput
               style={styles.modalInput}
@@ -150,7 +151,8 @@ export function PackingListScreen({ route }: { route: { params: { tripId: string
             />
             <AppButton title="Add" onPress={handleAdd} loading={adding} fullWidth />
             <AppButton title="Cancel" onPress={() => setShowAdd(false)} variant="outline" fullWidth style={{ marginTop: Spacing.sm }} />
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>

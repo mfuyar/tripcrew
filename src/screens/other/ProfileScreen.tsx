@@ -194,7 +194,7 @@ export function ProfileScreen() {
 
         {/* App info */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>About TripCrew</Text>
+          <Text style={styles.cardTitle}>About Travel Crew</Text>
           <Text style={styles.appInfo}>
             Plan together. Pay fairly. Remember everything.
           </Text>

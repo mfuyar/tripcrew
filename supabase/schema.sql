@@ -264,7 +264,8 @@ CREATE TABLE IF NOT EXISTS messages (
   mime_type        TEXT,
   duration_seconds NUMERIC(6,2),
   is_push_talk     BOOLEAN NOT NULL DEFAULT false,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  edited_at        TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS messages_trip_id_idx ON messages(trip_id);
 CREATE INDEX IF NOT EXISTS messages_created_at_idx ON messages(created_at);

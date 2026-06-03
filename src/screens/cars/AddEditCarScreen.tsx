@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
-  TouchableOpacity, Alert, Modal, TextInput,
+  View, Text, StyleSheet,
+  TouchableOpacity, Alert, Modal, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, Car, CarPassenger } from '../../types';
@@ -10,6 +10,7 @@ import { useTripContext } from '../../contexts/TripContext';
 import { carService } from '../../services/carService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
@@ -77,8 +78,7 @@ export function AddEditCarScreen({ navigation, route }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <FormKeyboardView contentContainerStyle={styles.container}>
         <AppTextInput label="Car Name *" value={name} onChangeText={setName} placeholder="Blue Honda" />
         <AppTextInput label="Total Seats" value={totalSeats} onChangeText={setTotalSeats} keyboardType="number-pad" placeholder="5" />
 
@@ -121,11 +121,12 @@ export function AddEditCarScreen({ navigation, route }: Props) {
             ))}
           </View>
         )}
-      </ScrollView>
+      
 
       <Modal visible={showAddPassenger} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={24}>
+            <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Add Passenger</Text>
             <TextInput
               style={styles.modalInput}
@@ -149,15 +150,15 @@ export function AddEditCarScreen({ navigation, route }: Props) {
             </View>
             <AppButton title="Add Passenger" onPress={handleAddPassenger} fullWidth />
             <AppButton title="Cancel" onPress={() => setShowAddPassenger(false)} variant="outline" fullWidth style={{ marginTop: Spacing.sm }} />
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.md },
   label: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.sm },
   famRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },

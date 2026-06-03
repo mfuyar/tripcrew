@@ -9,6 +9,21 @@ const STOP_EVENT = 'location-stop';
 
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 
+function mapLiveLocation(row: any): LiveLocation {
+  return {
+    userId: row.user_id,
+    familyId: row.family_id ?? undefined,
+    userName: row.profile?.full_name ?? undefined,
+    familyName: row.family?.name ?? undefined,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    accuracy: row.accuracy ?? undefined,
+    heading: row.heading ?? undefined,
+    timestamp: row.updated_at,
+    isLive: true,
+  };
+}
+
 export const locationService = {
   // ── Permission ──────────────────────────────────────────────────────────────
 
@@ -33,7 +48,8 @@ export const locationService = {
     userId: string,
     familyId: string | undefined,
     userName: string,
-    familyName: string | undefined
+    familyName: string | undefined,
+    onLocation?: (location: LiveLocation) => void
   ): Promise<() => void> {
     const channel = supabase.channel(CHANNEL(tripId));
 
@@ -58,7 +74,24 @@ export const locationService = {
         timestamp: new Date(pos.timestamp).toISOString(),
         isLive: true,
       };
+      onLocation?.(payload);
       channel.send({ type: 'broadcast', event: BROADCAST_EVENT, payload });
+      void (async () => {
+        try {
+          await supabase
+            .from('live_locations')
+            .upsert({
+              trip_id: tripId,
+              user_id: userId,
+              family_id: familyId ?? null,
+              latitude: payload.latitude,
+              longitude: payload.longitude,
+              accuracy: payload.accuracy ?? null,
+              heading: payload.heading ?? null,
+              updated_at: payload.timestamp,
+            }, { onConflict: 'trip_id,user_id' });
+        } catch {}
+      })();
     };
 
     // Send current position immediately — don't wait for the 8s interval
@@ -74,11 +107,30 @@ export const locationService = {
     return () => {
       locationSub.remove();
       channel.send({ type: 'broadcast', event: STOP_EVENT, payload: { userId } });
+      void (async () => {
+        try {
+          await supabase
+            .from('live_locations')
+            .delete()
+            .eq('trip_id', tripId)
+            .eq('user_id', userId);
+        } catch {}
+      })();
       supabase.removeChannel(channel);
     };
   },
 
   // ── Subscribing ─────────────────────────────────────────────────────────────
+
+  async getLiveLocations(tripId: string): Promise<LiveLocation[]> {
+    const { data, error } = await supabase
+      .from('live_locations')
+      .select('*, profile:profiles(*), family:families(*)')
+      .eq('trip_id', tripId);
+
+    if (error || !data) return [];
+    return data.map(mapLiveLocation);
+  },
 
   /**
    * Subscribe to live location updates from all trip members.

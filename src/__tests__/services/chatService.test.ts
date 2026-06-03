@@ -13,11 +13,13 @@ const mockOrder = jest.fn();
 const mockLimit = jest.fn();
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
+const mockUpdate = jest.fn();
 
 const mockNeq = jest.fn();
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
   insert: mockInsert.mockReturnThis(),
+  update: mockUpdate.mockReturnThis(),
   eq: mockEq.mockReturnThis(),
   neq: mockNeq.mockReturnThis(),
   order: mockOrder.mockReturnThis(),
@@ -248,6 +250,40 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
       trip_id: tripId,
       user_id: 'user-2',
     }));
+  });
+});
+
+// ─── §8 editMessage ──────────────────────────────────────────────────────────
+
+describe('SPEC §8 — editMessage', () => {
+  it('updates the sender text message content and marks it edited', async () => {
+    const edited = makeMessage({ id: 'msg-1', content: 'Updated plan', edited_at: new Date().toISOString() });
+    mockSingle.mockResolvedValueOnce({ data: edited, error: null });
+
+    const { data, error } = await chatService.editMessage('msg-1', userId, '  Updated plan  ');
+
+    expect(error).toBeNull();
+    expect(data?.content).toBe('Updated plan');
+    expect(mockFrom).toHaveBeenCalledWith('messages');
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'Updated plan',
+      edited_at: expect.any(String),
+    }));
+    expect(mockEq).toHaveBeenCalledWith('id', 'msg-1');
+    expect(mockEq).toHaveBeenCalledWith('user_id', userId);
+    expect(mockEq).toHaveBeenCalledWith('message_type', 'text');
+    expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'new_message',
+      payload: edited,
+    }));
+  });
+
+  it('rejects empty edits before touching the database', async () => {
+    const { data, error } = await chatService.editMessage('msg-1', userId, '   ');
+
+    expect(data).toBeNull();
+    expect(error).toBe('Message cannot be empty.');
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 });
 

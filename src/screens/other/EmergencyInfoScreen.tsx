@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Modal, TextInput, RefreshControl,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { EmergencyInfo } from '../../types';
@@ -104,7 +105,8 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
 
       <Modal visible={showAdd} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={24}>
+            <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Add Emergency Info</Text>
             <View style={styles.typeRow}>
               {TYPES.map((t) => (
@@ -121,7 +123,8 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
             <TextInput style={[styles.modalInput, { minHeight: 80, textAlignVertical: 'top' }]} value={newContent} onChangeText={setNewContent} placeholder="Details..." placeholderTextColor={Colors.textSecondary} multiline />
             <AppButton title="Save" onPress={handleAdd} loading={saving} fullWidth />
             <AppButton title="Cancel" onPress={() => setShowAdd(false)} variant="outline" fullWidth style={{ marginTop: Spacing.sm }} />
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>

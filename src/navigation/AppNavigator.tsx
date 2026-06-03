@@ -10,6 +10,8 @@ import { LoadingView } from '../components/LoadingView';
 // Auth Screens
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignUpScreen } from '../screens/auth/SignUpScreen';
+import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
+import { UpdatePasswordScreen } from '../screens/auth/UpdatePasswordScreen';
 
 // Main Screens
 import { TripsListScreen } from '../screens/trips/TripsListScreen';
@@ -81,10 +83,17 @@ const Tab = createBottomTabNavigator<TabParamList>();
 const TripTab = createBottomTabNavigator<TripTabParamList>();
 
 function AuthNavigator() {
+  const { isPasswordRecovery } = useAuth();
   return (
-    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+    <AuthStack.Navigator
+      key={isPasswordRecovery ? 'password-recovery' : 'auth'}
+      screenOptions={{ headerShown: false }}
+      initialRouteName={isPasswordRecovery ? 'UpdatePassword' : 'Login'}
+    >
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="SignUp" component={SignUpScreen} />
+      <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+      <AuthStack.Screen name="UpdatePassword" component={UpdatePasswordScreen} />
     </AuthStack.Navigator>
   );
 }
@@ -270,14 +279,14 @@ function MainNavigator() {
 }
 
 export function AppNavigator() {
-  const { user, loading } = useAuth();
+  const { user, loading, isPasswordRecovery } = useAuth();
 
-  if (loading) return <LoadingView message="Loading TripCrew..." />;
+  if (loading) return <LoadingView message="Loading Travel Crew..." />;
 
   return (
     <NavigationContainer>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        {user ? (
+        {user && !isPasswordRecovery ? (
           <RootStack.Screen name="Main" component={MainNavigator} />
         ) : (
           <RootStack.Screen name="Auth" component={AuthNavigator} />

@@ -1,6 +1,15 @@
 import { supabase } from '../lib/supabaseClient';
 import { Expense, ExpenseSplit, FamilySplitShare, ServiceResult } from '../types';
 
+function isMissingReplaceSplitsFunction(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === 'PGRST202' ||
+    error.message?.includes('replace_expense_splits') === true ||
+    error.message?.includes('schema cache') === true
+  );
+}
+
 export const expenseService = {
   async createExpense(
     tripId: string,
@@ -83,7 +92,34 @@ export const expenseService = {
       trip_uuid: tripId,
       shares_json: rows,
     });
-    if (error) return { data: null, error: error.message };
+
+    if (error && !isMissingReplaceSplitsFunction(error)) {
+      return { data: null, error: error.message };
+    }
+
+    if (error) {
+      const { error: deleteError } = await supabase
+        .from('expense_splits')
+        .delete()
+        .eq('expense_id', expenseId);
+
+      if (deleteError) return { data: null, error: deleteError.message };
+
+      const fallbackRows = rows.map((row) => ({
+        expense_id: expenseId,
+        trip_id: tripId,
+        ...row,
+      }));
+
+      const { data: fallbackData, error: insertError } = await supabase
+        .from('expense_splits')
+        .insert(fallbackRows)
+        .select('*, family:families(*)');
+
+      if (insertError) return { data: null, error: insertError.message };
+      return { data: fallbackData as ExpenseSplit[], error: null };
+    }
+
     return { data: data as ExpenseSplit[], error: null };
   },
 

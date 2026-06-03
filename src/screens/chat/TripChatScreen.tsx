@@ -41,6 +41,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [pendingPushTalks, setPendingPushTalks] = useState<{ id: string; url: string }[]>([]);
@@ -51,8 +52,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const listRef = useRef<FlatList>(null);
   const holdingPushTalkRef = useRef(false);
+  const startingRecordingRef = useRef(false);
   const recordingRef = useRef(false);
   const stoppingRecordingRef = useRef(false);
+  const pendingStopRef = useRef(false);
+  const recordingStartedAtRef = useRef<number | null>(null);
   const queuedPushTalkIdsRef = useRef<Set<string>>(new Set());
   // Ref-backed upload guard so startPushTalk never reads a stale closure value
   const uploadingRef = useRef(false);
@@ -69,6 +73,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       setLoading(false);
       return;
     }
+    await mediaService.deleteExpiredChatMedia(tripId);
     const { data } = await chatService.getMessages(tripId);
     setMessages(data ?? []);
     setLoading(false);
@@ -89,7 +94,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
 
     channelRef.current = chatService.subscribeToMessages(tripId, (msg) => {
       setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
+        if (prev.some((m) => m.id === msg.id)) {
+          return prev.map((m) => m.id === msg.id ? msg : m);
+        }
         return [...prev, msg];
       });
 
@@ -184,6 +191,40 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     setSending(false);
   }
 
+  async function handleSaveEdit() {
+    const content = text.trim();
+    if (!content || !user || !editingMessage || sending) return;
+    if (content === editingMessage.content) {
+      setEditingMessage(null);
+      setText('');
+      return;
+    }
+
+    setSending(true);
+    const { data, error } = await chatService.editMessage(editingMessage.id, user.id, content);
+    if (error || !data) {
+      Alert.alert('Edit failed', error ?? 'Unable to update this message.');
+      setSending(false);
+      return;
+    }
+
+    setMessages((prev) => prev.map((m) => m.id === data.id ? data : m));
+    setEditingMessage(null);
+    setText('');
+    setSending(false);
+  }
+
+  function handleStartEdit(message: Message) {
+    if (message.user_id !== user?.id || message.message_type !== 'text') return;
+    setEditingMessage(message);
+    setText(message.content);
+  }
+
+  function handleCancelEdit() {
+    setEditingMessage(null);
+    setText('');
+  }
+
   async function handlePickPhoto() {
     if (!user) return;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -202,10 +243,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     const asset = result.assets[0];
     uploadingRef.current = true; setUploadingMedia(true);
 
-    const { data, error } = await mediaService.uploadMedia(
+    const { data, error } = await mediaService.uploadChatMedia(
       tripId,
       user.id,
-      userFamily?.id,
       asset.uri,
       'photo'
     );
@@ -223,14 +263,15 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       userFamily?.id,
       'image',
       data.url,
-      asset.type === 'image' ? `image/${asset.uri.split('.').pop() ?? 'jpeg'}` : undefined
+      data.mime_type
     );
     uploadingRef.current = false; setUploadingMedia(false);
   }
 
   async function startPushTalk() {
-    if (!user || recordingRef.current || uploadingRef.current) return;
-    // Safety: clear any stuck stopping flag so the recorder isn't permanently blocked
+    if (!user || startingRecordingRef.current || recordingRef.current || uploadingRef.current) return;
+    startingRecordingRef.current = true;
+    pendingStopRef.current = false;
     stoppingRecordingRef.current = false;
     try {
       const { granted } = await requestRecordingPermissionsAsync();
@@ -238,33 +279,51 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         Alert.alert('Permission needed', 'Please allow microphone access to record audio.');
         return;
       }
+      pushTalkPlayer.pause();
+      setPlayingPushTalk(null);
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
+      recordingStartedAtRef.current = Date.now();
       recordingRef.current = true;
       setRecordingInProgress(true);
-      if (!holdingPushTalkRef.current) {
+      if (!holdingPushTalkRef.current || pendingStopRef.current) {
         setTimeout(() => sendPushTalk(), 0);
       }
     } catch (e: any) {
+      pendingStopRef.current = false;
       recordingRef.current = false;
+      recordingStartedAtRef.current = null;
       setRecordingInProgress(false);
       Alert.alert('Recording failed', e?.message ?? 'Could not start audio recording.');
+    } finally {
+      startingRecordingRef.current = false;
     }
   }
 
   async function sendPushTalk() {
-    if (!user || !recordingRef.current || stoppingRecordingRef.current) return;
+    if (!user || stoppingRecordingRef.current) return;
+    if (startingRecordingRef.current && !recordingRef.current) {
+      pendingStopRef.current = true;
+      return;
+    }
+    if (!recordingRef.current) return;
     stoppingRecordingRef.current = true;
     try {
       await recorder.stop();
       recordingRef.current = false;
       setRecordingInProgress(false);
       const uri = recorder.uri;
-      const duration = recorder.currentTime; // seconds
+      const wallClockDuration = recordingStartedAtRef.current
+        ? (Date.now() - recordingStartedAtRef.current) / 1000
+        : 0;
+      const duration = recorder.currentTime > 0 ? recorder.currentTime : wallClockDuration;
+      recordingStartedAtRef.current = null;
 
       if (!uri) {
-        Alert.alert('Recording failed', 'No audio was recorded.');
+        if (duration >= 0.35) {
+          Alert.alert('Recording failed', 'No audio was recorded.');
+        }
         return;
       }
 
@@ -291,11 +350,14 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
     } catch (e: any) {
       recordingRef.current = false;
+      recordingStartedAtRef.current = null;
       setRecordingInProgress(false);
       Alert.alert('Recording failed', e?.message ?? 'Could not stop or upload the recording.');
     } finally {
+      pendingStopRef.current = false;
       uploadingRef.current = false; setUploadingMedia(false);
       stoppingRecordingRef.current = false;
+      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
     }
   }
 
@@ -322,7 +384,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <MessageBubble message={item} isOwn={item.user_id === user?.id} />
+          <MessageBubble
+            message={item}
+            isOwn={item.user_id === user?.id}
+            onEdit={handleStartEdit}
+          />
         )}
         contentContainerStyle={styles.messageList}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
@@ -334,7 +400,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         }
       />
       <View style={styles.attachmentBar}>
-        <TouchableOpacity style={styles.attachmentButton} onPress={handlePickPhoto} disabled={uploadingMedia}>
+        <TouchableOpacity
+          style={[styles.attachmentButton, (uploadingMedia || recordingInProgress) && styles.attachmentButtonDisabled]}
+          onPress={handlePickPhoto}
+          disabled={uploadingMedia || recordingInProgress}
+        >
           <Text style={styles.attachmentText}>📷 Photo</Text>
         </TouchableOpacity>
         <Pressable
@@ -356,26 +426,35 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         </Pressable>
       </View>
       <View style={styles.inputBar}>
+        {editingMessage ? (
+          <TouchableOpacity
+            style={styles.cancelEditBtn}
+            onPress={handleCancelEdit}
+            disabled={sending}
+          >
+            <Text style={styles.cancelEditText}>Cancel</Text>
+          </TouchableOpacity>
+        ) : null}
         <TextInput
           style={styles.input}
           value={text}
           onChangeText={setText}
-          placeholder="Type a message..."
+          placeholder={editingMessage ? 'Edit message...' : 'Type a message...'}
           placeholderTextColor={Colors.textSecondary}
           multiline
           maxLength={1000}
           returnKeyType="send"
-          onSubmitEditing={handleSend}
+          onSubmitEditing={editingMessage ? handleSaveEdit : handleSend}
         />
         <TouchableOpacity
           style={[styles.sendBtn, (!text.trim() || sending) && styles.sendBtnDisabled]}
-          onPress={handleSend}
+          onPress={editingMessage ? handleSaveEdit : handleSend}
           disabled={!text.trim() || sending}
         >
           {sending || uploadingMedia ? (
             <ActivityIndicator size="small" color={Colors.surface} />
           ) : (
-            <Text style={styles.sendIcon}>↑</Text>
+            <Text style={styles.sendIcon}>{editingMessage ? 'OK' : '↑'}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -417,6 +496,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...Shadow.sm,
+  },
+  cancelEditBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xs,
+  },
+  cancelEditText: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
   },
   sendBtnDisabled: { backgroundColor: Colors.textSecondary },
   sendIcon: { color: Colors.surface, fontSize: 20, fontWeight: 'bold' },

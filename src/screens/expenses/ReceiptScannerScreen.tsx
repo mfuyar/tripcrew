@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Alert,
   Image,
   TouchableOpacity,
@@ -15,6 +14,7 @@ import { receiptService } from '../../services/receiptService';
 import { useAuth } from '../../contexts/AuthContext';
 import { AppButton } from '../../components/AppButton';
 import { AppTextInput } from '../../components/AppTextInput';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ReceiptScanner'>;
@@ -62,7 +62,7 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
       return;
     }
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       quality: 0.8,
     });
     if (!res.canceled && res.assets[0]) {
@@ -149,7 +149,7 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <FormKeyboardView contentContainerStyle={styles.content}>
       {/* Image picker area */}
       <TouchableOpacity style={styles.imageArea} onPress={pickImage}>
         {imageUri ? (
@@ -284,12 +284,11 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
           />
         </View>
       )}
-    </ScrollView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.md },
   imageArea: {
     height: 240,

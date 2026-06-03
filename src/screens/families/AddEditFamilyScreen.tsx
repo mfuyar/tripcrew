@@ -3,9 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
   TouchableOpacity,
   Alert,
 } from 'react-native';
@@ -16,6 +13,7 @@ import { useTripContext } from '../../contexts/TripContext';
 import { familyService } from '../../services/familyService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, FAMILY_COLORS } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'AddEditFamily'>;
@@ -23,9 +21,10 @@ type Props = NativeStackScreenProps<MainStackParamList, 'AddEditFamily'>;
 export function AddEditFamilyScreen({ navigation, route }: Props) {
   const { tripId, familyId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { families, setFamilies } = useTripContext();
+  const { families, setFamilies, members, setMembers, isTripOrganizer, userFamily } = useTripContext();
   const isEdit = !!familyId;
   const existing = families.find((f) => f.id === familyId);
+  const canDelete = isTripOrganizer || userFamily?.id === familyId;
 
   const [name, setName] = useState(existing?.name ?? '');
   const [adults, setAdults] = useState(String(existing?.adults_count ?? 2));
@@ -98,6 +97,9 @@ export function AddEditFamilyScreen({ navigation, route }: Props) {
         onPress: async () => {
           await familyService.deleteFamily(familyId);
           setFamilies(families.filter((f) => f.id !== familyId));
+          setMembers(members.map((m) => (
+            m.family_id === familyId ? { ...m, family_id: undefined, family: undefined } : m
+          )));
           navigation.goBack();
         },
       },
@@ -129,8 +131,7 @@ export function AddEditFamilyScreen({ navigation, route }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <FormKeyboardView contentContainerStyle={styles.container}>
         {error ? <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View> : null}
 
         <AppTextInput
@@ -164,16 +165,14 @@ export function AddEditFamilyScreen({ navigation, route }: Props) {
         </View>
 
         <AppButton title={isEdit ? 'Save Changes' : 'Create Family'} onPress={handleSave} loading={loading} fullWidth style={styles.saveBtn} />
-        {isEdit && (
+        {isEdit && canDelete && (
           <AppButton title="Delete Family" onPress={handleDelete} variant="danger" fullWidth style={{ marginTop: Spacing.sm }} />
         )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.md },
   errorBox: { backgroundColor: Colors.danger + '15', borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.md },
   errorText: { color: Colors.danger, fontSize: FontSize.sm },

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
+  View, Text, StyleSheet,
   TouchableOpacity, Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { pollService } from '../../services/pollService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreatePoll'>;
@@ -48,8 +49,7 @@ export function CreatePollScreen({ navigation, route }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <FormKeyboardView contentContainerStyle={styles.container}>
         <AppTextInput label="Question *" value={question} onChangeText={setQuestion} placeholder="Where should we have dinner?" />
         <AppTextInput label="Description" value={description} onChangeText={setDescription} placeholder="Optional details..." multiline />
 
@@ -82,13 +82,11 @@ export function CreatePollScreen({ navigation, route }: Props) {
         />
 
         <AppButton title="Create Poll" onPress={handleCreate} loading={loading} fullWidth style={styles.createBtn} />
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.md },
   label: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.sm },
   optionRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },

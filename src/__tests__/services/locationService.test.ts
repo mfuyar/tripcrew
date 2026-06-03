@@ -28,17 +28,48 @@ mockSubscribe.mockImplementation((cb?: (status: string) => void) => {
 
 const mockRemoveChannel = jest.fn();
 const mockSupabaseChannel = jest.fn(() => mockChannel);
+const mockUpsert = jest.fn().mockResolvedValue({ error: null });
+const mockSelect = jest.fn();
+const mockEq = jest.fn();
+const mockDeleteEq = jest.fn();
+const mockDelete = jest.fn();
+const mockFrom = jest.fn();
+
+const mockSelectBuilder = { eq: mockEq };
+const mockDeleteBuilder = { eq: mockDeleteEq };
+
+mockSelect.mockReturnValue(mockSelectBuilder);
+mockEq.mockResolvedValue({ data: [], error: null });
+mockDelete.mockReturnValue(mockDeleteBuilder);
+mockDeleteEq.mockReturnValue(mockDeleteBuilder);
+mockFrom.mockReturnValue({
+  upsert: mockUpsert,
+  select: mockSelect,
+  delete: mockDelete,
+});
 
 jest.mock('../../lib/supabaseClient', () => ({
   supabase: {
     channel: mockSupabaseChannel,
+    from: mockFrom,
     removeChannel: mockRemoveChannel,
   },
 }));
 
 import { locationService } from '../../services/locationService';
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockSelect.mockReturnValue(mockSelectBuilder);
+  mockEq.mockResolvedValue({ data: [], error: null });
+  mockDelete.mockReturnValue(mockDeleteBuilder);
+  mockDeleteEq.mockReturnValue(mockDeleteBuilder);
+  mockFrom.mockReturnValue({
+    upsert: mockUpsert,
+    select: mockSelect,
+    delete: mockDelete,
+  });
+});
 
 const tripId = 'trip-1';
 const userId = 'user-1';
@@ -157,6 +188,96 @@ describe('SPEC §13 — startSharing', () => {
         }),
       })
     );
+  });
+
+  it('position callback updates local UI immediately through onLocation', async () => {
+    const onLocation = jest.fn();
+    let positionCallback: ((pos: any) => void) | null = null;
+    (Location.watchPositionAsync as jest.Mock).mockImplementationOnce(
+      (_opts: any, cb: (pos: any) => void) => {
+        positionCallback = cb;
+        return Promise.resolve({ remove: jest.fn() });
+      }
+    );
+
+    await locationService.startSharing(tripId, userId, familyId, 'Alex', 'Uyar Family', onLocation);
+
+    positionCallback!({
+      coords: { latitude: 40.7128, longitude: -74.006, accuracy: 8, heading: 90 },
+      timestamp: Date.now(),
+    });
+
+    expect(onLocation).toHaveBeenCalledWith(expect.objectContaining({
+      userId,
+      latitude: 40.7128,
+      longitude: -74.006,
+      isLive: true,
+    }));
+  });
+
+  it('position callback upserts last-known location for reconnect UX', async () => {
+    let positionCallback: ((pos: any) => void) | null = null;
+    (Location.watchPositionAsync as jest.Mock).mockImplementationOnce(
+      (_opts: any, cb: (pos: any) => void) => {
+        positionCallback = cb;
+        return Promise.resolve({ remove: jest.fn() });
+      }
+    );
+
+    await locationService.startSharing(tripId, userId, familyId, 'Alex', 'Uyar Family');
+
+    positionCallback!({
+      coords: { latitude: 40.7128, longitude: -74.006, accuracy: 8, heading: 90 },
+      timestamp: Date.now(),
+    });
+
+    await Promise.resolve();
+
+    expect(mockFrom).toHaveBeenCalledWith('live_locations');
+    expect(mockUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trip_id: tripId,
+        user_id: userId,
+        family_id: familyId,
+        latitude: 40.7128,
+        longitude: -74.006,
+      }),
+      { onConflict: 'trip_id,user_id' }
+    );
+  });
+});
+
+describe('SPEC §13 — getLiveLocations', () => {
+  it('loads last-known live locations for the trip', async () => {
+    mockEq.mockResolvedValueOnce({
+      data: [{
+        user_id: 'user-2',
+        family_id: 'fam-2',
+        latitude: 48.8566,
+        longitude: 2.3522,
+        accuracy: 12,
+        heading: 45,
+        updated_at: '2026-06-03T11:00:00Z',
+        profile: { full_name: 'Sam' },
+        family: { name: 'Demir Family' },
+      }],
+      error: null,
+    });
+
+    const locations = await locationService.getLiveLocations(tripId);
+
+    expect(mockFrom).toHaveBeenCalledWith('live_locations');
+    expect(mockSelect).toHaveBeenCalledWith('*, profile:profiles(*), family:families(*)');
+    expect(mockEq).toHaveBeenCalledWith('trip_id', tripId);
+    expect(locations).toEqual([expect.objectContaining({
+      userId: 'user-2',
+      familyId: 'fam-2',
+      userName: 'Sam',
+      familyName: 'Demir Family',
+      latitude: 48.8566,
+      longitude: 2.3522,
+      isLive: true,
+    })]);
   });
 });
 

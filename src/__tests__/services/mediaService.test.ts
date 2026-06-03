@@ -8,6 +8,9 @@
 
 const mockSingle = jest.fn();
 const mockEq = jest.fn();
+const mockIn = jest.fn();
+const mockNot = jest.fn();
+const mockLt = jest.fn();
 const mockOrder = jest.fn();
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
@@ -21,15 +24,28 @@ const mockFrom = jest.fn(() => ({
   update: mockUpdate.mockReturnThis(),
   delete: mockDelete.mockReturnThis(),
   eq: mockEq.mockReturnThis(),
+  in: mockIn.mockReturnThis(),
+  not: mockNot.mockReturnThis(),
+  lt: mockLt.mockReturnThis(),
   order: mockOrder.mockReturnThis(),
   single: mockSingle,
 }));
 
 const mockGetPublicUrl = jest.fn();
+const mockCreateSignedUrl = jest.fn();
+const mockCreateSignedUrls = jest.fn();
+const mockRemove = jest.fn();
 const mockStorageFrom = jest.fn(() => ({
   getPublicUrl: mockGetPublicUrl,
+  createSignedUrl: mockCreateSignedUrl,
+  createSignedUrls: mockCreateSignedUrls,
+  remove: mockRemove,
 }));
 const mockExpoFetch = jest.fn();
+const mockResize = jest.fn().mockReturnThis();
+const mockReset = jest.fn().mockReturnThis();
+const mockRenderAsync = jest.fn();
+const mockSaveAsync = jest.fn();
 
 jest.mock('../../lib/supabaseClient', () => ({
   supabaseUrl: 'https://project.supabase.co',
@@ -42,15 +58,10 @@ jest.mock('../../lib/supabaseClient', () => ({
 }));
 
 jest.mock('expo-file-system', () => ({
-  File: class MockFile {
-    uri: string;
-    type: string;
-    size = 12345;
-
-    constructor(uri: string) {
-      this.uri = uri;
-      this.type = uri.endsWith('.m4a') ? 'audio/x-m4a' : 'image/jpeg';
-    }
+  File: function MockFile(this: { uri: string; type: string; size: number }, uri: string) {
+    this.uri = uri;
+    this.type = uri.endsWith('.m4a') ? 'audio/x-m4a' : 'image/jpeg';
+    this.size = 12345;
   },
 }));
 
@@ -58,11 +69,28 @@ jest.mock('expo/fetch', () => ({
   fetch: mockExpoFetch,
 }));
 
+jest.mock('expo-image-manipulator', () => ({
+  ImageManipulator: {
+    manipulate: jest.fn(() => ({
+      renderAsync: mockRenderAsync,
+      reset: mockReset,
+      resize: mockResize,
+    })),
+  },
+  SaveFormat: { JPEG: 'jpeg' },
+}));
+
 import { mediaService } from '../../services/mediaService';
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
+  mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://signed.example.com/object?token=abc' }, error: null });
+  mockCreateSignedUrls.mockResolvedValue({ data: [] });
+  mockRenderAsync
+    .mockResolvedValueOnce({ width: 3024, height: 4032 })
+    .mockResolvedValueOnce({ saveAsync: mockSaveAsync });
+  mockSaveAsync.mockResolvedValue({ uri: 'file:///cache/compressed.jpg', width: 1200, height: 1600 });
 });
 
 const tripId = 'trip-1';
@@ -93,6 +121,7 @@ describe('SPEC §9 — getMedia (reverse-chronological grid)', () => {
 
     const orderCalls = (mockOrder as jest.Mock).mock.calls;
     expect(orderCalls.some(([col, opts]) => col === 'created_at' && opts?.ascending === false)).toBe(true);
+    expect(mockIn).toHaveBeenCalledWith('media_type', ['photo', 'video']);
   });
 
   it('returns all media for the trip', async () => {
@@ -199,6 +228,8 @@ describe('SPEC §9 — uploadMedia', () => {
     );
     expect(error).toBeNull();
     expect(data?.url).toContain('https://');
+    expect(mockResize).toHaveBeenCalledWith({ height: 1600 });
+    expect(mockSaveAsync).toHaveBeenCalledWith({ compress: 0.78, format: 'jpeg' });
   });
 
   it('normalizes iOS m4a audio to a supported MIME type', async () => {
@@ -271,5 +302,66 @@ describe('SPEC §9 — uploadMedia', () => {
 
     expect(data).toBeNull();
     expect(error).toBe('Storage quota exceeded');
+  });
+
+  it('uploads chat photos without inserting trip_media and signs them for 24 hours', async () => {
+    mockExpoFetch.mockResolvedValueOnce({ ok: true });
+
+    const { data, error } = await mediaService.uploadChatMedia(
+      tripId, userId, 'file:///local/chat-photo.heic', 'photo'
+    );
+
+    expect(error).toBeNull();
+    expect(data).toEqual({ url: 'https://signed.example.com/object?token=abc', mime_type: 'image/jpeg' });
+    expect(mockFrom).not.toHaveBeenCalledWith('trip_media');
+    expect(mockCreateSignedUrl).toHaveBeenCalledWith(
+      expect.stringMatching(/^chat\/trip-1\/user-1\/\d+\.jpg$/),
+      60 * 60 * 24
+    );
+    expect(mockExpoFetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/object\/trip-media\/chat\/trip-1\/user-1\/\d+\.jpg$/),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Content-Type': 'image/jpeg' }),
+      })
+    );
+  });
+});
+
+// ─── Ephemeral chat media cleanup ─────────────────────────────────────────────
+
+describe('deleteExpiredChatMedia', () => {
+  it('deletes expired chat media storage objects and message rows', async () => {
+    mockLt.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'msg-1',
+          message_type: 'image',
+          media_url: 'https://project.supabase.co/storage/v1/object/sign/trip-media/chat/trip-1/user-1/old.jpg?token=x',
+        },
+        {
+          id: 'msg-2',
+          message_type: 'image',
+          media_url: 'https://project.supabase.co/storage/v1/object/sign/trip-media/trip-1/user-1/saved.jpg?token=x',
+        },
+        {
+          id: 'msg-3',
+          message_type: 'audio',
+          media_url: 'https://project.supabase.co/storage/v1/object/sign/trip-media/trip-1/user-1/old.m4a?token=x',
+        },
+      ],
+      error: null,
+    });
+    const cutoff = new Date('2026-06-02T12:00:00.000Z');
+    const { data, error } = await mediaService.deleteExpiredChatMedia(tripId, cutoff);
+
+    expect(error).toBeNull();
+    expect(data).toBe(2);
+    expect(mockFrom).toHaveBeenCalledWith('messages');
+    expect(mockIn).toHaveBeenCalledWith('message_type', ['image', 'audio']);
+    expect(mockNot).toHaveBeenCalledWith('media_url', 'is', null);
+    expect(mockLt).toHaveBeenCalledWith('created_at', cutoff.toISOString());
+    expect(mockRemove).toHaveBeenCalledWith(['chat/trip-1/user-1/old.jpg', 'trip-1/user-1/old.m4a']);
+    expect(mockDelete).toHaveBeenCalled();
+    expect(mockIn).toHaveBeenCalledWith('id', ['msg-1', 'msg-3']);
   });
 });

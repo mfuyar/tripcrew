@@ -6,11 +6,13 @@ import React, {
   ReactNode,
 } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import { Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../lib/supabaseClient';
 import { Profile } from '../types';
 import { demoProfile, DEMO_USER_ID } from '../lib/mockData';
 import { offlineService } from '../services/offlineService';
+import { AUTH_REDIRECT_URL } from '../constants/auth';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -22,10 +24,14 @@ interface AuthContextValue {
   isDemoMode: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
+  requestPasswordReset: (email: string) => Promise<{ error: string | null }>;
+  updatePassword: (password: string) => Promise<{ error: string | null }>;
   signInWithGoogle: () => Promise<{ error: string | null }>;
   signInDemo: () => void;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  isPasswordRecovery: boolean;
+  finishPasswordRecovery: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -46,8 +52,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDemoMode, setIsDemoMode] = useState(false);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+
+  function getUrlParams(url: string): URLSearchParams {
+    const parsed = new URL(url);
+    const hash = parsed.hash.startsWith('#') ? parsed.hash.slice(1) : parsed.hash;
+    return new URLSearchParams(hash || parsed.search);
+  }
+
+  async function handleAuthUrl(url: string) {
+    try {
+      const params = getUrlParams(url);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      const type = params.get('type');
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (!error && type === 'recovery') setIsPasswordRecovery(true);
+      }
+    } catch (_e) {}
+  }
 
   useEffect(() => {
+    Linking.getInitialURL().then((url) => {
+      if (url) handleAuthUrl(url);
+    });
+    const linkingSubscription = Linking.addEventListener('url', ({ url }) => {
+      handleAuthUrl(url);
+    });
+
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       setSession(s);
       setUser(s?.user ?? null);
@@ -55,15 +91,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       else setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
       if (isDemoMode) return; // don't override demo mode
+      if (event === 'PASSWORD_RECOVERY') setIsPasswordRecovery(true);
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) fetchProfile(s.user.id);
       else { setProfile(null); setLoading(false); }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      linkingSubscription.remove();
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function fetchProfile(userId: string) {
@@ -108,13 +148,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signUp(email: string, password: string, fullName: string): Promise<{ error: string | null }> {
     const { data, error } = await supabase.auth.signUp({
       email, password,
-      options: { data: { full_name: fullName } },
+      options: { data: { full_name: fullName }, emailRedirectTo: AUTH_REDIRECT_URL },
     });
     if (error) return { error: error.message };
     if (data.user) {
       await supabase.from('profiles').upsert({ id: data.user.id, email, full_name: fullName });
     }
     return { error: null };
+  }
+
+  async function requestPasswordReset(email: string): Promise<{ error: string | null }> {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: AUTH_REDIRECT_URL,
+    });
+    return { error: error?.message ?? null };
+  }
+
+  async function updatePassword(password: string): Promise<{ error: string | null }> {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) return { error: error.message };
+    setIsPasswordRecovery(false);
+    return { error: null };
+  }
+
+  function finishPasswordRecovery() {
+    setIsPasswordRecovery(false);
   }
 
   // ── Google OAuth ───────────────────────────────────────────────────────────
@@ -124,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'tripcrew://auth/callback',
+          redirectTo: AUTH_REDIRECT_URL,
           skipBrowserRedirect: true,
         },
       });
@@ -133,16 +191,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const result = await WebBrowser.openAuthSessionAsync(
         data.url,
-        'tripcrew://auth/callback'
+        AUTH_REDIRECT_URL
       );
 
       if (result.type === 'success' && result.url) {
-        const url = new URL(result.url);
-        const accessToken = url.searchParams.get('access_token');
-        const refreshToken = url.searchParams.get('refresh_token');
-        if (accessToken && refreshToken) {
-          await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-        }
+        await handleAuthUrl(result.url);
       }
       return { error: null };
     } catch (e: any) {
@@ -167,7 +220,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user, profile, session, loading, isDemoMode,
-      signIn, signUp, signInWithGoogle, signInDemo, signOut, refreshProfile,
+      signIn, signUp, requestPasswordReset, updatePassword, signInWithGoogle,
+      signInDemo, signOut, refreshProfile, isPasswordRecovery, finishPasswordRecovery,
     }}>
       {children}
     </AuthContext.Provider>

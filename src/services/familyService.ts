@@ -1,6 +1,15 @@
 import { supabase } from '../lib/supabaseClient';
 import { Family, FamilyMember, ServiceResult } from '../types';
 
+function isMissingInviteFunction(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === 'PGRST202' ||
+    error.message?.includes('add_family_member_by_email') === true ||
+    error.message?.includes('schema cache') === true
+  );
+}
+
 export const familyService = {
   async createFamily(
     tripId: string,
@@ -55,7 +64,12 @@ export const familyService = {
 
   async deleteFamily(familyId: string): Promise<ServiceResult<null>> {
     const { error } = await supabase.from('families').delete().eq('id', familyId);
-    return { data: null, error: error?.message ?? null };
+    if (error) return { data: null, error: error.message };
+    await supabase
+      .from('trip_members')
+      .update({ family_id: null })
+      .eq('family_id', familyId);
+    return { data: null, error: null };
   },
 
   async addFamilyMember(
@@ -76,6 +90,32 @@ export const familyService = {
       .update({ family_id: familyId })
       .eq('trip_id', tripId)
       .eq('user_id', userId);
+    return { data: data as FamilyMember, error: null };
+  },
+
+  async addFamilyMemberByEmail(
+    familyId: string,
+    tripId: string,
+    email: string,
+    isAdmin = false
+  ): Promise<ServiceResult<FamilyMember>> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return { data: null, error: 'Email is required' };
+
+    const { data, error } = await supabase.rpc('add_family_member_by_email', {
+      family_uuid: familyId,
+      trip_uuid: tripId,
+      member_email: normalizedEmail,
+      make_admin: isAdmin,
+    });
+
+    if (error) {
+      if (isMissingInviteFunction(error)) {
+        return { data: null, error: 'Invite email prepared. Apply the Supabase migration to auto-add existing users by email.' };
+      }
+      return { data: null, error: error.message };
+    }
+
     return { data: data as FamilyMember, error: null };
   },
 
@@ -111,6 +151,12 @@ export const familyService = {
       .delete()
       .eq('family_id', familyId)
       .eq('user_id', userId);
-    return { data: null, error: error?.message ?? null };
+    if (error) return { data: null, error: error.message };
+    await supabase
+      .from('trip_members')
+      .update({ family_id: null })
+      .eq('family_id', familyId)
+      .eq('user_id', userId);
+    return { data: null, error: null };
   },
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
+  View, Text, StyleSheet,
   TouchableOpacity, Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { itineraryService } from '../../services/itineraryService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'AddEditItineraryItem'>;
@@ -90,8 +91,7 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <FormKeyboardView contentContainerStyle={styles.container}>
         <AppTextInput label="Title *" value={title} onChangeText={setTitle} placeholder="Beach picnic..." />
 
         <Text style={styles.label}>Type</Text>
@@ -136,13 +136,11 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
         {isEdit && (
           <AppButton title="Delete Item" onPress={handleDelete} variant="danger" fullWidth style={{ marginTop: Spacing.sm }} />
         )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.md },
   label: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.sm },
   typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },

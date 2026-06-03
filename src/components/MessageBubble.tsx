@@ -7,6 +7,7 @@ import { Colors, FontSize, FontWeight, Radius, Spacing } from '../constants/them
 interface Props {
   message: Message;
   isOwn: boolean;
+  onEdit?: (message: Message) => void;
 }
 
 function formatDuration(seconds?: number | null): string | null {
@@ -60,7 +61,7 @@ function AudioMessageContent({ message, isOwn }: Props) {
   );
 }
 
-export function MessageBubble({ message, isOwn }: Props) {
+export function MessageBubble({ message, isOwn, onEdit }: Props) {
   const time = new Date(message.created_at).toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
@@ -94,9 +95,16 @@ export function MessageBubble({ message, isOwn }: Props) {
             </Text>
           )}
         </View>
-        <Text style={[styles.time, isOwn ? styles.timeOwn : styles.timeOther]}>
-          {time}
-        </Text>
+        <View style={[styles.metaRow, isOwn ? styles.metaRowOwn : styles.metaRowOther]}>
+          {isOwn && message.message_type === 'text' && onEdit ? (
+            <TouchableOpacity onPress={() => onEdit(message)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.editAction}>Edit</Text>
+            </TouchableOpacity>
+          ) : null}
+          <Text style={[styles.time, isOwn ? styles.timeOwn : styles.timeOther]}>
+            {message.edited_at ? `${time} · edited` : time}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -221,7 +229,6 @@ const styles = StyleSheet.create({
   },
   time: {
     fontSize: FontSize.xs,
-    marginTop: 2,
   },
   timeOwn: {
     color: Colors.textSecondary,
@@ -230,5 +237,22 @@ const styles = StyleSheet.create({
   timeOther: {
     color: Colors.textSecondary,
     marginLeft: Spacing.xs,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: 2,
+  },
+  metaRowOwn: {
+    justifyContent: 'flex-end',
+  },
+  metaRowOther: {
+    justifyContent: 'flex-start',
+  },
+  editAction: {
+    color: Colors.primary,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semiBold,
   },
 });

@@ -167,6 +167,7 @@ export interface Message {
   duration_seconds?: number;
   is_push_talk?: boolean;
   created_at: string;
+  edited_at?: string;
   // Joined data
   profile?: Profile;
   family?: Family;

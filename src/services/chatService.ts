@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Message, ServiceResult } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { notificationService } from './notificationService';
+import { sendBroadcast } from '../lib/realtimeBroadcast';
 
 export const chatService = {
   async getMessages(
@@ -65,6 +66,28 @@ export const chatService = {
     return { data: data as Message, error: null };
   },
 
+  async editMessage(
+    messageId: string,
+    userId: string,
+    content: string
+  ): Promise<ServiceResult<Message>> {
+    const trimmed = content.trim();
+    if (!trimmed) return { data: null, error: 'Message cannot be empty.' };
+
+    const { data, error } = await supabase
+      .from('messages')
+      .update({ content: trimmed, edited_at: new Date().toISOString() })
+      .eq('id', messageId)
+      .eq('user_id', userId)
+      .eq('message_type', 'text')
+      .select('*, profile:profiles(*), family:families(*)')
+      .single();
+
+    if (error) return { data: null, error: error.message };
+    chatService.broadcastMessage((data as Message).trip_id, data as Message);
+    return { data: data as Message, error: null };
+  },
+
   subscribeToMessages(
     tripId: string,
     onMessage: (message: Message) => void
@@ -95,8 +118,9 @@ export const chatService = {
 
     if (!members?.length) return;
 
-    const rows = members.map((m: { user_id: string }) => ({
-      user_id: m.user_id,
+    const userIds = members.map((m: { user_id: string }) => m.user_id);
+    const rows = userIds.map((userId) => ({
+      user_id: userId,
       trip_id: tripId,
       type: 'push_talk',
       title: '🎙️ Push Talk',
@@ -110,18 +134,25 @@ export const chatService = {
       .insert(rows)
       .select();
 
+    await notificationService.sendPushToUsers(
+      userIds,
+      '🎙️ Push Talk',
+      'A voice message was sent to your family',
+      { trip_id: tripId, family_id: familyId }
+    );
+
     // Broadcast real-time to each recipient
     (inserted ?? []).forEach((n: any) => {
-      supabase
-        .channel(`user-notifications:${n.user_id}`)
-        .send({ type: 'broadcast', event: 'notification', payload: n });
+      const channel = supabase.channel(`user-notifications:${n.user_id}`);
+      void sendBroadcast(channel, 'notification', n)
+        .finally(() => supabase.removeChannel(channel));
     });
   },
 
   broadcastMessage(tripId: string, message: Message): void {
-    supabase
-      .channel(`chat:${tripId}`)
-      .send({ type: 'broadcast', event: 'new_message', payload: message });
+    const channel = supabase.channel(`chat:${tripId}`);
+    void sendBroadcast(channel, 'new_message', message)
+      .finally(() => supabase.removeChannel(channel));
   },
 
   unsubscribe(channel: RealtimeChannel): void {

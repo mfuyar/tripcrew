@@ -236,6 +236,32 @@ CREATE POLICY "Trip members can send messages"
   ON messages FOR INSERT
   WITH CHECK (is_trip_member(trip_id, auth.uid()) AND user_id = auth.uid());
 
+CREATE POLICY "Users can edit their own text messages"
+  ON messages FOR UPDATE
+  USING (
+    is_trip_member(trip_id, auth.uid())
+    AND user_id = auth.uid()
+    AND message_type = 'text'
+  )
+  WITH CHECK (
+    is_trip_member(trip_id, auth.uid())
+    AND user_id = auth.uid()
+    AND message_type = 'text'
+  );
+
+CREATE POLICY "Trip members can delete expired chat media messages"
+  ON messages FOR DELETE
+  USING (
+    is_trip_member(trip_id, auth.uid())
+    AND message_type IN ('image', 'audio')
+    AND media_url IS NOT NULL
+    AND created_at < NOW() - INTERVAL '24 hours'
+    AND (
+      message_type = 'audio'
+      OR media_url LIKE '%/trip-media/chat/%'
+    )
+  );
+
 -- ─── trip_media ───────────────────────────────────────────────────────────────
 ALTER TABLE trip_media ENABLE ROW LEVEL SECURITY;
 

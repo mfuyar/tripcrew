@@ -1,9 +1,120 @@
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { supabase } from '../lib/supabaseClient';
+import { sendBroadcast } from '../lib/realtimeBroadcast';
 import { Notification, ServiceResult } from '../types';
+import { NOTIFICATION_SOUND } from '../constants/notifications';
 
 const NOTIFY_CHANNEL = (userId: string) => `user-notifications:${userId}`;
+const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
+
+type PushPayload = {
+  userIds: string[];
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+};
+
+function getExpoProjectId(): string | null {
+  const extraProjectId = Constants.expoConfig?.extra?.eas?.projectId;
+  const easProjectId = Constants.easConfig?.projectId;
+  const projectId = typeof extraProjectId === 'string' ? extraProjectId : easProjectId;
+  if (!projectId || projectId === 'your-eas-project-id') return null;
+  return projectId;
+}
+
+function getPlatformName(): 'ios' | 'android' | 'web' | 'unknown' {
+  if (Platform.OS === 'ios' || Platform.OS === 'android' || Platform.OS === 'web') {
+    return Platform.OS;
+  }
+  return 'unknown';
+}
+
+async function sendExpoPushNotifications({ userIds, title, body, data }: PushPayload): Promise<void> {
+  if (userIds.length === 0) return;
+
+  try {
+    const { data: tokens } = await supabase
+      .from('push_tokens')
+      .select('token')
+      .in('user_id', userIds)
+      .eq('is_active', true);
+
+    const uniqueTokens = Array.from(new Set((tokens ?? []).map((row: { token: string }) => row.token)));
+    if (uniqueTokens.length === 0) return;
+
+    const messages = uniqueTokens.map((to) => ({
+      to,
+      title,
+      body,
+      data: data ?? {},
+      sound: NOTIFICATION_SOUND,
+      channelId: 'default',
+    }));
+
+    await fetch(EXPO_PUSH_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(messages),
+    });
+  } catch {
+    // In-app notification rows and realtime broadcasts remain the source of truth.
+  }
+}
 
 export const notificationService = {
+  async registerForPushNotifications(userId: string): Promise<ServiceResult<string>> {
+    if (!Device.isDevice) {
+      return { data: null, error: 'Push notifications require a physical device.' };
+    }
+
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'Trip updates',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: NOTIFICATION_SOUND,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#4F7FFF',
+      });
+    }
+
+    const existing = await Notifications.getPermissionsAsync();
+    let finalStatus = existing.status;
+    if (finalStatus !== 'granted') {
+      const requested = await Notifications.requestPermissionsAsync();
+      finalStatus = requested.status;
+    }
+
+    if (finalStatus !== 'granted') {
+      return { data: null, error: 'Push notification permission was not granted.' };
+    }
+
+    const projectId = getExpoProjectId();
+    if (!projectId) {
+      return { data: null, error: 'Notification permission is enabled. Add a real EAS projectId in app.json to register push tokens.' };
+    }
+
+    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    const { error } = await supabase
+      .from('push_tokens')
+      .upsert({
+        user_id: userId,
+        token,
+        platform: getPlatformName(),
+        device_id: Constants.sessionId ?? null,
+        is_active: true,
+      }, { onConflict: 'token' });
+
+    if (error) return { data: null, error: error.message };
+    return { data: token, error: null };
+  },
+
   async getNotifications(userId: string): Promise<ServiceResult<Notification[]>> {
     const { data, error } = await supabase
       .from('notifications')
@@ -41,7 +152,17 @@ export const notificationService = {
       .select()
       .single();
     if (error) return { data: null, error: error.message };
+    await notificationService.sendPushToUsers([input.user_id], input.title, input.body, input.data);
     return { data: data as Notification, error: null };
+  },
+
+  async sendPushToUsers(
+    userIds: string[],
+    title: string,
+    body: string,
+    data?: Record<string, unknown>
+  ): Promise<void> {
+    await sendExpoPushNotifications({ userIds, title, body, data });
   },
 
   /**
@@ -65,9 +186,10 @@ export const notificationService = {
       .neq('user_id', excludeUserId);
 
     if (!members?.length) return;
+    const userIds = members.map((m: { user_id: string }) => m.user_id);
 
-    const rows = members.map((m) => ({
-      user_id: m.user_id,
+    const rows = userIds.map((userId) => ({
+      user_id: userId,
       trip_id: tripId,
       type,
       title,
@@ -81,11 +203,13 @@ export const notificationService = {
       .insert(rows)
       .select();
 
+    await notificationService.sendPushToUsers(userIds, title, body, data);
+
     // Broadcast to each user's personal channel for real-time delivery
     (inserted ?? []).forEach((n: Notification) => {
-      supabase
-        .channel(NOTIFY_CHANNEL(n.user_id))
-        .send({ type: 'broadcast', event: 'notification', payload: n });
+      const channel = supabase.channel(NOTIFY_CHANNEL(n.user_id));
+      void sendBroadcast(channel, 'notification', n)
+        .finally(() => supabase.removeChannel(channel));
     });
   },
 

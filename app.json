@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "TripCrew",
+    "name": "Travel Crew",
     "slug": "tripcrew",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -12,11 +12,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.muhemmet.tripcrew",
+      "bundleIdentifier": "com.muhemmet.travelcrew",
       "infoPlist": {
-        "NSCameraUsageDescription": "TripCrew needs camera access to scan receipts and take trip photos.",
-        "NSPhotoLibraryUsageDescription": "TripCrew needs photo library access to upload trip photos and scan receipts.",
-        "NSPhotoLibraryAddUsageDescription": "TripCrew saves photos to your photo library."
+        "NSCameraUsageDescription": "Travel Crew needs camera access to scan receipts and take trip photos.",
+        "NSLocationWhenInUseUsageDescription": "Travel Crew needs location access to share your live position with trip members.",
+        "NSPhotoLibraryUsageDescription": "Travel Crew needs photo library access to upload trip photos and scan receipts.",
+        "NSPhotoLibraryAddUsageDescription": "Travel Crew saves photos to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -25,11 +27,17 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "package": "com.muhemmet.tripcrew"
+      "package": "com.muhemmet.travelcrew"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -38,29 +46,44 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "TripCrew needs access to your photos to upload trip memories.",
-          "cameraPermission": "TripCrew needs camera access to scan receipts."
+          "photosPermission": "Travel Crew needs access to your photos to upload trip memories.",
+          "cameraPermission": "Travel Crew needs camera access to scan receipts."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "TripCrew needs camera access to scan receipts."
+          "cameraPermission": "Travel Crew needs camera access to scan receipts."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Travel Crew needs location access to share your live position with trip members."
         }
       ],
       "expo-web-browser",
       [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/tripcrew_alert.wav"
+          ]
+        }
+      ],
+      [
         "expo-audio",
         {
-          "microphonePermission": "TripCrew needs microphone access to send voice messages."
+          "microphonePermission": "Travel Crew needs microphone access to send voice messages."
         }
       ]
     ],
+    "scheme": "travelcrew",
     "extra": {
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "f332990c-5e7f-49a0-8054-21f3dcfb9abb"
       }
     },
-    "scheme": "tripcrew"
+    "owner": "mfuyar"
   }
 }

@@ -3,9 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
   TouchableOpacity,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -14,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { tripService } from '../../services/tripService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateTrip'>;
@@ -64,14 +62,7 @@ export function CreateTripScreen({ navigation }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
+    <FormKeyboardView contentContainerStyle={styles.container}>
         {errors.general ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{errors.general}</Text>
@@ -86,10 +77,10 @@ export function CreateTripScreen({ navigation }: Props) {
           error={errors.name}
         />
         <AppTextInput
-          label="Destination *"
+          label="Destination / Address *"
           value={destination}
           onChangeText={setDestination}
-          placeholder="Barcelona, Spain"
+          placeholder="Hotel, venue, street address, or city"
           error={errors.destination}
         />
         <AppTextInput
@@ -139,13 +130,11 @@ export function CreateTripScreen({ navigation }: Props) {
           fullWidth
           style={styles.createBtn}
         />
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.lg },
   errorBox: {
     backgroundColor: Colors.danger + '15',

@@ -1,10 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  Platform,
+  TextInput,
+  Linking,
+} from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, FamilyMember } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { familyService } from '../../services/familyService';
+import { tripService } from '../../services/tripService';
 import { notificationService } from '../../services/notificationService';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { AppButton } from '../../components/AppButton';
@@ -17,19 +28,31 @@ type Props = NativeStackScreenProps<MainStackParamList, 'FamilyDetail'>;
 export function FamilyDetailScreen({ navigation, route }: Props) {
   const { tripId, familyId } = route.params;
   const { user, profile, isDemoMode } = useAuth();
-  const { families, userFamily, members: tripMembers } = useTripContext();
+  const {
+    families,
+    setFamilies,
+    currentTrip,
+    userFamily,
+    members: tripMembers,
+    setMembers,
+    isTripOrganizer,
+  } = useTripContext();
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingPush, setSendingPush] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   const family = families.find((f) => f.id === familyId);
 
   // Trip members not yet assigned to any family
-  const unassigned = tripMembers.filter((m) => !m.family_id && m.user_id !== user?.id);
+  const unassigned = tripMembers.filter((m) => !m.family_id && (isTripOrganizer || m.user_id !== user?.id));
   // Is the current user an admin of this family?
   const isMyFamily = familyMembers.some((m) => m.user_id === user?.id);
   const isAdmin = familyMembers.some((m) => m.user_id === user?.id && m.is_admin);
+  const canManageFamily = isTripOrganizer || isAdmin;
 
   async function refresh() {
     if (isDemoMode) { setLoading(false); return; }
@@ -45,7 +68,82 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
     const { error } = await familyService.addFamilyMember(familyId, tripId, tripMemberId);
     setAdding(null);
     if (error) { Alert.alert('Error', error); return; }
+    setMembers(tripMembers.map((m) => (
+      m.user_id === tripMemberId ? { ...m, family_id: familyId, family } : m
+    )));
     refresh();
+  }
+
+  function buildInviteEmail() {
+    const email = inviteEmail.trim().toLowerCase();
+    const name = inviteName.trim();
+    const tripName = currentTrip?.name ?? 'our trip';
+    const inviteCode = currentTrip?.invite_code ?? '';
+    const subject = `Join ${tripName} on Travel Crew`;
+    const greeting = name ? `Hi ${name},` : 'Hi,';
+    const body = [
+      greeting,
+      '',
+      `I added your family to ${tripName} in Travel Crew.`,
+      inviteCode ? `Use invite code: ${inviteCode}` : '',
+      '',
+      `Family: ${family?.name ?? 'Family'}`,
+      '',
+      'After you sign in or create an account, join the trip with the invite code and the organizer can place you in the family.',
+    ].filter(Boolean).join('\n');
+
+    return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+
+  async function handleSendInviteEmail() {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email.includes('@')) {
+      Alert.alert('Email required', 'Enter a valid email address to send an invite.');
+      return;
+    }
+
+    const url = buildInviteEmail();
+    const canOpen = await Linking.canOpenURL(url);
+    if (!canOpen) {
+      Alert.alert('Email unavailable', 'No email app is available on this device.');
+      return;
+    }
+    await Linking.openURL(url);
+  }
+
+  async function handleInviteByEmail() {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email.includes('@')) {
+      Alert.alert('Email required', 'Enter a valid email address.');
+      return;
+    }
+
+    setInviting(true);
+    const { data, error } = await familyService.addFamilyMemberByEmail(familyId, tripId, email);
+    setInviting(false);
+
+    if (data) {
+      const [{ data: refreshedFamilyMembers }, { data: refreshedTripMembers }] = await Promise.all([
+        familyService.getFamilyMembers(familyId),
+        tripService.getTripMembers(tripId),
+      ]);
+      setFamilyMembers(refreshedFamilyMembers ?? []);
+      if (refreshedTripMembers) setMembers(refreshedTripMembers);
+      setInviteName('');
+      setInviteEmail('');
+      Alert.alert('Member Added', `${email} was added to ${family?.name ?? 'this family'}.`);
+      return;
+    }
+
+    if (error?.includes('No Travel Crew account') || error?.includes('No TripCrew account') || error?.includes('migration')) {
+      Alert.alert('Send Invite Email', error, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send Email', onPress: handleSendInviteEmail },
+      ]);
+      return;
+    }
+
+    Alert.alert('Unable to Add Member', error ?? 'Could not add member by email.');
   }
 
   async function handleRemoveMember(memberId: string, memberUserId: string) {
@@ -58,8 +156,12 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
           ])
         );
     if (!confirmed) return;
-    await familyService.removeFamilyMember(familyId, memberUserId);
+    const { error } = await familyService.removeFamilyMember(familyId, memberUserId);
+    if (error) { Alert.alert('Error', error); return; }
     setFamilyMembers((prev) => prev.filter((m) => m.id !== memberId));
+    setMembers(tripMembers.map((m) => (
+      m.user_id === memberUserId ? { ...m, family_id: undefined, family: undefined } : m
+    )));
   }
 
   if (loading) return <LoadingView />;
@@ -94,8 +196,33 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
     Alert.alert('Push talk sent', `Sent to ${recipients.length} opted-in member${recipients.length === 1 ? '' : 's'}.`);
   }
 
+  async function handleDeleteFamily() {
+    if (!family) return;
+    Alert.alert('Delete Family', `Delete ${family.name}? Members will stay in the trip but become unassigned.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await familyService.deleteFamily(familyId);
+          if (error) { Alert.alert('Error', error); return; }
+          setFamilies(families.filter((f) => f.id !== familyId));
+          setMembers(tripMembers.map((m) => (
+            m.family_id === familyId ? { ...m, family_id: undefined, family: undefined } : m
+          )));
+          navigation.goBack();
+        },
+      },
+    ]);
+  }
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+    >
       {/* Family header */}
       <View style={styles.header}>
         <FamilyAvatar name={family.name} color={family.color} size={80} />
@@ -117,13 +244,15 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         />
       )}
 
-      <AppButton
-        title="Edit Family"
-        onPress={() => navigation.navigate('AddEditFamily', { tripId, familyId })}
-        variant="outline"
-        fullWidth
-        style={styles.editBtn}
-      />
+      {canManageFamily && (
+        <AppButton
+          title="Edit Family"
+          onPress={() => navigation.navigate('AddEditFamily', { tripId, familyId })}
+          variant="outline"
+          fullWidth
+          style={styles.editBtn}
+        />
+      )}
 
       <AppButton
         title="🎙️ Send Push Talk Ping"
@@ -172,7 +301,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                 </Text>
               )}
 
-              {isAdmin && !m.is_admin && !isMe && (
+              {canManageFamily && (!m.is_admin || isTripOrganizer) && !isMe && (
                 <TouchableOpacity
                   onPress={() => handleRemoveMember(m.id, m.user_id)}
                   style={{ marginLeft: Spacing.sm }}
@@ -185,8 +314,8 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         })
       )}
 
-      {/* Add unassigned trip members — visible to family admin */}
-      {isAdmin && unassigned.length > 0 && (
+      {/* Add unassigned trip members — visible to family managers */}
+      {canManageFamily && unassigned.length > 0 && (
         <View style={styles.addSection}>
           <Text style={styles.sectionTitle}>Add trip members to this family</Text>
           {unassigned.map((m) => (
@@ -206,6 +335,59 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
             </View>
           ))}
         </View>
+      )}
+
+      {isTripOrganizer && (
+        <View style={styles.inviteSection}>
+          <Text style={styles.sectionTitle}>Invite family member</Text>
+          <Text style={styles.inviteHelp}>
+            Add an existing Travel Crew user by email, or send the trip invite code.
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={inviteName}
+            onChangeText={setInviteName}
+            placeholder="Name"
+            placeholderTextColor={Colors.textSecondary}
+            returnKeyType="next"
+          />
+          <TextInput
+            style={styles.input}
+            value={inviteEmail}
+            onChangeText={setInviteEmail}
+            placeholder="email@example.com"
+            placeholderTextColor={Colors.textSecondary}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="send"
+            onSubmitEditing={handleInviteByEmail}
+          />
+          <View style={styles.inviteActions}>
+            <AppButton
+              title="Add by Email"
+              onPress={handleInviteByEmail}
+              loading={inviting}
+              style={styles.inviteAction}
+            />
+            <AppButton
+              title="Send Invite"
+              onPress={handleSendInviteEmail}
+              variant="outline"
+              style={styles.inviteAction}
+            />
+          </View>
+        </View>
+      )}
+
+      {isTripOrganizer && (
+        <AppButton
+          title="Delete Family"
+          onPress={handleDeleteFamily}
+          variant="danger"
+          fullWidth
+          style={styles.deleteBtn}
+        />
       )}
     </ScrollView>
   );
@@ -261,6 +443,35 @@ const styles = StyleSheet.create({
   pushTalkBtnTextOn: { color: Colors.primary },
   pushTalkStatus: { fontSize: 18, marginLeft: Spacing.sm },
   addSection: { marginTop: Spacing.lg },
+  inviteSection: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginTop: Spacing.lg,
+    ...Shadow.sm,
+  },
+  inviteHelp: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.md,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    fontSize: FontSize.md,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+    backgroundColor: Colors.background,
+  },
+  inviteActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  inviteAction: { flex: 1 },
+  deleteBtn: { marginTop: Spacing.lg },
   addBtn: {
     backgroundColor: Colors.primary,
     borderRadius: Radius.md,
