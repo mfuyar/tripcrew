@@ -137,25 +137,33 @@ export function TripsListScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Trips</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.headerTitle}>My Trips</Text>
+          <TouchableOpacity
+            style={styles.notificationBtn}
+            onPress={() => navigation.navigate('Notifications')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.notificationIcon}>🔔</Text>
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
-            style={styles.headerBtn}
-            onPress={() => navigation.navigate('Notifications')}
-          >
-            <Text style={styles.headerBtnText}>
-              🔔{unreadCount > 0 ? ` ${unreadCount > 99 ? '99+' : unreadCount}` : ''}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerBtn}
+            style={[styles.headerBtn, styles.joinBtn]}
             onPress={() => setShowJoin(true)}
+            activeOpacity={0.8}
           >
             <Text style={styles.headerBtnText}>Join</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.headerBtn, styles.headerBtnPrimary]}
+            style={[styles.headerBtn, styles.headerBtnPrimary, styles.newTripBtn]}
             onPress={() => navigation.navigate('CreateTrip')}
+            activeOpacity={0.8}
           >
             <Text style={[styles.headerBtnText, styles.headerBtnTextWhite]}>+ New Trip</Text>
           </TouchableOpacity>
@@ -219,28 +227,65 @@ export function TripsListScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     padding: Spacing.lg,
     paddingTop: Spacing.xl,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
   headerTitle: {
     fontSize: FontSize.xxl,
     fontWeight: FontWeight.bold,
     color: Colors.text,
+    flex: 1,
+  },
+  notificationBtn: {
+    width: 56,
+    height: 44,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationIcon: { fontSize: 20 },
+  notificationBadge: {
+    position: 'absolute',
+    top: -7,
+    right: -7,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  notificationBadgeText: {
+    color: Colors.surface,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
   },
   headerActions: { flexDirection: 'row', gap: Spacing.sm },
   headerBtn: {
+    minHeight: 44,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  joinBtn: { width: 104 },
+  newTripBtn: { flex: 1 },
   headerBtnPrimary: {
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
