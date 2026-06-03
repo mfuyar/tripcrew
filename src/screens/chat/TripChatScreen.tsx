@@ -53,6 +53,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const recordingRef = useRef(false);
   const stoppingRecordingRef = useRef(false);
   const queuedPushTalkIdsRef = useRef<Set<string>>(new Set());
+  // Ref-backed upload guard so startPushTalk never reads a stale closure value
+  const uploadingRef = useRef(false);
+  // Tracks whether the push-talk player has actually started playing (isPlaying went true)
+  // so we can detect the true→false transition rather than relying on didJustFinish
+  const pushTalkHasPlayedRef = useRef(false);
 
   const loadMessages = useCallback(async () => {
     if (isDemoMode) {
@@ -126,11 +131,27 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     };
   }, [playingPushTalk, pushTalkPlayer]);
 
+  // Detect finish via isPlaying transition (true→false) rather than the transient
+  // didJustFinish flag which can be missed if React doesn't flush in the same 250ms poll.
   useEffect(() => {
-    if (playingPushTalk && pushTalkStatus.didJustFinish) {
+    if (!playingPushTalk) { pushTalkHasPlayedRef.current = false; return; }
+    if (pushTalkStatus.playing) {
+      pushTalkHasPlayedRef.current = true;
+    } else if (pushTalkHasPlayedRef.current) {
+      pushTalkHasPlayedRef.current = false;
       setPlayingPushTalk(null);
     }
-  }, [playingPushTalk, pushTalkStatus.didJustFinish]);
+  }, [playingPushTalk, pushTalkStatus.playing]);
+
+  // Safety timeout: clear stuck playingPushTalk after 30s (e.g. URL load error)
+  useEffect(() => {
+    if (!playingPushTalk) return;
+    const t = setTimeout(() => {
+      pushTalkHasPlayedRef.current = false;
+      setPlayingPushTalk(null);
+    }, 30000);
+    return () => clearTimeout(t);
+  }, [playingPushTalk]);
 
   async function handleSend() {
     const content = text.trim();
@@ -161,7 +182,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
 
     if (result.canceled || result.assets.length === 0) return;
     const asset = result.assets[0];
-    setUploadingMedia(true);
+    uploadingRef.current = true; setUploadingMedia(true);
 
     const { data, error } = await mediaService.uploadMedia(
       tripId,
@@ -173,7 +194,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
 
     if (error || !data) {
       Alert.alert('Upload failed', error ?? 'Unable to upload photo.');
-      setUploadingMedia(false);
+      uploadingRef.current = false; setUploadingMedia(false);
       return;
     }
 
@@ -186,11 +207,13 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       data.url,
       asset.type === 'image' ? `image/${asset.uri.split('.').pop() ?? 'jpeg'}` : undefined
     );
-    setUploadingMedia(false);
+    uploadingRef.current = false; setUploadingMedia(false);
   }
 
   async function startPushTalk() {
-    if (!user || recordingRef.current || uploadingMedia) return;
+    if (!user || recordingRef.current || uploadingRef.current) return;
+    // Safety: clear any stuck stopping flag so the recorder isn't permanently blocked
+    stoppingRecordingRef.current = false;
     try {
       const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) {
@@ -231,7 +254,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         return;
       }
 
-      setUploadingMedia(true);
+      uploadingRef.current = true; setUploadingMedia(true);
       const { data, error } = await mediaService.uploadChatAudio(
         tripId, user.id, uri, 'audio'
       );
@@ -253,7 +276,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       setRecordingInProgress(false);
       Alert.alert('Recording failed', e?.message ?? 'Could not stop or upload the recording.');
     } finally {
-      setUploadingMedia(false);
+      uploadingRef.current = false; setUploadingMedia(false);
       stoppingRecordingRef.current = false;
     }
   }
