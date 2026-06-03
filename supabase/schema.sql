@@ -492,6 +492,98 @@ DROP TRIGGER IF EXISTS poll_vote_rules ON poll_votes;
 CREATE TRIGGER poll_vote_rules BEFORE INSERT ON poll_votes
   FOR EACH ROW EXECUTE FUNCTION enforce_poll_vote_rules();
 
+CREATE OR REPLACE FUNCTION recalculate_poll_vote_counts(target_poll_id UUID)
+RETURNS void AS $$
+  UPDATE poll_options po
+  SET votes_count = (
+    SELECT COUNT(*)::INTEGER
+    FROM poll_votes pv
+    WHERE pv.poll_option_id = po.id
+  )
+  WHERE po.poll_id = target_poll_id;
+$$ LANGUAGE sql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION cast_poll_vote(
+  p_poll_id UUID,
+  p_option_id UUID,
+  p_trip_id UUID,
+  p_user_id UUID,
+  p_family_id UUID DEFAULT NULL
+)
+RETURNS void AS $$
+DECLARE
+  multiple_allowed BOOLEAN;
+  poll_status TEXT;
+  existing_vote RECORD;
+BEGIN
+  IF p_user_id <> auth.uid() THEN
+    RAISE EXCEPTION 'Cannot vote for another user';
+  END IF;
+
+  IF NOT is_trip_member(p_trip_id, auth.uid()) THEN
+    RAISE EXCEPTION 'Not a trip member';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_poll_id::text || ':' || p_user_id::text, 0));
+
+  SELECT allow_multiple, status INTO multiple_allowed, poll_status
+  FROM polls
+  WHERE id = p_poll_id AND trip_id = p_trip_id;
+
+  IF poll_status IS NULL THEN
+    RAISE EXCEPTION 'Poll not found';
+  END IF;
+
+  IF poll_status <> 'active' THEN
+    RAISE EXCEPTION 'Poll is closed';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM poll_options
+    WHERE id = p_option_id
+      AND poll_id = p_poll_id
+      AND trip_id = p_trip_id
+  ) THEN
+    RAISE EXCEPTION 'Poll option does not belong to this poll';
+  END IF;
+
+  IF multiple_allowed IS TRUE THEN
+    SELECT id INTO existing_vote
+    FROM poll_votes
+    WHERE poll_id = p_poll_id
+      AND poll_option_id = p_option_id
+      AND user_id = p_user_id
+    LIMIT 1;
+
+    IF FOUND THEN
+      DELETE FROM poll_votes WHERE id = existing_vote.id;
+    ELSE
+      INSERT INTO poll_votes (poll_id, poll_option_id, trip_id, user_id, family_id)
+      VALUES (p_poll_id, p_option_id, p_trip_id, p_user_id, p_family_id)
+      ON CONFLICT (poll_id, poll_option_id, user_id) DO NOTHING;
+    END IF;
+  ELSE
+    SELECT id, poll_option_id INTO existing_vote
+    FROM poll_votes
+    WHERE poll_id = p_poll_id
+      AND user_id = p_user_id
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+      INSERT INTO poll_votes (poll_id, poll_option_id, trip_id, user_id, family_id)
+      VALUES (p_poll_id, p_option_id, p_trip_id, p_user_id, p_family_id);
+    ELSIF existing_vote.poll_option_id <> p_option_id THEN
+      UPDATE poll_votes
+      SET poll_option_id = p_option_id,
+          family_id = p_family_id
+      WHERE id = existing_vote.id;
+    END IF;
+  END IF;
+
+  PERFORM recalculate_poll_vote_counts(p_poll_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- ─── Receipt Scans ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS receipt_scans (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

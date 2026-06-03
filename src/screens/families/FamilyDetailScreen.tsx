@@ -35,7 +35,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
     userFamily,
     members: tripMembers,
     setMembers,
-    isTripOrganizer,
+    canManageTrip,
   } = useTripContext();
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,11 +48,11 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
   const family = families.find((f) => f.id === familyId);
 
   // Trip members not yet assigned to any family
-  const unassigned = tripMembers.filter((m) => !m.family_id && (isTripOrganizer || m.user_id !== user?.id));
+  const unassigned = tripMembers.filter((m) => !m.family_id && (canManageTrip || m.user_id !== user?.id));
   // Is the current user an admin of this family?
   const isMyFamily = familyMembers.some((m) => m.user_id === user?.id);
   const isAdmin = familyMembers.some((m) => m.user_id === user?.id && m.is_admin);
-  const canManageFamily = isTripOrganizer || isAdmin;
+  const canManageFamily = canManageTrip || isAdmin;
 
   async function refresh() {
     if (isDemoMode) { setLoading(false); return; }
@@ -301,7 +301,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                 </Text>
               )}
 
-              {canManageFamily && (!m.is_admin || isTripOrganizer) && !isMe && (
+              {canManageFamily && (!m.is_admin || canManageTrip) && !isMe && (
                 <TouchableOpacity
                   onPress={() => handleRemoveMember(m.id, m.user_id)}
                   style={{ marginLeft: Spacing.sm }}
@@ -337,7 +337,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {isTripOrganizer && (
+      {canManageTrip && (
         <View style={styles.inviteSection}>
           <Text style={styles.sectionTitle}>Invite family member</Text>
           <Text style={styles.inviteHelp}>
@@ -380,7 +380,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {isTripOrganizer && (
+      {canManageTrip && (
         <AppButton
           title="Delete Family"
           onPress={handleDeleteFamily}

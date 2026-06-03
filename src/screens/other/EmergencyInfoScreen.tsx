@@ -19,7 +19,7 @@ const TYPE_ICONS: Record<string, string> = { medical: '🏥', contact: '📞', i
 export function EmergencyInfoScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { userFamily } = useTripContext();
+  const { userFamily, canManageTrip } = useTripContext();
   const [info, setInfo] = useState<EmergencyInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -28,6 +28,7 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<EmergencyInfo | null>(null);
 
   const load = useCallback(async () => {
     if (isDemoMode) { setInfo([]); setLoading(false); setRefreshing(false); return; }
@@ -39,17 +40,48 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  async function handleAdd() {
-    if (!newTitle.trim() || !newContent.trim() || !user) return;
-    setSaving(true);
-    await emergencyService.addInfo(tripId, user.id, {
-      type: newType, title: newTitle.trim(), content: newContent.trim(),
-      is_shared: true, family_id: userFamily?.id ?? undefined,
-    });
-    setSaving(false);
+  function openAdd() {
+    setEditing(null);
+    setNewType('contact');
     setNewTitle('');
     setNewContent('');
+    setShowAdd(true);
+  }
+
+  function openEdit(entry: EmergencyInfo) {
+    setEditing(entry);
+    setNewType(entry.type as typeof TYPES[number]);
+    setNewTitle(entry.title);
+    setNewContent(entry.content);
+    setShowAdd(true);
+  }
+
+  function closeEditor() {
     setShowAdd(false);
+    setEditing(null);
+    setNewType('contact');
+    setNewTitle('');
+    setNewContent('');
+  }
+
+  async function handleSaveInfo() {
+    if (!newTitle.trim() || !newContent.trim() || !user) return;
+    setSaving(true);
+    if (editing) {
+      await emergencyService.updateInfo(editing.id, {
+        type: newType,
+        title: newTitle.trim(),
+        content: newContent.trim(),
+        is_shared: true,
+      });
+    } else {
+      await emergencyService.addInfo(tripId, user.id, {
+        type: newType, title: newTitle.trim(), content: newContent.trim(),
+        is_shared: true, family_id: userFamily?.id ?? undefined,
+      });
+    }
+    setSaving(false);
+    closeEditor();
     load();
   }
 
@@ -78,27 +110,41 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
           <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.primary} />
         }
         ListHeaderComponent={
-          <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)}>
+          <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
             <Text style={styles.addBtnText}>+ Add Info</Text>
           </TouchableOpacity>
         }
         ListEmptyComponent={
-          <EmptyState icon="🚨" title="No emergency info" subtitle="Add medical, contact, and insurance info for your group." actionLabel="Add Info" onAction={() => setShowAdd(true)} />
+          <EmptyState icon="🚨" title="No emergency info" subtitle="Add medical, contact, and insurance info for your group." actionLabel="Add Info" onAction={openAdd} />
         }
         renderItem={({ item: type }) => (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{TYPE_ICONS[type]} {type.charAt(0).toUpperCase() + type.slice(1)}</Text>
-            {grouped[type].map((entry) => (
-              <TouchableOpacity
-                key={entry.id}
-                style={styles.card}
-                onLongPress={() => handleDelete(entry.id)}
-              >
-                <Text style={styles.entryTitle}>{entry.title}</Text>
-                <Text style={styles.entryContent}>{entry.content}</Text>
-                {entry.family && <Text style={styles.entryFamily}>👨‍👩‍👧 {entry.family.name}</Text>}
-              </TouchableOpacity>
-            ))}
+            {grouped[type].map((entry) => {
+              const canManageEntry = canManageTrip || entry.added_by === user?.id;
+              return (
+                <TouchableOpacity
+                  key={entry.id}
+                  style={styles.card}
+                  onPress={() => canManageEntry && openEdit(entry)}
+                  onLongPress={() => canManageEntry && handleDelete(entry.id)}
+                >
+                  <Text style={styles.entryTitle}>{entry.title}</Text>
+                  <Text style={styles.entryContent}>{entry.content}</Text>
+                  {entry.family && <Text style={styles.entryFamily}>👨‍👩‍👧 {entry.family.name}</Text>}
+                  {canManageEntry && (
+                    <View style={styles.entryActions}>
+                      <TouchableOpacity onPress={() => openEdit(entry)}>
+                        <Text style={styles.editAction}>Edit</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleDelete(entry.id)}>
+                        <Text style={styles.deleteAction}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
       />
@@ -107,7 +153,7 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={24}>
             <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Add Emergency Info</Text>
+            <Text style={styles.modalTitle}>{editing ? 'Edit Emergency Info' : 'Add Emergency Info'}</Text>
             <View style={styles.typeRow}>
               {TYPES.map((t) => (
                 <TouchableOpacity
@@ -121,8 +167,8 @@ export function EmergencyInfoScreen({ route }: { route: { params: { tripId: stri
             </View>
             <TextInput style={styles.modalInput} value={newTitle} onChangeText={setNewTitle} placeholder="Title" placeholderTextColor={Colors.textSecondary} autoFocus />
             <TextInput style={[styles.modalInput, { minHeight: 80, textAlignVertical: 'top' }]} value={newContent} onChangeText={setNewContent} placeholder="Details..." placeholderTextColor={Colors.textSecondary} multiline />
-            <AppButton title="Save" onPress={handleAdd} loading={saving} fullWidth />
-            <AppButton title="Cancel" onPress={() => setShowAdd(false)} variant="outline" fullWidth style={{ marginTop: Spacing.sm }} />
+            <AppButton title="Save" onPress={handleSaveInfo} loading={saving} fullWidth />
+            <AppButton title="Cancel" onPress={closeEditor} variant="outline" fullWidth style={{ marginTop: Spacing.sm }} />
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -142,6 +188,9 @@ const styles = StyleSheet.create({
   entryTitle: { fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text, marginBottom: 4 },
   entryContent: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
   entryFamily: { fontSize: FontSize.xs, color: Colors.primary, marginTop: 4 },
+  entryActions: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.sm },
+  editAction: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  deleteAction: { fontSize: FontSize.sm, color: Colors.danger, fontWeight: FontWeight.semiBold },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl },
   modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.text, marginBottom: Spacing.md },

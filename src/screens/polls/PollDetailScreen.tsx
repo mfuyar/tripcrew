@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch, Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, Poll } from '../../types';
@@ -14,10 +14,10 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PollDetail'>;
 
-export function PollDetailScreen({ route }: Props) {
+export function PollDetailScreen({ navigation, route }: Props) {
   const { tripId, pollId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { userFamily } = useTripContext();
+  const { userFamily, canManageTrip } = useTripContext();
   const [poll, setPoll] = useState<Poll | null>(null);
   const [loading, setLoading] = useState(true);
   const [voting, setVoting] = useState<string | null>(null);
@@ -44,12 +44,12 @@ export function PollDetailScreen({ route }: Props) {
       return;
     }
     setVoting(optionId);
-    const { error } = await pollService.vote(
+    const { data, error } = await pollService.vote(
       pollId, optionId, tripId, user.id, userFamily?.id, poll.allow_multiple
     );
     setVoting(null);
     if (error) Alert.alert('Error', error);
-    else load();
+    else if (data) setPoll(data);
   }
 
   async function handleToggleMultiple(value: boolean) {
@@ -67,10 +67,28 @@ export function PollDetailScreen({ route }: Props) {
     ]);
   }
 
+  async function handleDelete() {
+    Alert.alert('Delete Poll', 'This will permanently delete the poll and its votes.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await pollService.deletePoll(pollId);
+          if (error) {
+            Alert.alert('Delete failed', error);
+            return;
+          }
+          navigation.goBack();
+        },
+      },
+    ]);
+  }
+
   if (loading) return <LoadingView />;
   if (!poll) return null;
 
-  const isCreator = poll.created_by === user?.id;
+  const canManagePoll = canManageTrip || poll.created_by === user?.id;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -84,7 +102,7 @@ export function PollDetailScreen({ route }: Props) {
           <Text style={styles.changeHint}>Tap another option to change your vote</Text>
         )}
         {poll.allow_multiple && poll.status === 'active' && (
-          <Text style={styles.changeHint}>Tap a selected option again to remove your vote</Text>
+          <Text style={styles.changeHint}>You count once per option. Tap a selected option again to remove it.</Text>
         )}
         {poll.deadline && (
           <Text style={styles.deadline}>Deadline: {new Date(poll.deadline).toLocaleDateString()}</Text>
@@ -121,29 +139,45 @@ export function PollDetailScreen({ route }: Props) {
       </View>
 
       {/* Creator controls */}
-      {isCreator && poll.status === 'active' && (
+      {canManagePoll && (
         <View style={styles.creatorCard}>
-          <Text style={styles.creatorTitle}>Poll Settings</Text>
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Allow multiple choices</Text>
-              <Text style={styles.settingDesc}>Members can select more than one option</Text>
+          <Text style={styles.creatorTitle}>Poll Controls</Text>
+          {poll.status === 'active' ? (
+            <>
+              <View style={styles.settingRow}>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Allow multiple choices</Text>
+                  <Text style={styles.settingDesc}>Members can select more than one option</Text>
+                </View>
+                <Switch
+                  value={poll.allow_multiple}
+                  onValueChange={handleToggleMultiple}
+                  disabled={togglingMultiple}
+                  trackColor={{ false: Colors.border, true: Colors.primary }}
+                  thumbColor={Colors.surface}
+                />
+              </View>
+              <AppButton
+                title="Close Poll"
+                onPress={handleClose}
+                variant="outline"
+                fullWidth
+                style={{ marginTop: Spacing.sm }}
+              />
+            </>
+          ) : (
+            <Text style={styles.settingDesc}>This poll is closed.</Text>
+          )}
+          {canManageTrip ? (
+            <View style={styles.deleteWrap}>
+              <AppButton
+                title="Delete Poll"
+                onPress={handleDelete}
+                variant="danger"
+                fullWidth
+              />
             </View>
-            <Switch
-              value={poll.allow_multiple}
-              onValueChange={handleToggleMultiple}
-              disabled={togglingMultiple}
-              trackColor={{ false: Colors.border, true: Colors.primary }}
-              thumbColor={Colors.surface}
-            />
-          </View>
-          <AppButton
-            title="Close Poll"
-            onPress={handleClose}
-            variant="outline"
-            fullWidth
-            style={{ marginTop: Spacing.sm }}
-          />
+          ) : null}
         </View>
       )}
     </ScrollView>
@@ -191,4 +225,5 @@ const styles = StyleSheet.create({
   settingInfo: { flex: 1, marginRight: Spacing.md },
   settingLabel: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text },
   settingDesc: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  deleteWrap: { marginTop: Spacing.sm },
 });

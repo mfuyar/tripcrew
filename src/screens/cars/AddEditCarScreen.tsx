@@ -77,6 +77,25 @@ export function AddEditCarScreen({ navigation, route }: Props) {
     });
   }
 
+  async function handleDeleteCar() {
+    if (!carId) return;
+    Alert.alert('Delete Car', 'Delete this car and its passenger list?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await carService.deleteCar(carId);
+          if (error) {
+            Alert.alert('Error', error);
+          } else {
+            navigation.goBack();
+          }
+        },
+      },
+    ]);
+  }
+
   return (
     <FormKeyboardView contentContainerStyle={styles.container}>
         <AppTextInput label="Car Name *" value={name} onChangeText={setName} placeholder="Blue Honda" />
@@ -120,6 +139,15 @@ export function AddEditCarScreen({ navigation, route }: Props) {
               </View>
             ))}
           </View>
+        )}
+        {isEdit && (
+          <AppButton
+            title="Delete Car"
+            onPress={handleDeleteCar}
+            variant="danger"
+            fullWidth
+            style={{ marginTop: Spacing.sm }}
+          />
         )}
       
 

@@ -38,6 +38,12 @@ RETURNS boolean AS $$
   );
 $$ LANGUAGE sql SECURITY DEFINER;
 
+-- Helper function: checks if user can manage trip content (organizer or admin)
+CREATE OR REPLACE FUNCTION can_manage_trip(trip_uuid uuid, user_uuid uuid)
+RETURNS boolean AS $$
+  SELECT can_manage_announcements(trip_uuid, user_uuid);
+$$ LANGUAGE sql SECURITY DEFINER;
+
 -- ─── profiles ─────────────────────────────────────────────────────────────────
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
@@ -107,7 +113,7 @@ CREATE POLICY "Organizers can manage members, users can leave"
 
 CREATE POLICY "Organizers can update member roles"
   ON trip_members FOR UPDATE
-  USING (is_trip_organizer(trip_id, auth.uid()));
+  USING (can_manage_trip(trip_id, auth.uid()));
 
 -- ─── families ─────────────────────────────────────────────────────────────────
 ALTER TABLE families ENABLE ROW LEVEL SECURITY;
@@ -124,14 +130,14 @@ CREATE POLICY "Family creators and organizers can update families"
   ON families FOR UPDATE
   USING (
     created_by = auth.uid()
-    OR is_trip_organizer(trip_id, auth.uid())
+    OR can_manage_trip(trip_id, auth.uid())
   );
 
 CREATE POLICY "Family creators and organizers can delete families"
   ON families FOR DELETE
   USING (
     created_by = auth.uid()
-    OR is_trip_organizer(trip_id, auth.uid())
+    OR can_manage_trip(trip_id, auth.uid())
   );
 
 -- ─── family_members ───────────────────────────────────────────────────────────
@@ -154,7 +160,7 @@ CREATE POLICY "Family admins and organizers can remove members"
   ON family_members FOR DELETE
   USING (
     user_id = auth.uid()
-    OR is_trip_organizer(trip_id, auth.uid())
+    OR can_manage_trip(trip_id, auth.uid())
   );
 
 -- ─── expenses ─────────────────────────────────────────────────────────────────
@@ -172,14 +178,14 @@ CREATE POLICY "Expense creators and organizers can update expenses"
   ON expenses FOR UPDATE
   USING (
     paid_by_user_id = auth.uid()
-    OR is_trip_organizer(trip_id, auth.uid())
+    OR can_manage_trip(trip_id, auth.uid())
   );
 
 CREATE POLICY "Expense creators and organizers can delete expenses"
   ON expenses FOR DELETE
   USING (
     paid_by_user_id = auth.uid()
-    OR is_trip_organizer(trip_id, auth.uid())
+    OR can_manage_trip(trip_id, auth.uid())
   );
 
 -- ─── expense_splits ───────────────────────────────────────────────────────────
@@ -222,6 +228,7 @@ CREATE POLICY "Settlement payer or receiver can update status"
         WHERE family_members.family_id = settlements.to_family_id
           AND family_members.user_id = auth.uid()
       ))
+      OR can_manage_trip(trip_id, auth.uid())
     )
   );
 
@@ -277,12 +284,12 @@ CREATE POLICY "Uploaders and organizers can delete media"
   ON trip_media FOR DELETE
   USING (
     uploaded_by = auth.uid()
-    OR is_trip_organizer(trip_id, auth.uid())
+    OR can_manage_trip(trip_id, auth.uid())
   );
 
 CREATE POLICY "Uploaders can update captions"
   ON trip_media FOR UPDATE
-  USING (uploaded_by = auth.uid());
+  USING (uploaded_by = auth.uid() OR can_manage_trip(trip_id, auth.uid()));
 
 -- ─── itinerary_items ──────────────────────────────────────────────────────────
 ALTER TABLE itinerary_items ENABLE ROW LEVEL SECURITY;
@@ -297,11 +304,11 @@ CREATE POLICY "Trip members can create itinerary items"
 
 CREATE POLICY "Creators and organizers can update items"
   ON itinerary_items FOR UPDATE
-  USING (created_by = auth.uid() OR is_trip_organizer(trip_id, auth.uid()));
+  USING (created_by = auth.uid() OR can_manage_trip(trip_id, auth.uid()));
 
 CREATE POLICY "Creators and organizers can delete items"
   ON itinerary_items FOR DELETE
-  USING (created_by = auth.uid() OR is_trip_organizer(trip_id, auth.uid()));
+  USING (created_by = auth.uid() OR can_manage_trip(trip_id, auth.uid()));
 
 -- ─── itinerary_attendance ─────────────────────────────────────────────────────
 ALTER TABLE itinerary_attendance ENABLE ROW LEVEL SECURITY;
@@ -337,11 +344,11 @@ CREATE POLICY "Trip members can create cars"
 
 CREATE POLICY "Car creators and organizers can manage cars"
   ON cars FOR UPDATE
-  USING (created_by = auth.uid() OR is_trip_organizer(trip_id, auth.uid()));
+  USING (created_by = auth.uid() OR can_manage_trip(trip_id, auth.uid()));
 
 CREATE POLICY "Car creators and organizers can delete cars"
   ON cars FOR DELETE
-  USING (created_by = auth.uid() OR is_trip_organizer(trip_id, auth.uid()));
+  USING (created_by = auth.uid() OR can_manage_trip(trip_id, auth.uid()));
 
 -- ─── car_passengers ───────────────────────────────────────────────────────────
 ALTER TABLE car_passengers ENABLE ROW LEVEL SECURITY;
@@ -363,7 +370,11 @@ CREATE POLICY "Admins can create polls"
 
 CREATE POLICY "Poll creators and organizers can update polls"
   ON polls FOR UPDATE
-  USING (created_by = auth.uid() OR is_trip_organizer(trip_id, auth.uid()));
+  USING (created_by = auth.uid() OR can_manage_announcements(trip_id, auth.uid()));
+
+CREATE POLICY "Admins can delete polls"
+  ON polls FOR DELETE
+  USING (can_manage_announcements(trip_id, auth.uid()));
 
 -- ─── poll_options ─────────────────────────────────────────────────────────────
 ALTER TABLE poll_options ENABLE ROW LEVEL SECURITY;
@@ -400,11 +411,11 @@ CREATE POLICY "Trip members can add emergency info"
 
 CREATE POLICY "Info adders and organizers can update/delete"
   ON emergency_info FOR UPDATE
-  USING (added_by = auth.uid() OR is_trip_organizer(trip_id, auth.uid()));
+  USING (added_by = auth.uid() OR can_manage_trip(trip_id, auth.uid()));
 
 CREATE POLICY "Info adders and organizers can delete"
   ON emergency_info FOR DELETE
-  USING (added_by = auth.uid() OR is_trip_organizer(trip_id, auth.uid()));
+  USING (added_by = auth.uid() OR can_manage_trip(trip_id, auth.uid()));
 
 -- ─── announcements ────────────────────────────────────────────────────────────
 ALTER TABLE announcements ENABLE ROW LEVEL SECURITY;

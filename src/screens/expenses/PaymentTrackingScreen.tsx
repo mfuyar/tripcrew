@@ -16,7 +16,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'PaymentTracking'>;
 export function PaymentTrackingScreen({ route }: Props) {
   const { tripId } = route.params;
   const { isDemoMode } = useAuth();
-  const { userFamily } = useTripContext();
+  const { userFamily, canManageTrip } = useTripContext();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,9 +66,11 @@ export function PaymentTrackingScreen({ route }: Props) {
         <SettlementCard
           settlement={item}
           showActions={
-            (item.status === 'pending' || item.status === 'disputed')
-              ? item.from_family_id === userFamily?.id
-              : item.status === 'paid' && item.to_family_id === userFamily?.id
+            canManageTrip || (
+              (item.status === 'pending' || item.status === 'disputed')
+                ? item.from_family_id === userFamily?.id
+                : item.status === 'paid' && item.to_family_id === userFamily?.id
+            )
           }
           onMarkPaid={() => handleMarkPaid(item.id)}
           onConfirm={() => handleConfirm(item.id)}

@@ -15,10 +15,12 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import {
   useAudioRecorder,
+  useAudioRecorderState,
   useAudioPlayer,
   useAudioPlayerStatus,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
+  setIsAudioActiveAsync,
   RecordingPresets,
 } from 'expo-audio';
 import { RealtimeChannel } from '@supabase/supabase-js';
@@ -44,9 +46,12 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [liveAudioEnabled, setLiveAudioEnabled] = useState(false);
+  const [updatingLiveAudio, setUpdatingLiveAudio] = useState(false);
   const [pendingPushTalks, setPendingPushTalks] = useState<{ id: string; url: string }[]>([]);
   const [playingPushTalk, setPlayingPushTalk] = useState<{ id: string; url: string } | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder, 150);
   const pushTalkPlayer = useAudioPlayer(null, { updateInterval: 250 });
   const pushTalkStatus = useAudioPlayerStatus(pushTalkPlayer);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -64,8 +69,31 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   // so we can detect the true→false transition rather than relying on didJustFinish
   const pushTalkHasPlayedRef = useRef(false);
   // Whether the current user opted in to receive push-talk audio auto-play.
-  // Defaults to true so users without a family record still hear messages.
-  const pushTalkEnabledRef = useRef(true);
+  const pushTalkEnabledRef = useRef(false);
+  const pushTalkMemberIdRef = useRef<string | null>(null);
+
+  function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function resetRecordingState() {
+    pendingStopRef.current = false;
+    startingRecordingRef.current = false;
+    stoppingRecordingRef.current = false;
+    recordingRef.current = false;
+    recordingStartedAtRef.current = null;
+    setRecordingInProgress(false);
+  }
+
+  function showRecordingError(message?: string) {
+    const isAudioSessionError = message?.includes('561210739') || message?.includes('!ses');
+    Alert.alert(
+      'Recording failed',
+      isAudioSessionError
+        ? 'Could not start the microphone. Wait a second and try again.'
+        : message ?? 'Could not start audio recording.'
+    );
+  }
 
   const loadMessages = useCallback(async () => {
     if (isDemoMode) {
@@ -83,7 +111,15 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     if (user?.id && userFamily?.id) {
       const { data: members } = await familyService.getFamilyMembers(userFamily.id);
       const me = members?.find((m) => m.user_id === user.id);
-      if (me !== undefined) pushTalkEnabledRef.current = me.push_talk_enabled;
+      if (me !== undefined) {
+        pushTalkMemberIdRef.current = me.id;
+        pushTalkEnabledRef.current = me.push_talk_enabled;
+        setLiveAudioEnabled(me.push_talk_enabled);
+      }
+    } else {
+      pushTalkMemberIdRef.current = null;
+      pushTalkEnabledRef.current = false;
+      setLiveAudioEnabled(false);
     }
   }, [tripId, isDemoMode, user?.id, userFamily?.id]);
 
@@ -225,6 +261,24 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     setText('');
   }
 
+  async function handleSetLiveAudio(enabled: boolean) {
+    if (enabled === liveAudioEnabled || updatingLiveAudio) return;
+    setLiveAudioEnabled(enabled);
+    pushTalkEnabledRef.current = enabled;
+
+    if (isDemoMode || !pushTalkMemberIdRef.current) return;
+
+    setUpdatingLiveAudio(true);
+    const { error } = await familyService.updateFamilyMemberPushTalk(pushTalkMemberIdRef.current, enabled);
+    setUpdatingLiveAudio(false);
+
+    if (error) {
+      setLiveAudioEnabled(!enabled);
+      pushTalkEnabledRef.current = !enabled;
+      Alert.alert('Audio mode failed', error);
+    }
+  }
+
   async function handlePickPhoto() {
     if (!user) return;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -269,7 +323,13 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   }
 
   async function startPushTalk() {
-    if (!user || startingRecordingRef.current || recordingRef.current || uploadingRef.current) return;
+    if (
+      !user ||
+      startingRecordingRef.current ||
+      recordingRef.current ||
+      recorderState.isRecording ||
+      uploadingRef.current
+    ) return;
     startingRecordingRef.current = true;
     pendingStopRef.current = false;
     stoppingRecordingRef.current = false;
@@ -279,9 +339,24 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         Alert.alert('Permission needed', 'Please allow microphone access to record audio.');
         return;
       }
-      pushTalkPlayer.pause();
+
+      if (pushTalkStatus.playing || playingPushTalk) {
+        pushTalkPlayer.pause();
+        pushTalkPlayer.replace(null);
+        pushTalkHasPlayedRef.current = false;
+        setPlayingPushTalk(null);
+        await wait(200);
+      }
+
+      await setIsAudioActiveAsync(true);
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+      });
+      await wait(100);
+
       setPlayingPushTalk(null);
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
       recordingStartedAtRef.current = Date.now();
@@ -291,11 +366,8 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         setTimeout(() => sendPushTalk(), 0);
       }
     } catch (e: any) {
-      pendingStopRef.current = false;
-      recordingRef.current = false;
-      recordingStartedAtRef.current = null;
-      setRecordingInProgress(false);
-      Alert.alert('Recording failed', e?.message ?? 'Could not start audio recording.');
+      resetRecordingState();
+      showRecordingError(e?.message);
     } finally {
       startingRecordingRef.current = false;
     }
@@ -307,17 +379,22 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       pendingStopRef.current = true;
       return;
     }
-    if (!recordingRef.current) return;
+    if (!recordingRef.current && !recorderState.isRecording) return;
     stoppingRecordingRef.current = true;
     try {
-      await recorder.stop();
+      if (recorderState.isRecording || recordingRef.current) {
+        await recorder.stop();
+      }
       recordingRef.current = false;
       setRecordingInProgress(false);
-      const uri = recorder.uri;
+      const uri = recorder.uri ?? recorderState.url;
       const wallClockDuration = recordingStartedAtRef.current
         ? (Date.now() - recordingStartedAtRef.current) / 1000
         : 0;
-      const duration = recorder.currentTime > 0 ? recorder.currentTime : wallClockDuration;
+      const recorderDuration = recorder.currentTime > 0
+        ? recorder.currentTime
+        : recorderState.durationMillis / 1000;
+      const duration = recorderDuration > 0 ? recorderDuration : wallClockDuration;
       recordingStartedAtRef.current = null;
 
       if (!uri) {
@@ -349,10 +426,8 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       }
       setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
     } catch (e: any) {
-      recordingRef.current = false;
-      recordingStartedAtRef.current = null;
-      setRecordingInProgress(false);
-      Alert.alert('Recording failed', e?.message ?? 'Could not stop or upload the recording.');
+      resetRecordingState();
+      showRecordingError(e?.message ?? 'Could not stop or upload the recording.');
     } finally {
       pendingStopRef.current = false;
       uploadingRef.current = false; setUploadingMedia(false);
@@ -399,6 +474,38 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
           </View>
         }
       />
+      <View style={styles.listenModeBar}>
+        <Pressable
+          style={[
+            styles.listenModeOption,
+            liveAudioEnabled && styles.listenModeOptionActive,
+            updatingLiveAudio && styles.attachmentButtonDisabled,
+          ]}
+          onPress={() => handleSetLiveAudio(true)}
+          disabled={updatingLiveAudio}
+          accessibilityRole="button"
+          accessibilityLabel="Live audio"
+        >
+          <Text style={[styles.listenModeText, liveAudioEnabled && styles.listenModeTextActive]}>
+            Live Audio
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[
+            styles.listenModeOption,
+            !liveAudioEnabled && styles.listenModeOptionActive,
+            updatingLiveAudio && styles.attachmentButtonDisabled,
+          ]}
+          onPress={() => handleSetLiveAudio(false)}
+          disabled={updatingLiveAudio}
+          accessibilityRole="button"
+          accessibilityLabel="Play button"
+        >
+          <Text style={[styles.listenModeText, !liveAudioEnabled && styles.listenModeTextActive]}>
+            Play Button
+          </Text>
+        </Pressable>
+      </View>
       <View style={styles.attachmentBar}>
         <TouchableOpacity
           style={[styles.attachmentButton, (uploadingMedia || recordingInProgress) && styles.attachmentButtonDisabled]}
@@ -517,6 +624,38 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     gap: Spacing.sm,
+  },
+  listenModeBar: {
+    flexDirection: 'row',
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Spacing.sm,
+    paddingBottom: 0,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    gap: Spacing.sm,
+  },
+  listenModeOption: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  listenModeOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  listenModeText: {
+    color: Colors.text,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
+  listenModeTextActive: {
+    color: Colors.surface,
   },
   attachmentButton: {
     flex: 1,

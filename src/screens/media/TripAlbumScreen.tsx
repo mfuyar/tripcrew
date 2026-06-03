@@ -36,7 +36,7 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { userFamily, isTripOrganizer } = useTripContext();
+  const { userFamily, canManageTrip } = useTripContext();
   const [media, setMedia] = useState<TripMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -99,7 +99,12 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
         );
     if (!confirmed) return;
     setDeleting(true);
-    const toDelete = media.filter((m) => selectedIds.has(m.id));
+    const toDelete = media.filter((m) => selectedIds.has(m.id) && canDelete(m));
+    if (toDelete.length === 0) {
+      setDeleting(false);
+      Alert.alert('No permission', 'You can delete your own uploads, or admins can delete any upload.');
+      return;
+    }
     const { error } = await mediaService.deleteMultipleMedia(toDelete);
     setDeleting(false);
     if (error) {
@@ -167,7 +172,7 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   const handleUpload = Platform.OS === 'web' ? handleUploadWeb : handleUploadNative;
 
   const canDelete = (item: TripMedia) =>
-    item.uploaded_by === user?.id || isTripOrganizer;
+    item.uploaded_by === user?.id || canManageTrip;
 
   if (loading) return <LoadingView />;
 

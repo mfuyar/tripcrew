@@ -21,10 +21,10 @@ type Props = NativeStackScreenProps<MainStackParamList, 'AddEditFamily'>;
 export function AddEditFamilyScreen({ navigation, route }: Props) {
   const { tripId, familyId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { families, setFamilies, members, setMembers, isTripOrganizer, userFamily } = useTripContext();
+  const { families, setFamilies, members, setMembers, canManageTrip, userFamily } = useTripContext();
   const isEdit = !!familyId;
   const existing = families.find((f) => f.id === familyId);
-  const canDelete = isTripOrganizer || userFamily?.id === familyId;
+  const canDelete = canManageTrip || userFamily?.id === familyId;
 
   const [name, setName] = useState(existing?.name ?? '');
   const [adults, setAdults] = useState(String(existing?.adults_count ?? 2));

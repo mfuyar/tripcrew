@@ -25,7 +25,7 @@ type Props = NativeStackScreenProps<MainStackParamList, 'MediaDetail'>;
 export function MediaDetailScreen({ navigation, route }: Props) {
   const { tripId, mediaId } = route.params;
   const { user, isDemoMode } = useAuth();
-  const { isTripOrganizer } = useTripContext();
+  const { canManageTrip } = useTripContext();
   const [media, setMedia] = useState<TripMedia | null>(null);
   const [loading, setLoading] = useState(true);
   const [caption, setCaption] = useState('');
@@ -71,8 +71,7 @@ export function MediaDetailScreen({ navigation, route }: Props) {
   if (loading) return <LoadingView />;
   if (!media) return null;
 
-  // Uploader or trip organizer can modify/delete
-  const canModify = media.uploaded_by === user?.id || isTripOrganizer;
+  const canModify = media.uploaded_by === user?.id || canManageTrip;
   const { width } = Dimensions.get('window');
 
   return (

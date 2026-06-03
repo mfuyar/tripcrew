@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
-import { Poll, PollOption, PollVote, ServiceResult } from '../types';
+import { Poll, PollOption, ServiceResult } from '../types';
 import { notificationService } from './notificationService';
 
 export const pollService = {
@@ -78,67 +78,16 @@ export const pollService = {
     userId: string,
     familyId?: string,
     _allowMultiple?: boolean
-  ): Promise<ServiceResult<PollVote | null>> {
-    const { data: poll, error: pollError } = await supabase
-      .from('polls')
-      .select('allow_multiple, status')
-      .eq('id', pollId)
-      .single();
-    if (pollError) return { data: null, error: pollError.message };
-    if (poll?.status === 'closed') return { data: null, error: 'Poll is closed' };
-
-    const isMultipleChoice = Boolean(poll?.allow_multiple);
-
-    if (isMultipleChoice) {
-      // Multiple choice: toggle — clicking a voted option removes it
-      const { data: sameOption } = await supabase
-        .from('poll_votes')
-        .select('id')
-        .eq('poll_id', pollId)
-        .eq('poll_option_id', optionId)
-        .eq('user_id', userId)
-        .single();
-
-      if (sameOption) {
-        await supabase.from('poll_votes').delete().eq('id', sameOption.id);
-        await pollService._decrementOption(optionId);
-        return { data: null, error: null };
-      }
-    } else {
-      // Single choice: change vote if already voted on a different option
-      const { data: existingOnAny } = await supabase
-        .from('poll_votes')
-        .select('id, poll_option_id')
-        .eq('poll_id', pollId)
-        .eq('user_id', userId)
-        .limit(1)
-        .single();
-
-      if (existingOnAny) {
-        if (existingOnAny.poll_option_id === optionId) {
-          return { data: null, error: null }; // same option tapped — no-op
-        }
-        // Different option: remove old vote then cast new one
-        await supabase.from('poll_votes').delete().eq('id', existingOnAny.id);
-        await pollService._decrementOption(existingOnAny.poll_option_id);
-      }
-    }
-
-    const { data, error } = await supabase
-      .from('poll_votes')
-      .insert({
-        poll_id: pollId,
-        poll_option_id: optionId,
-        trip_id: tripId,
-        user_id: userId,
-        family_id: familyId ?? null,
-      })
-      .select()
-      .single();
+  ): Promise<ServiceResult<Poll>> {
+    const { error } = await supabase.rpc('cast_poll_vote', {
+      p_poll_id: pollId,
+      p_option_id: optionId,
+      p_trip_id: tripId,
+      p_user_id: userId,
+      p_family_id: familyId ?? null,
+    });
     if (error) return { data: null, error: error.message };
-
-    await supabase.rpc('increment_poll_votes', { option_id: optionId });
-    return { data: data as PollVote, error: null };
+    return pollService.getPollById(pollId);
   },
 
   async updatePollSettings(
@@ -168,6 +117,14 @@ export const pollService = {
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as Poll, error: null };
+  },
+
+  async deletePoll(pollId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('polls')
+      .delete()
+      .eq('id', pollId);
+    return { data: null, error: error?.message ?? null };
   },
 
   async getPollResults(pollId: string): Promise<ServiceResult<PollOption[]>> {
