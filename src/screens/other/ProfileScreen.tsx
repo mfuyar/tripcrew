@@ -1,20 +1,24 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform,
+  View, Text, StyleSheet, Alert, Platform, Linking,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationsContext';
 import { authService } from '../../services/authService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 export function ProfileScreen() {
   const { user, profile, signOut, refreshProfile, isDemoMode } = useAuth();
+  const { enablePushNotifications, pushTokenError, notificationsEnabled } = useNotifications();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(profile?.full_name ?? '');
   const [phone, setPhone] = useState(profile?.phone ?? '');
   const [saving, setSaving] = useState(false);
+  const [enablingNotifications, setEnablingNotifications] = useState(false);
 
   async function handleSave() {
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Profile editing is disabled in demo.'); return; }
@@ -46,9 +50,34 @@ export function ProfileScreen() {
     ]);
   }
 
+  async function handleEnableNotifications() {
+    if (isDemoMode) {
+      Alert.alert('Demo Mode', 'Notifications are disabled in demo.');
+      return;
+    }
+
+    setEnablingNotifications(true);
+    const { data, error } = await enablePushNotifications();
+    setEnablingNotifications(false);
+
+    if (data) {
+      Alert.alert('Notifications Enabled', 'You will receive push talk, message, and announcement alerts.');
+      return;
+    }
+
+    if (error?.includes('not granted')) {
+      Alert.alert('Notifications Disabled', 'Enable notifications in Settings to receive trip alerts.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      ]);
+      return;
+    }
+
+    Alert.alert('Notifications', error ?? 'Notifications could not be enabled.');
+  }
+
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container}>
+    <FormKeyboardView contentContainerStyle={styles.container}>
         {/* Profile header */}
         <View style={styles.header}>
           <FamilyAvatar name={profile?.full_name ?? user?.email ?? '?'} size={80} />
@@ -92,6 +121,31 @@ export function ProfileScreen() {
           )}
         </View>
 
+        {/* Notifications */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Notifications</Text>
+          <Text style={styles.appInfo}>
+            Receive push talk, message, and announcement alerts.
+          </Text>
+          {notificationsEnabled ? (
+            <View style={styles.notifEnabledRow}>
+              <Text style={styles.notifEnabledIcon}>🔔</Text>
+              <Text style={styles.notifEnabledText}>Notifications are enabled</Text>
+            </View>
+          ) : (
+            <>
+              {pushTokenError ? <Text style={styles.noticeText}>{pushTokenError}</Text> : null}
+              <AppButton
+                title="Enable Notifications"
+                onPress={handleEnableNotifications}
+                loading={enablingNotifications}
+                fullWidth
+                style={styles.notificationBtn}
+              />
+            </>
+          )}
+        </View>
+
         {/* App info */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>About TripCrew</Text>
@@ -109,13 +163,11 @@ export function ProfileScreen() {
           fullWidth
           style={styles.signOutBtn}
         />
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.md, paddingTop: Spacing.xl },
   header: { alignItems: 'center', marginBottom: Spacing.xl },
   name: { fontSize: FontSize.xxl, fontWeight: FontWeight.bold, color: Colors.text, marginTop: Spacing.md },
@@ -131,6 +183,11 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: FontSize.sm, color: Colors.textSecondary },
   infoValue: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text },
   appInfo: { fontSize: FontSize.md, color: Colors.textSecondary, fontStyle: 'italic', marginBottom: Spacing.sm },
+  noticeText: { fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: Spacing.sm },
+  notificationBtn: { marginTop: Spacing.xs },
+  notifEnabledRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.xs },
+  notifEnabledIcon: { fontSize: 20 },
+  notifEnabledText: { fontSize: FontSize.sm, color: Colors.success, fontWeight: FontWeight.semiBold },
   version: { fontSize: FontSize.xs, color: Colors.textSecondary },
   signOutBtn: { marginTop: Spacing.sm },
 });
