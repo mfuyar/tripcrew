@@ -156,7 +156,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: false,
-      quality: 1, // resize handled in uploadMedia via expo-image-manipulator
+      quality: 0.7,
     });
 
     if (result.canceled || result.assets.length === 0) return;
@@ -168,10 +168,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       user.id,
       userFamily?.id,
       asset.uri,
-      'photo',
-      undefined,
-      asset.width,
-      asset.height
+      'photo'
     );
 
     if (error || !data) {

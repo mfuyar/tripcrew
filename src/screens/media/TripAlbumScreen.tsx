@@ -117,8 +117,7 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
       const errors: string[] = [];
       for (const asset of assets) {
         const { error } = await mediaService.uploadMedia(
-          tripId, user.id, userFamily?.id, asset.uri, 'photo',
-          undefined, asset.width, asset.height
+          tripId, user.id, userFamily?.id, asset.uri, 'photo'
         );
         if (error) errors.push(error);
       }
@@ -158,10 +157,10 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
-      quality: 1, // resize handled in uploadMedia via expo-image-manipulator
+      quality: 0.7,
     });
     if (!result.canceled && result.assets.length > 0) {
-      await processUploads(result.assets.map((a) => ({ uri: a.uri, width: a.width, height: a.height })));
+      await processUploads(result.assets.map((a) => ({ uri: a.uri })));
     }
   }
 
