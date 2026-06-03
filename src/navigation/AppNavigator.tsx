@@ -2,7 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { Colors, FontSize } from '../constants/theme';
 import { LoadingView } from '../components/LoadingView';
@@ -145,19 +145,36 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   return (
     <TripTab.Navigator
-      screenOptions={{
-        headerShown: false,
+      screenOptions={({ navigation }) => ({
+        headerShown: true,
+        headerTintColor: Colors.primary,
+        headerTitleStyle: { fontWeight: '700', color: Colors.text },
+        headerStyle: { backgroundColor: Colors.surface },
+        headerShadowVisible: false,
+        headerLeft: () => (
+          <TouchableOpacity
+            onPress={() => navigation.getParent()?.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel="Back to trips"
+            style={{ paddingVertical: 8, paddingRight: 12 }}
+          >
+            <Text style={{ color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' }}>
+              ‹ Trips
+            </Text>
+          </TouchableOpacity>
+        ),
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textSecondary,
         tabBarStyle: { borderTopColor: Colors.border },
         tabBarLabelStyle: { fontSize: FontSize.xs },
-      }}
+      })}
     >
       <TripTab.Screen
         name="Dashboard"
         component={TripDashboardScreen}
         initialParams={{ tripId }}
         options={{
+          title: 'Trip Home',
           tabBarLabel: 'Home',
           tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} />,
         }}
@@ -167,6 +184,7 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
         component={ExpensesListScreen}
         initialParams={{ tripId }}
         options={{
+          title: 'Expenses',
           tabBarLabel: 'Expenses',
           tabBarIcon: ({ focused }) => <TabIcon emoji="💰" focused={focused} />,
         }}
@@ -176,6 +194,7 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
         component={TripChatScreen}
         initialParams={{ tripId }}
         options={{
+          title: 'Chat',
           tabBarLabel: 'Chat',
           tabBarIcon: ({ focused }) => <TabIcon emoji="💬" focused={focused} />,
         }}
@@ -185,6 +204,7 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
         component={TripAlbumScreen}
         initialParams={{ tripId }}
         options={{
+          title: 'Album',
           tabBarLabel: 'Album',
           tabBarIcon: ({ focused }) => <TabIcon emoji="📷" focused={focused} />,
         }}
@@ -194,6 +214,7 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
         component={MoreScreen}
         initialParams={{ tripId }}
         options={{
+          title: 'More',
           tabBarLabel: 'More',
           tabBarIcon: ({ focused }) => <TabIcon emoji="☰" focused={focused} />,
         }}
