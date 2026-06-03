@@ -6,6 +6,7 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
+  Pressable,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
@@ -14,6 +15,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import {
   useAudioRecorder,
+  useAudioPlayer,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   RecordingPresets,
@@ -27,7 +29,7 @@ import { mediaService } from '../../services/mediaService';
 import { demoMessages } from '../../lib/mockData';
 import { MessageBubble } from '../../components/MessageBubble';
 import { LoadingView } from '../../components/LoadingView';
-import { Colors, FontSize, Spacing, Radius, Shadow } from '../../constants/theme';
+import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 export function TripChatScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
@@ -39,9 +41,14 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [sending, setSending] = useState(false);
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [autoPlayPushTalk, setAutoPlayPushTalk] = useState<{ id: string; url: string } | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const pushTalkPlayer = useAudioPlayer(null, { updateInterval: 250 });
   const channelRef = useRef<RealtimeChannel | null>(null);
   const listRef = useRef<FlatList>(null);
+  const holdingPushTalkRef = useRef(false);
+  const recordingRef = useRef(false);
+  const stoppingRecordingRef = useRef(false);
 
   const loadMessages = useCallback(async () => {
     if (isDemoMode) {
@@ -59,13 +66,15 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
 
     if (isDemoMode) return;
 
-    // Subscribe to real-time messages
     channelRef.current = chatService.subscribeToMessages(tripId, (msg) => {
       setMessages((prev) => {
-        // Avoid duplicates
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
+
+      if (msg.is_push_talk && msg.media_url && msg.user_id !== user?.id) {
+        setAutoPlayPushTalk({ id: msg.id, url: msg.media_url });
+      }
     });
 
     return () => {
@@ -73,14 +82,35 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         chatService.unsubscribe(channelRef.current);
       }
     };
-  }, [tripId]);
+  }, [tripId, loadMessages, isDemoMode, user?.id]);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [messages.length]);
+
+  useEffect(() => {
+    if (!autoPlayPushTalk) return;
+
+    let canceled = false;
+    const pushTalk = autoPlayPushTalk;
+    async function playIncomingPushTalk() {
+      try {
+        await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+        if (canceled) return;
+        pushTalkPlayer.replace(pushTalk.url);
+        pushTalkPlayer.play();
+      } catch {
+        // Keep chat quiet; the message still appears with a manual play button.
+      }
+    }
+
+    playIncomingPushTalk();
+    return () => {
+      canceled = true;
+    };
+  }, [autoPlayPushTalk, pushTalkPlayer]);
 
   async function handleSend() {
     const content = text.trim();
@@ -139,8 +169,8 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     setUploadingMedia(false);
   }
 
-  async function startRecording() {
-    if (!user) return;
+  async function startPushTalk() {
+    if (!user || recordingRef.current || uploadingMedia) return;
     try {
       const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) {
@@ -150,23 +180,34 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
       recorder.record();
+      recordingRef.current = true;
       setRecordingInProgress(true);
+      if (!holdingPushTalkRef.current) {
+        setTimeout(() => sendPushTalk(), 0);
+      }
     } catch (e: any) {
+      recordingRef.current = false;
       setRecordingInProgress(false);
       Alert.alert('Recording failed', e?.message ?? 'Could not start audio recording.');
     }
   }
 
-  async function stopRecording() {
-    if (!user) return;
+  async function sendPushTalk() {
+    if (!user || !recordingRef.current || stoppingRecordingRef.current) return;
+    stoppingRecordingRef.current = true;
     try {
       await recorder.stop();
+      recordingRef.current = false;
       setRecordingInProgress(false);
       const uri = recorder.uri;
       const duration = recorder.currentTime; // seconds
 
       if (!uri) {
         Alert.alert('Recording failed', 'No audio was recorded.');
+        return;
+      }
+
+      if (duration > 0 && duration < 0.35) {
         return;
       }
 
@@ -179,8 +220,8 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         return;
       }
       const { data: message, error: messageError } = await chatService.sendMessage(
-        tripId, user.id, 'Audio message', userFamily?.id,
-        'audio', data.url, 'audio/m4a', duration > 0 ? duration : undefined, true
+        tripId, user.id, 'Push talk', userFamily?.id,
+        'audio', data.url, data.mime_type ?? 'audio/mp4', duration > 0 ? duration : undefined, true
       );
       if (messageError || !message) {
         Alert.alert('Message failed', messageError ?? 'Unable to send audio message.');
@@ -188,11 +229,23 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       }
       setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
     } catch (e: any) {
+      recordingRef.current = false;
       setRecordingInProgress(false);
       Alert.alert('Recording failed', e?.message ?? 'Could not stop or upload the recording.');
     } finally {
       setUploadingMedia(false);
+      stoppingRecordingRef.current = false;
     }
+  }
+
+  function handlePushTalkPressIn() {
+    holdingPushTalkRef.current = true;
+    startPushTalk();
+  }
+
+  function handlePushTalkPressOut() {
+    holdingPushTalkRef.current = false;
+    sendPushTalk();
   }
 
   if (loading) return <LoadingView />;
@@ -223,13 +276,23 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         <TouchableOpacity style={styles.attachmentButton} onPress={handlePickPhoto} disabled={uploadingMedia}>
           <Text style={styles.attachmentText}>📷 Photo</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.attachmentButton, recordingInProgress && styles.recordingActive]}
-          onPress={recordingInProgress ? stopRecording : startRecording}
+        <Pressable
+          style={({ pressed }) => [
+            styles.attachmentButton,
+            styles.pushTalkButton,
+            (pressed || recordingInProgress) && styles.recordingActive,
+            uploadingMedia && styles.attachmentButtonDisabled,
+          ]}
+          onPressIn={handlePushTalkPressIn}
+          onPressOut={handlePushTalkPressOut}
           disabled={uploadingMedia}
+          accessibilityRole="button"
+          accessibilityLabel="Hold to talk"
         >
-          <Text style={styles.attachmentText}>{recordingInProgress ? '⏹️ Stop' : '🎙️ Record'}</Text>
-        </TouchableOpacity>
+          <Text style={[styles.attachmentText, recordingInProgress && styles.recordingText]}>
+            {recordingInProgress ? 'Live - release' : 'Hold to Talk'}
+          </Text>
+        </Pressable>
       </View>
       <View style={styles.inputBar}>
         <TextInput
@@ -319,8 +382,18 @@ const styles = StyleSheet.create({
   recordingActive: {
     backgroundColor: Colors.danger,
   },
+  attachmentButtonDisabled: {
+    opacity: 0.6,
+  },
+  pushTalkButton: {
+    borderColor: Colors.primary,
+  },
   attachmentText: {
     color: Colors.text,
     fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
+  recordingText: {
+    color: Colors.surface,
   },
 });
