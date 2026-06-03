@@ -223,6 +223,10 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
         data={media}
         keyExtractor={(item) => item.id}
         numColumns={COLS}
+        removeClippedSubviews
+        initialNumToRender={12}
+        maxToRenderPerBatch={9}
+        windowSize={5}
         refreshControl={
           !selectMode
             ? <RefreshControl
@@ -265,7 +269,7 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
               activeOpacity={0.8}
             >
               {isPhoto ? (
-                <Image source={{ uri: item.url }} style={styles.thumbnail} />
+                <Image source={{ uri: item.url }} style={styles.thumbnail} resizeMode="cover" />
               ) : (
                 <View style={styles.mediaPlaceholder}>
                   <Text style={styles.mediaIcon}>{MEDIA_ICON[item.media_type] ?? '📎'}</Text>
