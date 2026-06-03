@@ -258,20 +258,29 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           ))}
         </ScrollView>
 
-        {/* Split method */}
-        <Text style={styles.label}>Split Method</Text>
         {/* Applies to — always visible, all families ticked by default */}
         <View style={styles.appliesToSection}>
           <View style={styles.appliesToHeader}>
             <Text style={styles.label}>Applies to</Text>
-            {selectedFamilies.length < families.length && (
-              <TouchableOpacity onPress={() => {
-                setSelectedFamilies(families.map((f) => f.id));
-                setSplitMethod(baseSplitMethod);
-              }}>
-                <Text style={styles.selectAllText}>All families</Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.appliesToShortcuts}>
+              {/* "Just for us" — sets Applies To = payer family only */}
+              {!(selectedFamilies.length === 1 && selectedFamilies[0] === paidByFamilyId) && paidByFamilyId && (
+                <TouchableOpacity onPress={() => {
+                  setSelectedFamilies([paidByFamilyId]);
+                  setSplitMethod('selected_families_only');
+                }}>
+                  <Text style={styles.shortcutText}>Just for us</Text>
+                </TouchableOpacity>
+              )}
+              {selectedFamilies.length < families.length && (
+                <TouchableOpacity onPress={() => {
+                  setSelectedFamilies(families.map((f) => f.id));
+                  setSplitMethod(baseSplitMethod);
+                }}>
+                  <Text style={styles.selectAllText}>All families</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {families.map((f) => {
@@ -293,11 +302,6 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           </ScrollView>
           {selectedFamilies.length === 0 && (
             <Text style={styles.noFamilyWarning}>Select at least one family</Text>
-          )}
-          {selectedFamilies.length > 0 && selectedFamilies.length < families.length && (
-            <Text style={styles.appliesToHint}>
-              Only {selectedFamilies.length} of {families.length} families share this expense
-            </Text>
           )}
         </View>
 
@@ -324,17 +328,63 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
         )}
 
         {/* Split Preview */}
-        {splits.length > 0 && (
-          <View style={styles.preview}>
-            <Text style={styles.previewTitle}>Split Preview</Text>
-            {splits.map((s) => (
-              <View key={s.familyId} style={styles.previewRow}>
-                <Text style={styles.previewFamily}>{s.familyName}</Text>
-                <CurrencyAmount amount={s.shareAmount} currency={currentTrip?.currency ?? '$'} />
+        {(() => {
+          const amt = parseFloat(amount);
+          const paidByFamily = families.find((f) => f.id === paidByFamilyId);
+          const isPersonal =
+            selectedFamilies.length === 1 && selectedFamilies[0] === paidByFamilyId;
+          const isSingleOther =
+            selectedFamilies.length === 1 && selectedFamilies[0] !== paidByFamilyId;
+          const soloFamily = isSingleOther
+            ? families.find((f) => f.id === selectedFamilies[0])
+            : null;
+
+          if (isPersonal && !isNaN(amt) && amt > 0) {
+            return (
+              <View style={[styles.preview, styles.previewPersonal]}>
+                <Text style={styles.previewPersonalIcon}>🏠</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.previewPersonalTitle}>Personal expense</Text>
+                  <Text style={styles.previewPersonalSub}>
+                    Only {paidByFamily?.name ?? 'this family'} — no balance impact on anyone else
+                  </Text>
+                </View>
               </View>
-            ))}
-          </View>
-        )}
+            );
+          }
+
+          if (isSingleOther && soloFamily && paidByFamily && !isNaN(amt) && amt > 0) {
+            return (
+              <View style={[styles.preview, styles.previewOwes]}>
+                <Text style={styles.previewOwesIcon}>💳</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.previewOwesTitle}>
+                    {soloFamily.name} will owe {paidByFamily.name}
+                  </Text>
+                  <Text style={styles.previewOwesSub}>
+                    Full amount: {currentTrip?.currency} {amt.toFixed(2)}
+                  </Text>
+                </View>
+              </View>
+            );
+          }
+
+          if (splits.length > 0) {
+            return (
+              <View style={styles.preview}>
+                <Text style={styles.previewTitle}>Split Preview</Text>
+                {splits.filter((s) => s.shareAmount > 0).map((s) => (
+                  <View key={s.familyId} style={styles.previewRow}>
+                    <Text style={styles.previewFamily}>{s.familyName}</Text>
+                    <CurrencyAmount amount={s.shareAmount} currency={currentTrip?.currency ?? '$'} />
+                  </View>
+                ))}
+              </View>
+            );
+          }
+
+          return null;
+        })()}
 
         <AppTextInput
           label="Notes"
@@ -436,7 +486,8 @@ const styles = StyleSheet.create({
   excludedX: { fontSize: 10, color: Colors.textSecondary, marginLeft: 2 },
   appliesToSection: { marginBottom: Spacing.md },
   appliesToHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
-  appliesToHint: { fontSize: FontSize.xs, color: Colors.primary, marginTop: Spacing.xs },
+  appliesToShortcuts: { flexDirection: 'row', gap: Spacing.md },
+  shortcutText: { fontSize: FontSize.sm, color: Colors.secondary, fontWeight: FontWeight.semiBold },
   methodRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -480,4 +531,22 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   previewFamily: { fontSize: FontSize.sm, color: Colors.text },
+  previewPersonal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.success + '18',
+    gap: Spacing.sm,
+  },
+  previewPersonalIcon: { fontSize: 22 },
+  previewPersonalTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.success },
+  previewPersonalSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  previewOwes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.warning + '18',
+    gap: Spacing.sm,
+  },
+  previewOwesIcon: { fontSize: 22 },
+  previewOwesTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.warning },
+  previewOwesSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
 });
