@@ -45,6 +45,7 @@ jest.mock('expo-file-system', () => ({
   File: class MockFile {
     uri: string;
     type: string;
+    size = 12345;
 
     constructor(uri: string) {
       this.uri = uri;
@@ -223,7 +224,39 @@ describe('SPEC §9 — uploadMedia', () => {
         }),
       })
     );
+    const insertCalls = (mockInsert as jest.Mock).mock.calls;
+    expect(insertCalls[0][0]).toEqual(expect.objectContaining({
+      media_type: 'audio',
+      mime_type: 'audio/mp4',
+      file_size: 12345,
+    }));
     expect(error).toBeNull();
+  });
+
+  it('uses supported audio MIME types for mp3 and wav uploads', async () => {
+    mockExpoFetch.mockResolvedValue({ ok: true });
+    mockGetPublicUrl.mockReturnValue({
+      data: { publicUrl: 'https://storage.example.com/trip-1/user-1/audio' },
+    });
+    mockSingle.mockResolvedValue({ data: makeMedia({ media_type: 'audio' }), error: null });
+
+    await mediaService.uploadMedia(tripId, userId, undefined, 'file:///local/message.mp3', 'audio');
+    await mediaService.uploadMedia(tripId, userId, undefined, 'file:///local/message.wav', 'audio');
+
+    expect(mockExpoFetch).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Content-Type': 'audio/mpeg' }),
+      })
+    );
+    expect(mockExpoFetch).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Content-Type': 'audio/wav' }),
+      })
+    );
   });
 
   it('returns error if storage upload fails', async () => {

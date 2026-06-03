@@ -206,6 +206,49 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
     const insertCalls = (mockInsert as jest.Mock).mock.calls;
     expect(insertCalls[0][0].is_push_talk).toBe(true);
   });
+
+  it('routes push talk notifications through opted-in family recipients', async () => {
+    const msg = makeMessage({ message_type: 'audio', is_push_talk: true });
+    const notifySpy = jest
+      .spyOn(chatService, 'notifyPushTalkReceivers')
+      .mockResolvedValueOnce(undefined);
+    mockSingle.mockResolvedValueOnce({ data: msg, error: null });
+
+    await chatService.sendMessage(
+      tripId, userId, 'Push talk', familyId,
+      'audio', 'https://cdn.example.com/push.m4a', 'audio/mp4', 4.1, true
+    );
+
+    expect(notifySpy).toHaveBeenCalledWith(tripId, userId, familyId);
+    notifySpy.mockRestore();
+  });
+
+  it('creates push talk notifications only for opted-in family members', async () => {
+    const members = [{ user_id: 'user-2' }, { user_id: 'user-3' }];
+    mockSelect
+      .mockImplementationOnce(function (this: unknown) { return this; })
+      .mockResolvedValueOnce({
+        data: members.map((m, index) => ({ id: `notif-${index}`, user_id: m.user_id })),
+        error: null,
+      });
+    mockNeq.mockResolvedValueOnce({ data: members, error: null });
+
+    await chatService.notifyPushTalkReceivers(tripId, userId, familyId);
+
+    expect(mockFrom).toHaveBeenCalledWith('family_members');
+    expect(mockEq).toHaveBeenCalledWith('family_id', familyId);
+    expect(mockEq).toHaveBeenCalledWith('push_talk_enabled', true);
+
+    const insertCalls = (mockInsert as jest.Mock).mock.calls;
+    const notificationRows = insertCalls.find(([rows]) => Array.isArray(rows))?.[0];
+    expect(notificationRows).toHaveLength(2);
+    expect(notificationRows[0]).toEqual(expect.objectContaining({
+      type: 'push_talk',
+      title: '🎙️ Push Talk',
+      trip_id: tripId,
+      user_id: 'user-2',
+    }));
+  });
 });
 
 // ─── §8 subscribeToMessages / unsubscribe ─────────────────────────────────────
@@ -221,5 +264,18 @@ describe('SPEC §8 — Realtime subscription', () => {
     const { supabase } = require('../../lib/supabaseClient');
     chatService.unsubscribe(mockChannel as any);
     expect(supabase.removeChannel).toHaveBeenCalledWith(mockChannel);
+  });
+
+  it('passes broadcast payloads to the message handler', () => {
+    const onMessage = jest.fn();
+    const payload = makeMessage({ id: 'broadcast-msg', content: 'Live update' });
+
+    chatService.subscribeToMessages(tripId, onMessage);
+
+    const onCalls = (mockChannel.on as jest.Mock).mock.calls;
+    const broadcastHandler = onCalls.find(([eventType]) => eventType === 'broadcast')?.[2];
+    broadcastHandler({ payload });
+
+    expect(onMessage).toHaveBeenCalledWith(payload);
   });
 });

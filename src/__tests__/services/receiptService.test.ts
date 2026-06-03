@@ -123,6 +123,16 @@ describe('receiptService', () => {
   });
 
   describe('scanReceipt', () => {
+    it('requires a signed-in user before calling the scan function', async () => {
+      mockGetSession.mockResolvedValueOnce({ data: { session: null } });
+
+      const { data, error } = await receiptService.scanReceipt(receiptId, imageUrl);
+
+      expect(mockExpoFetch).not.toHaveBeenCalled();
+      expect(data).toBeNull();
+      expect(error).toBe('You must be signed in to scan receipts.');
+    });
+
     it('invokes the Gemini receipt scan function', async () => {
       const scanned = makeReceipt({
         parsed_amount: 42.5,
@@ -149,6 +159,18 @@ describe('receiptService', () => {
       );
       expect(error).toBeNull();
       expect(data?.parsed_merchant).toBe('Market');
+    });
+
+    it('returns an error when the scan function returns no receipt data', async () => {
+      mockExpoFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: null }),
+      });
+
+      const { data, error } = await receiptService.scanReceipt(receiptId, imageUrl);
+
+      expect(data).toBeNull();
+      expect(error).toBe('Receipt scan returned no data');
     });
 
     it('returns function errors', async () => {
