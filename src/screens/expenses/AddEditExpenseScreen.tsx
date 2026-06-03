@@ -4,8 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  KeyboardAvoidingView,
-  Platform,
   TouchableOpacity,
   Alert,
 } from 'react-native';
@@ -18,6 +16,7 @@ import { calculateExpenseSplits } from '../../utils/calculations';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { CurrencyAmount } from '../../components/CurrencyAmount';
+import { FormKeyboardView } from '../../components/FormKeyboardView';
 import {
   Colors, FontSize, FontWeight, Spacing, Radius,
   CATEGORY_ICONS, CATEGORY_COLORS,
@@ -85,6 +84,11 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setSplitMethod(data.split_method);
       setDate(data.date);
       setNotes(data.notes ?? '');
+      if (data.split_method === 'selected_families_only' && data.expense_splits?.length) {
+        setSelectedFamilies(
+          data.expense_splits.filter((s) => s.share_amount > 0).map((s) => s.family_id)
+        );
+      }
     }
     setFetching(false);
   }
@@ -109,6 +113,9 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) { Alert.alert('Error', 'Please enter a valid amount.'); return; }
     if (!paidByFamilyId) { Alert.alert('Error', 'Please select who paid.'); return; }
+    if (splitMethod === 'selected_families_only' && selectedFamilies.length === 0) {
+      Alert.alert('Error', 'Select at least one family for the split.'); return;
+    }
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Adding expenses is disabled in demo.'); return; }
 
     setLoading(true);
@@ -167,8 +174,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   if (fetching) return null;
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <FormKeyboardView contentContainerStyle={styles.container}>
         {!isEdit && (
           <View style={styles.scanPanel}>
             <View style={styles.scanCopy}>
@@ -253,7 +259,20 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
         {/* Selected families for 'selected_families_only' */}
         {splitMethod === 'selected_families_only' && (
           <View style={styles.selectedFamilies}>
-            <Text style={styles.label}>Include which families</Text>
+            <View style={styles.selectedFamiliesHeader}>
+              <Text style={styles.label}>Split between which families</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  setSelectedFamilies(
+                    selectedFamilies.length === families.length ? [] : families.map((f) => f.id)
+                  )
+                }
+              >
+                <Text style={styles.selectAllText}>
+                  {selectedFamilies.length === families.length ? 'Deselect all' : 'Select all'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             {families.map((f) => (
               <TouchableOpacity
                 key={f.id}
@@ -267,9 +286,13 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
                 <View style={[styles.checkbox, selectedFamilies.includes(f.id) && styles.checkboxActive]}>
                   {selectedFamilies.includes(f.id) && <Text style={styles.checkmark}>✓</Text>}
                 </View>
+                <View style={[styles.famDot, { backgroundColor: f.color ?? Colors.primary }]} />
                 <Text style={styles.checkLabel}>{f.name}</Text>
               </TouchableOpacity>
             ))}
+            {selectedFamilies.length === 0 && (
+              <Text style={styles.noFamilyWarning}>Select at least one family</Text>
+            )}
           </View>
         )}
 
@@ -304,13 +327,11 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
             style={{ marginTop: Spacing.sm }}
           />
         )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </FormKeyboardView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: Colors.background },
   container: { padding: Spacing.md },
   scanPanel: {
     flexDirection: 'row',
@@ -405,6 +426,14 @@ const styles = StyleSheet.create({
   methodLabel: { fontSize: FontSize.md, color: Colors.textSecondary },
   methodLabelActive: { color: Colors.primary, fontWeight: FontWeight.medium },
   selectedFamilies: { marginBottom: Spacing.md },
+  selectedFamiliesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  selectAllText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  noFamilyWarning: { fontSize: FontSize.sm, color: Colors.danger, marginTop: Spacing.xs },
   checkRow: {
     flexDirection: 'row',
     alignItems: 'center',
