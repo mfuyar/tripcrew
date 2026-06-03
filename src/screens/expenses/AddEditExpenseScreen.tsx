@@ -28,12 +28,13 @@ const CATEGORIES: ExpenseCategory[] = [
   'lodging', 'groceries', 'gas', 'restaurant', 'activity', 'tickets', 'parking', 'tolls', 'supplies', 'other',
 ];
 
-const SPLIT_METHODS: { value: SplitMethod; label: string }[] = [
-  { value: 'equal_by_family', label: 'Equal by family' },
-  { value: 'equal_by_person', label: 'Equal by person' },
-  { value: 'adults_only', label: 'Adults only' },
-  { value: 'children_count_half', label: 'Children count half' },
-  { value: 'selected_families_only', label: 'Selected families' },
+// 'selected_families_only' is used internally when the user excludes families;
+// it is not shown in the split method picker.
+const SPLIT_METHODS: { value: SplitMethod; label: string; desc: string }[] = [
+  { value: 'equal_by_family', label: 'Equal by family', desc: 'Each family pays the same share' },
+  { value: 'equal_by_person', label: 'Equal by person', desc: 'Split by headcount' },
+  { value: 'adults_only', label: 'Adults only', desc: 'Children excluded' },
+  { value: 'children_count_half', label: 'Children ½', desc: 'Children count as half a person' },
 ];
 
 export function AddEditExpenseScreen({ navigation, route }: Props) {
@@ -47,6 +48,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   const [category, setCategory] = useState<ExpenseCategory>('other');
   const [paidByFamilyId, setPaidByFamilyId] = useState(userFamily?.id ?? families[0]?.id ?? '');
   const [splitMethod, setSplitMethod] = useState<SplitMethod>('equal_by_family');
+  const [baseSplitMethod, setBaseSplitMethod] = useState<SplitMethod>('equal_by_family');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [selectedFamilies, setSelectedFamilies] = useState<string[]>(families.map((f) => f.id));
@@ -73,6 +75,19 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     if (scannedExpense.notes) setNotes(scannedExpense.notes);
   }, [scannedExpense, isEdit]);
 
+  function toggleAppliesTo(familyId: string) {
+    setSelectedFamilies((prev) => {
+      const next = prev.includes(familyId) ? prev.filter((id) => id !== familyId) : [...prev, familyId];
+      const allSelected = next.length === families.length;
+      if (allSelected) {
+        setSplitMethod(baseSplitMethod);
+      } else {
+        setSplitMethod('selected_families_only');
+      }
+      return next;
+    });
+  }
+
   async function loadExpense() {
     if (isDemoMode) { setFetching(false); return; }
     const { data } = await expenseService.getExpenseById(expenseId!);
@@ -85,9 +100,11 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setDate(data.date);
       setNotes(data.notes ?? '');
       if (data.split_method === 'selected_families_only' && data.expense_splits?.length) {
-        setSelectedFamilies(
-          data.expense_splits.filter((s) => s.share_amount > 0).map((s) => s.family_id)
-        );
+        const included = data.expense_splits.filter((s) => s.share_amount > 0).map((s) => s.family_id);
+        setSelectedFamilies(included);
+        setBaseSplitMethod('equal_by_family');
+      } else {
+        setBaseSplitMethod(data.split_method as SplitMethod);
       }
     }
     setFetching(false);
@@ -113,8 +130,8 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) { Alert.alert('Error', 'Please enter a valid amount.'); return; }
     if (!paidByFamilyId) { Alert.alert('Error', 'Please select who paid.'); return; }
-    if (splitMethod === 'selected_families_only' && selectedFamilies.length === 0) {
-      Alert.alert('Error', 'Select at least one family for the split.'); return;
+    if (selectedFamilies.length === 0) {
+      Alert.alert('Error', 'Select at least one family under "Applies to".'); return;
     }
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Adding expenses is disabled in demo.'); return; }
 
@@ -243,57 +260,67 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
 
         {/* Split method */}
         <Text style={styles.label}>Split Method</Text>
-        {SPLIT_METHODS.map((m) => (
-          <TouchableOpacity
-            key={m.value}
-            style={[styles.methodRow, splitMethod === m.value && styles.methodRowActive]}
-            onPress={() => setSplitMethod(m.value)}
-          >
-            <View style={[styles.radio, splitMethod === m.value && styles.radioActive]} />
-            <Text style={[styles.methodLabel, splitMethod === m.value && styles.methodLabelActive]}>
-              {m.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-
-        {/* Selected families for 'selected_families_only' */}
-        {splitMethod === 'selected_families_only' && (
-          <View style={styles.selectedFamilies}>
-            <View style={styles.selectedFamiliesHeader}>
-              <Text style={styles.label}>Split between which families</Text>
-              <TouchableOpacity
-                onPress={() =>
-                  setSelectedFamilies(
-                    selectedFamilies.length === families.length ? [] : families.map((f) => f.id)
-                  )
-                }
-              >
-                <Text style={styles.selectAllText}>
-                  {selectedFamilies.length === families.length ? 'Deselect all' : 'Select all'}
-                </Text>
+        {/* Applies to — always visible, all families ticked by default */}
+        <View style={styles.appliesToSection}>
+          <View style={styles.appliesToHeader}>
+            <Text style={styles.label}>Applies to</Text>
+            {selectedFamilies.length < families.length && (
+              <TouchableOpacity onPress={() => {
+                setSelectedFamilies(families.map((f) => f.id));
+                setSplitMethod(baseSplitMethod);
+              }}>
+                <Text style={styles.selectAllText}>All families</Text>
               </TouchableOpacity>
-            </View>
-            {families.map((f) => (
-              <TouchableOpacity
-                key={f.id}
-                style={styles.checkRow}
-                onPress={() =>
-                  setSelectedFamilies((prev) =>
-                    prev.includes(f.id) ? prev.filter((id) => id !== f.id) : [...prev, f.id]
-                  )
-                }
-              >
-                <View style={[styles.checkbox, selectedFamilies.includes(f.id) && styles.checkboxActive]}>
-                  {selectedFamilies.includes(f.id) && <Text style={styles.checkmark}>✓</Text>}
-                </View>
-                <View style={[styles.famDot, { backgroundColor: f.color ?? Colors.primary }]} />
-                <Text style={styles.checkLabel}>{f.name}</Text>
-              </TouchableOpacity>
-            ))}
-            {selectedFamilies.length === 0 && (
-              <Text style={styles.noFamilyWarning}>Select at least one family</Text>
             )}
           </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+            {families.map((f) => {
+              const included = selectedFamilies.includes(f.id);
+              return (
+                <TouchableOpacity
+                  key={f.id}
+                  style={[styles.famChip, included ? styles.famChipIncluded : styles.famChipExcluded]}
+                  onPress={() => toggleAppliesTo(f.id)}
+                >
+                  <View style={[styles.famDot, { backgroundColor: included ? (f.color ?? Colors.primary) : Colors.border }]} />
+                  <Text style={[styles.famChipText, included ? styles.famChipTextActive : styles.famChipTextExcluded]}>
+                    {f.name}
+                  </Text>
+                  {!included && <Text style={styles.excludedX}>✕</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          {selectedFamilies.length === 0 && (
+            <Text style={styles.noFamilyWarning}>Select at least one family</Text>
+          )}
+          {selectedFamilies.length > 0 && selectedFamilies.length < families.length && (
+            <Text style={styles.appliesToHint}>
+              Only {selectedFamilies.length} of {families.length} families share this expense
+            </Text>
+          )}
+        </View>
+
+        {/* Split method — only shown when all families included (specific = always equal) */}
+        {splitMethod !== 'selected_families_only' && (
+          <>
+            <Text style={styles.label}>How to split</Text>
+            {SPLIT_METHODS.map((m) => (
+              <TouchableOpacity
+                key={m.value}
+                style={[styles.methodRow, splitMethod === m.value && styles.methodRowActive]}
+                onPress={() => { setSplitMethod(m.value); setBaseSplitMethod(m.value); }}
+              >
+                <View style={[styles.radio, splitMethod === m.value && styles.radioActive]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.methodLabel, splitMethod === m.value && styles.methodLabelActive]}>
+                    {m.label}
+                  </Text>
+                  <Text style={styles.methodDesc}>{m.desc}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </>
         )}
 
         {/* Split Preview */}
@@ -399,10 +426,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     gap: Spacing.xs,
   },
+  famChipIncluded: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  famChipExcluded: { borderColor: Colors.border, backgroundColor: Colors.background, opacity: 0.6 },
   famChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   famDot: { width: 10, height: 10, borderRadius: 5 },
   famChipText: { fontSize: FontSize.sm, color: Colors.textSecondary },
   famChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  famChipTextExcluded: { color: Colors.textSecondary, textDecorationLine: 'line-through' },
+  excludedX: { fontSize: 10, color: Colors.textSecondary, marginLeft: 2 },
+  appliesToSection: { marginBottom: Spacing.md },
+  appliesToHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
+  appliesToHint: { fontSize: FontSize.xs, color: Colors.primary, marginTop: Spacing.xs },
   methodRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -425,33 +459,9 @@ const styles = StyleSheet.create({
   radioActive: { borderColor: Colors.primary, backgroundColor: Colors.primary },
   methodLabel: { fontSize: FontSize.md, color: Colors.textSecondary },
   methodLabelActive: { color: Colors.primary, fontWeight: FontWeight.medium },
-  selectedFamilies: { marginBottom: Spacing.md },
-  selectedFamiliesHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
+  methodDesc: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   selectAllText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
   noFamilyWarning: { fontSize: FontSize.sm, color: Colors.danger, marginTop: Spacing.xs },
-  checkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.sm,
-    gap: Spacing.md,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: Radius.sm,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  checkmark: { color: Colors.surface, fontSize: 13, fontWeight: FontWeight.bold },
-  checkLabel: { fontSize: FontSize.md, color: Colors.text },
   preview: {
     backgroundColor: Colors.primaryLight,
     borderRadius: Radius.md,
