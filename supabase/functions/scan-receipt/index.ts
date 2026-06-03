@@ -187,12 +187,8 @@ Deno.serve(async (req) => {
             },
           ],
           generationConfig: {
-            responseFormat: {
-              text: {
-                mimeType: 'application/json',
-                schema: receiptSchema,
-              },
-            },
+            responseMimeType: 'application/json',
+            responseJsonSchema: receiptSchema,
           },
         }),
       }
