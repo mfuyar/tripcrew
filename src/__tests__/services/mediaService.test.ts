@@ -48,7 +48,7 @@ jest.mock('expo-file-system', () => ({
 
     constructor(uri: string) {
       this.uri = uri;
-      this.type = uri.endsWith('.m4a') ? 'audio/m4a' : 'image/jpeg';
+      this.type = uri.endsWith('.m4a') ? 'audio/x-m4a' : 'image/jpeg';
     }
   },
 }));
@@ -200,7 +200,7 @@ describe('SPEC §9 — uploadMedia', () => {
     expect(data?.url).toContain('https://');
   });
 
-  it('uploads audio with an audio MIME type', async () => {
+  it('normalizes iOS m4a audio to a supported MIME type', async () => {
     mockExpoFetch.mockResolvedValueOnce({ ok: true });
     mockGetPublicUrl.mockReturnValueOnce({
       data: { publicUrl: 'https://storage.example.com/trip-1/user-1/1234.m4a' },
@@ -219,7 +219,7 @@ describe('SPEC §9 — uploadMedia', () => {
       expect.stringMatching(/\.m4a$/),
       expect.objectContaining({
         headers: expect.objectContaining({
-          'Content-Type': 'audio/m4a',
+          'Content-Type': 'audio/mp4',
         }),
       })
     );

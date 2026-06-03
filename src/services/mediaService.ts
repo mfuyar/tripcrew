@@ -22,7 +22,7 @@ function getContentType(file: File, ext: string, mediaType: MediaType): string {
     gif: 'image/gif',
     webp: 'image/webp',
     heic: 'image/heic',
-    m4a: 'audio/m4a',
+    m4a: 'audio/mp4',
     mp3: 'audio/mpeg',
     wav: 'audio/wav',
     aac: 'audio/aac',
@@ -30,7 +30,9 @@ function getContentType(file: File, ext: string, mediaType: MediaType): string {
     mp4: mediaType === 'audio' ? 'audio/mp4' : 'video/mp4',
     mov: 'video/quicktime',
   };
-  return file.type || mimeMap[ext] || (mediaType === 'audio' ? 'audio/m4a' : 'image/jpeg');
+
+  if (mediaType === 'audio') return mimeMap[ext] || 'audio/mp4';
+  return file.type || mimeMap[ext] || 'image/jpeg';
 }
 
 export const mediaService = {
