@@ -49,7 +49,12 @@
         }
       ],
       "expo-web-browser",
-      "expo-audio"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "TripCrew needs microphone access to send voice messages."
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -1,11 +1,63 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
+import { Alert, Image, Text, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Message } from '../types';
 import { Colors, FontSize, FontWeight, Radius, Spacing } from '../constants/theme';
 
 interface Props {
   message: Message;
   isOwn: boolean;
+}
+
+function formatDuration(seconds?: number | null): string | null {
+  if (!seconds || seconds <= 0) return null;
+  const rounded = Math.round(seconds);
+  const mins = Math.floor(rounded / 60);
+  const secs = rounded % 60;
+  return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`;
+}
+
+function AudioMessageContent({ message, isOwn }: Props) {
+  const player = useAudioPlayer(message.media_url ?? null, { updateInterval: 250 });
+  const status = useAudioPlayerStatus(player);
+  const duration = formatDuration(message.duration_seconds ?? status.duration);
+
+  async function handleTogglePlayback() {
+    try {
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      if (status.playing) {
+        player.pause();
+        return;
+      }
+      if (status.didJustFinish) player.seekTo(0);
+      player.play();
+    } catch (e: any) {
+      Alert.alert('Playback failed', e?.message ?? 'Could not play this audio message.');
+    }
+  }
+
+  return (
+    <View style={styles.audioCard}>
+      <TouchableOpacity
+        style={[styles.audioPlayButton, isOwn ? styles.audioPlayButtonOwn : styles.audioPlayButtonOther]}
+        onPress={handleTogglePlayback}
+      >
+        <Text style={[styles.audioPlayIcon, isOwn ? styles.textOwn : styles.textOther]}>
+          {status.playing ? 'Pause' : 'Play'}
+        </Text>
+      </TouchableOpacity>
+      <View style={styles.audioTextBlock}>
+        <Text style={[styles.audioLabel, isOwn ? styles.textOwn : styles.textOther]}>
+          {message.is_push_talk ? 'Push talk' : 'Audio message'}
+        </Text>
+        {duration ? (
+          <Text style={[styles.audioMeta, isOwn ? styles.audioMetaOwn : styles.audioMetaOther]}>
+            {duration}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
 }
 
 export function MessageBubble({ message, isOwn }: Props) {
@@ -35,14 +87,7 @@ export function MessageBubble({ message, isOwn }: Props) {
           {message.message_type === 'image' && message.media_url ? (
             <Image source={{ uri: message.media_url }} style={styles.image} resizeMode="cover" />
           ) : message.message_type === 'audio' && message.media_url ? (
-            <View style={styles.audioCard}>
-              <Text style={[styles.audioLabel, isOwn ? styles.textOwn : styles.textOther]}>🎙️ Audio message</Text>
-              {message.duration_seconds ? (
-                <Text style={[styles.audioMeta, isOwn ? styles.textOwn : styles.textOther]}>
-                  {`${message.duration_seconds.toFixed(1)} sec`}
-                </Text>
-              ) : null}
-            </View>
+            <AudioMessageContent message={message} isOwn={isOwn} />
           ) : (
             <Text style={[styles.text, isOwn ? styles.textOwn : styles.textOther]}>
               {message.content}
@@ -130,9 +175,34 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
   },
   audioCard: {
+    minWidth: 190,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     padding: Spacing.sm,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: Radius.md,
+  },
+  audioPlayButton: {
+    minWidth: 58,
+    minHeight: 36,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.sm,
+  },
+  audioPlayButtonOwn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  audioPlayButtonOther: {
+    backgroundColor: Colors.background,
+  },
+  audioPlayIcon: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+  },
+  audioTextBlock: {
+    flex: 1,
   },
   audioLabel: {
     fontSize: FontSize.md,
@@ -141,6 +211,12 @@ const styles = StyleSheet.create({
   audioMeta: {
     fontSize: FontSize.xs,
     marginTop: 4,
+  },
+  audioMetaOwn: {
+    color: Colors.surface,
+    opacity: 0.9,
+  },
+  audioMetaOther: {
     color: Colors.textSecondary,
   },
   time: {

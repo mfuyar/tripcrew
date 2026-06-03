@@ -1,5 +1,37 @@
-import { supabase } from '../lib/supabaseClient';
+import { File } from 'expo-file-system';
+import { fetch as expoFetch } from 'expo/fetch';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { TripMedia, MediaType, ServiceResult } from '../types';
+
+const MEDIA_BUCKET = 'trip-media';
+
+function getExtension(uri: string, mediaType: MediaType): string {
+  const cleanUri = uri.split('?')[0];
+  const ext = cleanUri.split('.').pop()?.toLowerCase();
+  if (ext && ext.length <= 5) return ext;
+  if (mediaType === 'audio') return 'm4a';
+  if (mediaType === 'video') return 'mp4';
+  return 'jpg';
+}
+
+function getContentType(file: File, ext: string, mediaType: MediaType): string {
+  const mimeMap: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    m4a: 'audio/m4a',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    aac: 'audio/aac',
+    caf: 'audio/x-caf',
+    mp4: mediaType === 'audio' ? 'audio/mp4' : 'video/mp4',
+    mov: 'video/quicktime',
+  };
+  return file.type || mimeMap[ext] || (mediaType === 'audio' ? 'audio/m4a' : 'image/jpeg');
+}
 
 export const mediaService = {
   async uploadMedia(
@@ -10,35 +42,34 @@ export const mediaService = {
     mediaType: MediaType,
     caption?: string
   ): Promise<ServiceResult<TripMedia>> {
-    // Convert URI to Blob for upload
-    let blob: Blob;
-    try {
-      const response = await fetch(uri);
-      blob = await response.blob();
-    } catch (e: any) {
-      return { data: null, error: `Could not read file: ${e?.message ?? 'unknown error'}` };
+    const file = new File(uri);
+    const ext = getExtension(uri, mediaType);
+    const fileName = `${tripId}/${userId}/${Date.now()}.${ext}`;
+    const contentType = getContentType(file, ext, mediaType);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token ?? supabaseAnonKey;
+
+    const uploadResponse = await expoFetch(
+      `${supabaseUrl}/storage/v1/object/${MEDIA_BUCKET}/${fileName}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: supabaseAnonKey,
+          'Content-Type': contentType,
+          'x-upsert': 'false',
+        },
+        body: file,
+      }
+    );
+
+    if (!uploadResponse.ok) {
+      const uploadError = await uploadResponse.text().catch(() => '');
+      return { data: null, error: uploadError || 'Media upload failed' };
     }
 
-    // Strip query params before extracting extension
-    const cleanUri = uri.split('?')[0];
-    const ext = cleanUri.split('.').pop()?.toLowerCase() ?? 'jpg';
-    const fileName = `${tripId}/${userId}/${Date.now()}.${ext}`;
-    // blob.type can be empty on some platforms — fall back to MIME from extension
-    const mimeMap: Record<string, string> = {
-      jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
-      gif: 'image/gif', webp: 'image/webp', heic: 'image/heic',
-      mp4: 'video/mp4', mov: 'video/quicktime',
-    };
-    const contentType = blob.type || mimeMap[ext] || 'image/jpeg';
-
-    const { error: uploadError } = await supabase.storage
-      .from('trip-media')
-      .upload(fileName, blob, { contentType, upsert: false });
-
-    if (uploadError) return { data: null, error: uploadError.message };
-
     const { data: urlData } = supabase.storage
-      .from('trip-media')
+      .from(MEDIA_BUCKET)
       .getPublicUrl(fileName);
 
     const { data, error } = await supabase
@@ -50,6 +81,8 @@ export const mediaService = {
         media_type: mediaType,
         url: urlData.publicUrl,
         caption: caption ?? null,
+        mime_type: contentType,
+        file_size: file.size || null,
       })
       .select('*, uploader:profiles(*), family:families(*)')
       .single();

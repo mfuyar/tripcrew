@@ -13,6 +13,7 @@ const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
+const mockGetSession = jest.fn();
 
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
@@ -24,28 +25,44 @@ const mockFrom = jest.fn(() => ({
   single: mockSingle,
 }));
 
-const mockUpload = jest.fn();
 const mockGetPublicUrl = jest.fn();
 const mockStorageFrom = jest.fn(() => ({
-  upload: mockUpload,
   getPublicUrl: mockGetPublicUrl,
 }));
+const mockExpoFetch = jest.fn();
 
 jest.mock('../../lib/supabaseClient', () => ({
+  supabaseUrl: 'https://project.supabase.co',
+  supabaseAnonKey: 'anon-key',
   supabase: {
+    auth: { getSession: mockGetSession },
     from: mockFrom,
     storage: { from: mockStorageFrom },
   },
 }));
 
-// Mock fetch for the upload blob conversion
-global.fetch = jest.fn().mockResolvedValue({
-  blob: () => Promise.resolve({ type: 'image/jpeg' }),
-}) as jest.Mock;
+jest.mock('expo-file-system', () => ({
+  File: class MockFile {
+    uri: string;
+    type: string;
+
+    constructor(uri: string) {
+      this.uri = uri;
+      this.type = uri.endsWith('.m4a') ? 'audio/m4a' : 'image/jpeg';
+    }
+  },
+}));
+
+jest.mock('expo/fetch', () => ({
+  fetch: mockExpoFetch,
+}));
 
 import { mediaService } from '../../services/mediaService';
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockGetSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
+});
 
 const tripId = 'trip-1';
 const userId = 'user-1';
@@ -154,7 +171,7 @@ describe('SPEC §9 — deleteMedia (uploader or organizer only — enforced by R
 
 describe('SPEC §9 — uploadMedia', () => {
   it('uploads file to storage and inserts record', async () => {
-    mockUpload.mockResolvedValueOnce({ error: null });
+    mockExpoFetch.mockResolvedValueOnce({ ok: true });
     mockGetPublicUrl.mockReturnValueOnce({
       data: { publicUrl: 'https://storage.example.com/trip-1/user-1/1234.jpg' },
     });
@@ -166,13 +183,54 @@ describe('SPEC §9 — uploadMedia', () => {
     );
 
     expect(mockStorageFrom).toHaveBeenCalledWith('trip-media');
-    expect(mockUpload).toHaveBeenCalled();
+    expect(mockExpoFetch).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^https:\/\/project\.supabase\.co\/storage\/v1\/object\/trip-media\/trip-1\/user-1\/\d+\.jpg$/
+      ),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer user-token',
+          apikey: 'anon-key',
+          'Content-Type': 'image/jpeg',
+        }),
+      })
+    );
     expect(error).toBeNull();
     expect(data?.url).toContain('https://');
   });
 
+  it('uploads audio with an audio MIME type', async () => {
+    mockExpoFetch.mockResolvedValueOnce({ ok: true });
+    mockGetPublicUrl.mockReturnValueOnce({
+      data: { publicUrl: 'https://storage.example.com/trip-1/user-1/1234.m4a' },
+    });
+    const inserted = makeMedia({
+      media_type: 'audio',
+      url: 'https://storage.example.com/trip-1/user-1/1234.m4a',
+    });
+    mockSingle.mockResolvedValueOnce({ data: inserted, error: null });
+
+    const { error } = await mediaService.uploadMedia(
+      tripId, userId, undefined, 'file:///local/recording.m4a', 'audio'
+    );
+
+    expect(mockExpoFetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\.m4a$/),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Content-Type': 'audio/m4a',
+        }),
+      })
+    );
+    expect(error).toBeNull();
+  });
+
   it('returns error if storage upload fails', async () => {
-    mockUpload.mockResolvedValueOnce({ error: { message: 'Storage quota exceeded' } });
+    mockExpoFetch.mockResolvedValueOnce({
+      ok: false,
+      text: () => Promise.resolve('Storage quota exceeded'),
+    });
 
     const { data, error } = await mediaService.uploadMedia(
       tripId, userId, undefined, 'file:///local/photo.jpg', 'photo'

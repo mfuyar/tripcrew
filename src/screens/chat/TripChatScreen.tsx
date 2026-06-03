@@ -151,8 +151,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       await recorder.prepareToRecordAsync();
       recorder.record();
       setRecordingInProgress(true);
-    } catch {
-      Alert.alert('Recording failed', 'Could not start audio recording.');
+    } catch (e: any) {
+      setRecordingInProgress(false);
+      Alert.alert('Recording failed', e?.message ?? 'Could not start audio recording.');
     }
   }
 
@@ -177,12 +178,18 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         Alert.alert('Upload failed', error ?? 'Unable to upload audio.');
         return;
       }
-      await chatService.sendMessage(
+      const { data: message, error: messageError } = await chatService.sendMessage(
         tripId, user.id, 'Audio message', userFamily?.id,
         'audio', data.url, 'audio/m4a', duration > 0 ? duration : undefined, true
       );
-    } catch {
-      Alert.alert('Recording failed', 'Could not stop or upload the recording.');
+      if (messageError || !message) {
+        Alert.alert('Message failed', messageError ?? 'Unable to send audio message.');
+        return;
+      }
+      setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
+    } catch (e: any) {
+      setRecordingInProgress(false);
+      Alert.alert('Recording failed', e?.message ?? 'Could not stop or upload the recording.');
     } finally {
       setUploadingMedia(false);
     }
