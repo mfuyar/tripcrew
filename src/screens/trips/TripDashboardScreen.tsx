@@ -15,6 +15,7 @@ import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
 import { announcementService } from '../../services/announcementService';
+import { tripService } from '../../services/tripService';
 import { demoExpenses, demoAnnouncements } from '../../lib/mockData';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 import { LoadingView } from '../../components/LoadingView';
@@ -38,7 +39,7 @@ const ALL_QUICK_LINKS: (QuickLink & { adminOnly?: boolean })[] = [
 export function TripDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip, families, members, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip } = useTripContext();
+  const { currentTrip, families, members, setMembers, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<{ id: string; title: string; priority: string }[]>([]);
@@ -67,7 +68,14 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [loadData])
+      // Re-fetch members so role changes (e.g. newly promoted admin) are
+      // reflected in canManageTrip/isTripAdmin without requiring a full restart.
+      if (!isDemoMode) {
+        tripService.getTripMembers(tripId).then(({ data }) => {
+          if (data) setMembers(data);
+        });
+      }
+    }, [loadData, tripId, isDemoMode])
   );
 
   if (loading) return <LoadingView />;

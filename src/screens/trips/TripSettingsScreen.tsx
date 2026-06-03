@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -37,6 +38,14 @@ export function TripSettingsScreen({ navigation, route }: Props) {
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(currentTrip?.name ?? '');
   const [destination, setDestination] = useState(currentTrip?.destination ?? '');
+
+  // Re-fetch members on focus so role changes from any device are reflected
+  useFocusEffect(useCallback(() => {
+    if (isDemoMode) return;
+    tripService.getTripMembers(tripId).then(({ data }) => {
+      if (data) setMembers(data);
+    });
+  }, [tripId, isDemoMode]));
 
   async function handleSave() {
     if (isDemoMode) { Alert.alert('Demo Mode', 'Editing trip settings is disabled in demo.'); return; }
@@ -219,10 +228,10 @@ export function TripSettingsScreen({ navigation, route }: Props) {
                         {
                           text: label,
                           onPress: async () => {
-                            await tripService.setMemberRole(tripId, m.user_id, newRole);
-                            setMembers(members.map((x) =>
-                              x.user_id === m.user_id ? { ...x, role: newRole } : x
-                            ));
+                            const { error } = await tripService.setMemberRole(tripId, m.user_id, newRole);
+                            if (error) { Alert.alert('Error', error); return; }
+                            const { data: fresh } = await tripService.getTripMembers(tripId);
+                            if (fresh) setMembers(fresh);
                           },
                         },
                       ]);
