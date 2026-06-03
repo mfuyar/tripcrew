@@ -27,6 +27,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { chatService } from '../../services/chatService';
 import { mediaService } from '../../services/mediaService';
+import { familyService } from '../../services/familyService';
 import { demoMessages } from '../../lib/mockData';
 import { MessageBubble } from '../../components/MessageBubble';
 import { LoadingView } from '../../components/LoadingView';
@@ -58,6 +59,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   // Tracks whether the push-talk player has actually started playing (isPlaying went true)
   // so we can detect the true→false transition rather than relying on didJustFinish
   const pushTalkHasPlayedRef = useRef(false);
+  // Whether the current user opted in to receive push-talk audio auto-play.
+  // Defaults to true so users without a family record still hear messages.
+  const pushTalkEnabledRef = useRef(true);
 
   const loadMessages = useCallback(async () => {
     if (isDemoMode) {
@@ -68,7 +72,15 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     const { data } = await chatService.getMessages(tripId);
     setMessages(data ?? []);
     setLoading(false);
-  }, [tripId, isDemoMode]);
+
+    // Load the current user's push-talk opt-in status so we know whether
+    // to auto-play incoming audio. Re-read on every focus in case they toggled it.
+    if (user?.id && userFamily?.id) {
+      const { data: members } = await familyService.getFamilyMembers(userFamily.id);
+      const me = members?.find((m) => m.user_id === user.id);
+      if (me !== undefined) pushTalkEnabledRef.current = me.push_talk_enabled;
+    }
+  }, [tripId, isDemoMode, user?.id, userFamily?.id]);
 
   useEffect(() => {
     loadMessages();
@@ -81,7 +93,13 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         return [...prev, msg];
       });
 
-      if (msg.is_push_talk && msg.media_url && msg.user_id !== user?.id && !queuedPushTalkIdsRef.current.has(msg.id)) {
+      if (
+        msg.is_push_talk &&
+        msg.media_url &&
+        msg.user_id !== user?.id &&
+        pushTalkEnabledRef.current &&
+        !queuedPushTalkIdsRef.current.has(msg.id)
+      ) {
         queuedPushTalkIdsRef.current.add(msg.id);
         setPendingPushTalks((prev) => [...prev, { id: msg.id, url: msg.media_url! }]);
       }
