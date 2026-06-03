@@ -202,7 +202,21 @@ export function TripSettingsScreen({ navigation, route }: Props) {
 
       {/* Members */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trip Members ({members.length})</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, styles.sectionTitleInHeader]}>
+            Trip Members ({members.length})
+          </Text>
+          <TouchableOpacity
+            onPress={async () => {
+              if (isDemoMode) return;
+              const { data } = await tripService.getTripMembers(tripId);
+              if (data) setMembers(data);
+            }}
+            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+          >
+            <Text style={styles.refreshText}>↻ Refresh</Text>
+          </TouchableOpacity>
+        </View>
         {members.map((m) => {
           const isAdmin = m.role === 'trip_admin';
           const canPromote = isTripOrganizer && m.user_id !== user?.id && m.role !== 'trip_organizer';
@@ -296,6 +310,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   sectionTitleInHeader: { marginBottom: 0 },
+  refreshText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
   addFamilyText: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.primary },
   codeBox: {
     backgroundColor: Colors.primaryLight,
