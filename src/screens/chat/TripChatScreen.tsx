@@ -20,7 +20,6 @@ import {
   useAudioPlayerStatus,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
-  setIsAudioActiveAsync,
   RecordingPresets,
 } from 'expo-audio';
 import { RealtimeChannel } from '@supabase/supabase-js';
@@ -366,20 +365,19 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       }
 
       if (pushTalkStatus.playing || playingPushTalk) {
-        pushTalkPlayer.pause();
-        pushTalkPlayer.replace(null);
+        pushTalkPlayer.pause();   // don't call replace(null) — expo-audio rejects null AudioSource
         pushTalkHasPlayedRef.current = false;
         setPlayingPushTalk(null);
-        await wait(200);
+        await wait(150);
       }
 
-      await setIsAudioActiveAsync(true);
+      // setIsAudioActiveAsync can fail with "Session lookup failed" when the
+      // session is already in playback mode. setAudioModeAsync alone is enough.
       await setAudioModeAsync({
         allowsRecording: true,
         playsInSilentMode: true,
-        interruptionMode: 'doNotMix',
       });
-      await wait(250);
+      await wait(150);
 
       setPlayingPushTalk(null);
       await recorder.prepareToRecordAsync();
