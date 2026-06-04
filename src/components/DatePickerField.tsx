@@ -32,18 +32,20 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
 
   function handleChange(_: any, selected?: Date) {
     if (Platform.OS === 'android') setShow(false);
-    if (selected) formatAndSet(selected);
+    if (selected && !isNaN(selected.getTime())) formatAndSet(selected);
   }
 
   function handleValueChange(selected: Date | undefined) {
-    if (selected) formatAndSet(selected);
+    if (selected && !isNaN(selected.getTime())) formatAndSet(selected);
   }
 
   function formatAndSet(selected: Date) {
-    const y = selected.getFullYear();
-    const m = String(selected.getMonth() + 1).padStart(2, '0');
-    const d = String(selected.getDate()).padStart(2, '0');
-    onChange(`${y}-${m}-${d}`);
+    try {
+      const y = selected.getFullYear();
+      const m = String(selected.getMonth() + 1).padStart(2, '0');
+      const d = String(selected.getDate()).padStart(2, '0');
+      onChange(`${y}-${m}-${d}`);
+    } catch { /* ignore invalid date from picker boundary scroll */ }
   }
 
   // Fallback: simple text input when native module isn't linked
@@ -147,12 +149,16 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
     if (Platform.OS === 'android') { setShow(false); if (selected) formatTime(selected); }
   }
 
-  function handleValueChange(selected: Date | undefined) { if (selected) formatTime(selected); }
+  function handleValueChange(selected: Date | undefined) {
+    if (selected && !isNaN(selected.getTime())) formatTime(selected);
+  }
 
   function formatTime(selected: Date) {
-    const h = String(selected.getHours()).padStart(2, '0');
-    const m = String(selected.getMinutes()).padStart(2, '0');
-    onChange(`${h}:${m}`);
+    try {
+      const h = String(selected.getHours()).padStart(2, '0');
+      const m = String(selected.getMinutes()).padStart(2, '0');
+      onChange(`${h}:${m}`);
+    } catch { /* ignore invalid date */ }
   }
 
   // Fallback
