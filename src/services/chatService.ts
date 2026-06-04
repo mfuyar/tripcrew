@@ -107,12 +107,18 @@ export const chatService = {
 
   subscribeToMessages(
     tripId: string,
-    onMessage: (message: Message) => void
+    onMessage: (message: Message) => void,
+    onTyping?: (userId: string, name: string) => void
   ): RealtimeChannel {
     const channel = supabase
       .channel(`chat:${tripId}`)
       .on('broadcast', { event: 'new_message' }, ({ payload }) => {
         onMessage(payload as Message);
+      })
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (onTyping && payload?.userId && payload?.name) {
+          onTyping(payload.userId as string, payload.name as string);
+        }
       })
       .on(
         'postgres_changes',
@@ -179,8 +185,14 @@ export const chatService = {
   broadcastMessage(tripId: string, message: Message): void {
     const channel = activeChannels.get(tripId);
     if (channel) {
-      // Reuse the already-subscribed channel — never remove or recreate it.
       void channel.send({ type: 'broadcast', event: 'new_message', payload: message });
+    }
+  },
+
+  broadcastTyping(tripId: string, userId: string, name: string): void {
+    const channel = activeChannels.get(tripId);
+    if (channel) {
+      void channel.send({ type: 'broadcast', event: 'typing', payload: { userId, name } });
     }
   },
 

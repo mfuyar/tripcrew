@@ -37,7 +37,7 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 
 export function TripChatScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
-  const { user, isDemoMode } = useAuth();
+  const { user, profile, isDemoMode } = useAuth();
   const { userFamily } = useTripContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +50,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [updatingLiveAudio, setUpdatingLiveAudio] = useState(false);
   const [pendingPushTalks, setPendingPushTalks] = useState<{ id: string; url: string }[]>([]);
   const [playingPushTalk, setPlayingPushTalk] = useState<{ id: string; url: string } | null>(null);
+  const [typingUsers, setTypingUsers] = useState<Record<string, string>>({}); // userId → name
+  const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const typingBroadcastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder, 150);
   const pushTalkPlayer = useAudioPlayer(null, { updateInterval: 250 });
@@ -140,12 +143,26 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         msg.is_push_talk &&
         msg.media_url &&
         msg.user_id !== user?.id &&
+        (!msg.family_id || !userFamily?.id || msg.family_id === userFamily.id) &&
         pushTalkEnabledRef.current &&
         !queuedPushTalkIdsRef.current.has(msg.id)
       ) {
         queuedPushTalkIdsRef.current.add(msg.id);
         setPendingPushTalks((prev) => [...prev, { id: msg.id, url: msg.media_url! }]);
       }
+    }, (typingUserId, typingName) => {
+      // Ignore own typing events
+      if (typingUserId === user?.id) return;
+      setTypingUsers((prev) => ({ ...prev, [typingUserId]: typingName }));
+      // Clear after 3s of silence
+      clearTimeout(typingTimersRef.current[typingUserId]);
+      typingTimersRef.current[typingUserId] = setTimeout(() => {
+        setTypingUsers((prev) => {
+          const next = { ...prev };
+          delete next[typingUserId];
+          return next;
+        });
+      }, 3000);
     });
 
     return () => {
@@ -153,7 +170,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         chatService.unsubscribe(channelRef.current);
       }
     };
-  }, [tripId, loadMessages, isDemoMode, user?.id]);
+  }, [tripId, loadMessages, isDemoMode, user?.id, userFamily?.id]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -219,9 +236,12 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     if (!content || !user || sending) return;
     setText('');
     setSending(true);
-    const { data } = await chatService.sendMessage(tripId, user.id, content, userFamily?.id, 'text');
-    // Optimistic: add sender's own message immediately (broadcast echo handles other users)
-    if (data) {
+    const { data, error } = await chatService.sendMessage(tripId, user.id, content, userFamily?.id, 'text');
+    if (error || !data) {
+      setText(content);
+      Alert.alert('Message failed', error ?? 'Unable to send this message.');
+    } else {
+      // Optimistic: add sender's own message immediately (realtime echo handles other users)
       setMessages((prev) => prev.some((m) => m.id === data.id) ? prev : [...prev, data]);
     }
     setSending(false);
@@ -310,7 +330,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       return;
     }
 
-    await chatService.sendMessage(
+    const { data: message, error: messageError } = await chatService.sendMessage(
       tripId,
       user.id,
       '',
@@ -319,6 +339,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       data.url,
       data.mime_type
     );
+    if (messageError || !message) {
+      Alert.alert('Message failed', messageError ?? 'Unable to send photo message.');
+    } else {
+      setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
+    }
     uploadingRef.current = false; setUploadingMedia(false);
   }
 
@@ -354,11 +379,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         playsInSilentMode: true,
         interruptionMode: 'doNotMix',
       });
-      await wait(100);
+      await wait(250);
 
       setPlayingPushTalk(null);
       await recorder.prepareToRecordAsync();
-      recorder.record();
+      recorder.record({ forDuration: 60 });
       recordingStartedAtRef.current = Date.now();
       recordingRef.current = true;
       setRecordingInProgress(true);
@@ -368,6 +393,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     } catch (e: any) {
       resetRecordingState();
       showRecordingError(e?.message);
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
     } finally {
       startingRecordingRef.current = false;
     }
@@ -532,6 +558,13 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
           </Text>
         </Pressable>
       </View>
+      {Object.keys(typingUsers).length > 0 && (
+        <View style={styles.typingBar}>
+          <Text style={styles.typingText}>
+            {Object.values(typingUsers).join(', ')} {Object.keys(typingUsers).length === 1 ? 'is' : 'are'} typing…
+          </Text>
+        </View>
+      )}
       <View style={styles.inputBar}>
         {editingMessage ? (
           <TouchableOpacity
@@ -545,7 +578,17 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         <TextInput
           style={styles.input}
           value={text}
-          onChangeText={setText}
+          onChangeText={(t) => {
+            setText(t);
+            // Throttle typing broadcasts to once per second
+            if (typingBroadcastRef.current) return;
+            typingBroadcastRef.current = setTimeout(() => {
+              typingBroadcastRef.current = null;
+            }, 1000);
+            if (t.length > 0 && user) {
+              chatService.broadcastTyping(tripId, user.id, profile?.full_name ?? 'Someone');
+            }
+          }}
           placeholder={editingMessage ? 'Edit message...' : 'Type a message...'}
           placeholderTextColor={Colors.textSecondary}
           multiline
@@ -575,6 +618,16 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
   emptyIcon: { fontSize: 48, marginBottom: Spacing.md },
   emptyText: { fontSize: FontSize.md, color: Colors.textSecondary },
+  typingBar: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
+    backgroundColor: Colors.surface,
+  },
+  typingText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    fontStyle: 'italic',
+  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
