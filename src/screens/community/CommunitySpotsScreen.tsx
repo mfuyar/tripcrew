@@ -19,7 +19,6 @@ import { useTripContext } from '../../contexts/TripContext';
 import { communitySpotService } from '../../services/communitySpotService';
 import { addressSearchService } from '../../services/addressSearchService';
 import { LoadingView } from '../../components/LoadingView';
-import { EmptyState } from '../../components/EmptyState';
 import { AppButton } from '../../components/AppButton';
 import { Colors, FontSize, FontWeight, Radius, Shadow, Spacing } from '../../constants/theme';
 
@@ -59,7 +58,7 @@ export function CommunitySpotsScreen({ route }: Props) {
   const navigation = useNavigation<Nav>();
   const { tripId, startDate } = route.params ?? {};
   const { user } = useAuth();
-  const { currentTrip } = useTripContext();
+  const { currentTrip, canManageTrip } = useTripContext();
   const [spots, setSpots] = useState<CommunitySpot[]>([]);
   const [guideSummary, setGuideSummary] = useState('');
   const [showingGemini, setShowingGemini] = useState(false);
@@ -68,6 +67,9 @@ export function CommunitySpotsScreen({ route }: Props) {
   const [lookingAround, setLookingAround] = useState(false);
   const [commentText, setCommentText] = useState<Record<string, string>>({});
   const [commenting, setCommenting] = useState<string | null>(null);
+  // commentId → draft text while editing
+  const [editingComment, setEditingComment] = useState<Record<string, string>>({});
+  const [savingComment, setSavingComment] = useState<string | null>(null);
 
   const loadRecent = useCallback(async () => {
     const { data, error } = await communitySpotService.getRecent(user?.id);
@@ -153,11 +155,15 @@ export function CommunitySpotsScreen({ route }: Props) {
 
     let nearby = data ?? [];
     let usingGemini = false;
+    let geminiError: string | null = null;
     if (nearby.length === 0) {
       const gemini = await communitySpotService.getGeminiFavorites(latitude, longitude, 10);
-      // Silently fall back if Gemini is unavailable — no error shown to user
-      nearby = gemini.data ?? [];
-      usingGemini = true;
+      if (gemini.data && gemini.data.length > 0) {
+        nearby = gemini.data;
+        usingGemini = true;
+      } else {
+        geminiError = gemini.error;
+      }
     }
 
     setLookingAround(false);
@@ -166,6 +172,8 @@ export function CommunitySpotsScreen({ route }: Props) {
     setGuideSummary(
       usingGemini
         ? `No community posts were found near ${lookupLocation.label} yet. Gemini suggested these favorite places:\n${communitySpotService.summarizeNearbySpots(nearby)}`
+        : geminiError
+          ? `No community posts were found near ${lookupLocation.label} yet. Gemini could not load suggestions right now: ${geminiError}`
         : `${lookupLocation.isFallback ? `Using ${lookupLocation.label} because live location was unavailable.\n` : ''}${communitySpotService.summarizeNearbySpots(nearby)}`
     );
   }
@@ -214,6 +222,22 @@ export function CommunitySpotsScreen({ route }: Props) {
           }
         : item
     )));
+  }
+
+  async function handleSaveEditComment(spotId: string, commentId: string) {
+    const draft = editingComment[commentId]?.trim();
+    if (!draft) return;
+    setSavingComment(commentId);
+    const { data, error } = await communitySpotService.updateComment(commentId, draft);
+    setSavingComment(null);
+    if (error) { Alert.alert('Unable to update comment', error); return; }
+    setEditingComment((prev) => { const next = { ...prev }; delete next[commentId]; return next; });
+    setSpots((prev) => prev.map((item) =>
+      item.id !== spotId ? item : {
+        ...item,
+        comments: (item.comments ?? []).map((c) => c.id === commentId ? data! : c),
+      }
+    ));
   }
 
   function handleAddToItinerary(spot: CommunitySpot) {
@@ -266,13 +290,27 @@ export function CommunitySpotsScreen({ route }: Props) {
           </View>
         ) : null}
         ListEmptyComponent={
-          <EmptyState
-            icon="📍"
-            title="No community spots yet"
-            subtitle="Share a local favorite, hidden gem, food stop, or viewpoint for other travelers."
-            actionLabel="Post Spot"
-            onAction={() => navigation.navigate('CreateCommunitySpot', { tripId })}
-          />
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>📍</Text>
+            <Text style={styles.emptyTitle}>No community spots yet</Text>
+            <Text style={styles.emptySubtitle}>
+              Find nearby favorites with Gemini or share the first local spot for other travelers.
+            </Text>
+            <View style={styles.emptyActions}>
+              <AppButton
+                title="Find with Gemini"
+                onPress={handleLookAround}
+                loading={lookingAround}
+                style={styles.emptyButton}
+              />
+              <AppButton
+                title="Post Spot"
+                onPress={() => navigation.navigate('CreateCommunitySpot', { tripId })}
+                variant="outline"
+                style={styles.emptyButton}
+              />
+            </View>
+          </View>
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
@@ -312,12 +350,51 @@ export function CommunitySpotsScreen({ route }: Props) {
                 />
               ) : null}
 
-              {item.source !== 'gemini' && (item.comments ?? []).slice(0, 2).map((comment) => (
-                <View key={comment.id} style={styles.comment}>
-                  <Text style={styles.commentAuthor}>{publicName(comment.author?.full_name)}</Text>
-                  <Text style={styles.commentText}>{comment.content}</Text>
-                </View>
-              ))}
+              {item.source !== 'gemini' && (item.comments ?? []).slice(0, 2).map((comment) => {
+                const isEditing = comment.id in editingComment;
+                const canEdit = comment.user_id === user?.id || canManageTrip;
+                return (
+                  <View key={comment.id} style={styles.comment}>
+                    <View style={styles.commentHeader}>
+                      <Text style={styles.commentAuthor}>{publicName(comment.author?.full_name)}</Text>
+                      {canEdit && !isEditing && (
+                        <TouchableOpacity
+                          hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+                          onPress={() => setEditingComment((prev) => ({ ...prev, [comment.id]: comment.content }))}
+                        >
+                          <Text style={styles.commentEditLink}>Edit</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    {isEditing ? (
+                      <View style={styles.commentRow}>
+                        <TextInput
+                          style={[styles.commentInput, { flex: 1 }]}
+                          value={editingComment[comment.id]}
+                          onChangeText={(v) => setEditingComment((prev) => ({ ...prev, [comment.id]: v }))}
+                          autoFocus
+                          multiline
+                        />
+                        <TouchableOpacity
+                          style={[styles.commentButton, savingComment === comment.id && styles.commentButtonDisabled]}
+                          onPress={() => handleSaveEditComment(item.id, comment.id)}
+                          disabled={savingComment === comment.id}
+                        >
+                          <Text style={styles.commentButtonText}>{savingComment === comment.id ? '...' : 'Save'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.commentCancelBtn}
+                          onPress={() => setEditingComment((prev) => { const n = { ...prev }; delete n[comment.id]; return n; })}
+                        >
+                          <Text style={styles.commentCancelText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <Text style={styles.commentText}>{comment.content}</Text>
+                    )}
+                  </View>
+                );
+              })}
 
               {item.source !== 'gemini' ? (
                 <View style={styles.commentRow}>
@@ -367,6 +444,37 @@ const styles = StyleSheet.create({
   },
   guideTitle: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.primary, marginBottom: Spacing.xs },
   guideText: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 20 },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+  },
+  emptyIcon: {
+    fontSize: 56,
+    marginBottom: Spacing.md,
+  },
+  emptyTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.bold,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: Spacing.sm,
+  },
+  emptySubtitle: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: Spacing.lg,
+  },
+  emptyActions: {
+    width: '100%',
+    gap: Spacing.sm,
+  },
+  emptyButton: {
+    width: '100%',
+  },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
@@ -422,4 +530,12 @@ const styles = StyleSheet.create({
   },
   commentButtonDisabled: { opacity: 0.5 },
   commentButtonText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
+  commentHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  commentEditLink: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  commentCancelBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  commentCancelText: { fontSize: 12, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
 });

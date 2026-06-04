@@ -552,6 +552,11 @@ CREATE POLICY "Users can create their own community spot comments"
   ON community_spot_comments FOR INSERT
   WITH CHECK (user_id = auth.uid());
 
+CREATE POLICY "Users can update their own community spot comments"
+  ON community_spot_comments FOR UPDATE
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
 CREATE POLICY "Users can delete their own community spot comments"
   ON community_spot_comments FOR DELETE
   USING (user_id = auth.uid());

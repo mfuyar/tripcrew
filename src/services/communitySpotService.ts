@@ -23,7 +23,9 @@ const BAD_LANGUAGE_PATTERNS = [
 ];
 
 function getGeminiApiKey(): string | undefined {
-  return process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const key = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  if (!key || key.startsWith('your_') || key === 'your_gemini_api_key_here') return undefined;
+  return key;
 }
 
 function getGeminiModel(): string {
@@ -131,9 +133,10 @@ async function moderatePhoto(file: File): Promise<ModerationDecision> {
               {
                 text: [
                   'Moderate this user-submitted travel spot photo.',
-                  'Return only JSON: {"adult": boolean, "unsafe": boolean, "reason": string}.',
+                  'Return only JSON: {"adult": boolean, "unsafe": boolean, "uncertain": boolean, "reason": string}.',
                   'adult should be true for nudity, sexual content, explicit poses, pornography, or clearly +18 imagery.',
                   'unsafe should be true for graphic violence or hateful symbols.',
+                  'uncertain should be true only when the image might be unsafe but is not clear enough to reject directly.',
                 ].join('\n'),
               },
               { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
@@ -157,8 +160,14 @@ async function moderatePhoto(file: File): Promise<ModerationDecision> {
     const result = parseGeminiJsonObject(extractGeminiText(await response.json()));
     if (result.adult || result.unsafe) {
       return {
+        status: 'rejected',
+        reason: String(result.reason || 'Photo contains content that cannot be posted.'),
+      };
+    }
+    if (result.uncertain) {
+      return {
         status: 'pending_review',
-        reason: String(result.reason || 'Photo may contain +18 or unsafe content.'),
+        reason: String(result.reason || 'Photo needs manual review.'),
       };
     }
     return { status: 'approved' };
@@ -173,8 +182,8 @@ async function moderatePhoto(file: File): Promise<ModerationDecision> {
 async function moderateSpotInput(input: CommunitySpotInput, photoFile?: File): Promise<ModerationDecision> {
   if (containsBadLanguage(input.name, input.description, input.address)) {
     return {
-      status: 'pending_review',
-      reason: 'Text may contain bad language.',
+      status: 'rejected',
+      reason: 'This spot cannot be posted.',
     };
   }
   if (!photoFile) return { status: 'approved' };
@@ -291,6 +300,9 @@ export const communitySpotService = {
     }
 
     const moderation = await moderateSpotInput(input, photoFile ?? undefined);
+    if (moderation.status === 'rejected') {
+      return { data: null, error: moderation.reason ?? 'This spot cannot be posted.' };
+    }
 
     if (photoFile) {
       const upload = await uploadPreparedSpotPhoto(userId, photoFile);
@@ -381,11 +393,25 @@ export const communitySpotService = {
 
   async addComment(spotId: string, userId: string, content: string): Promise<ServiceResult<CommunitySpotComment>> {
     if (containsBadLanguage(content)) {
-      return { data: null, error: 'Comment needs review because it may contain bad language.' };
+      return { data: null, error: 'This comment cannot be posted.' };
     }
     const { data, error } = await supabase
       .from('community_spot_comments')
       .insert({ spot_id: spotId, user_id: userId, content })
+      .select('*, author:profiles(*)')
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as CommunitySpotComment, error: null };
+  },
+
+  async updateComment(commentId: string, content: string): Promise<ServiceResult<CommunitySpotComment>> {
+    const trimmed = content.trim();
+    if (!trimmed) return { data: null, error: 'Comment cannot be empty.' };
+    if (containsBadLanguage(trimmed)) return { data: null, error: 'This comment cannot be posted.' };
+    const { data, error } = await supabase
+      .from('community_spot_comments')
+      .update({ content: trimmed })
+      .eq('id', commentId)
       .select('*, author:profiles(*)')
       .single();
     if (error) return { data: null, error: error.message };
