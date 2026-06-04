@@ -46,7 +46,6 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [recordingInProgress, setRecordingInProgress] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [liveAudioEnabled, setLiveAudioEnabled] = useState(false);
-  const [updatingLiveAudio, setUpdatingLiveAudio] = useState(false);
   const [playingPushTalk, setPlayingPushTalk] = useState<{ id: string; url: string } | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({}); // userId → name
   const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -298,23 +297,22 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     setText('');
   }
 
-  async function handleSetLiveAudio(enabled: boolean) {
-    if (enabled === liveAudioEnabled || updatingLiveAudio) return;
+  function handleSetLiveAudio(enabled: boolean) {
+    if (enabled === liveAudioEnabled) return;
+    // Optimistic: update UI immediately — no loading state shown
     setLiveAudioEnabled(enabled);
     pushTalkEnabledRef.current = enabled;
     if (enabled) playNextQueuedPushTalk();
 
+    // Sync to DB in background — revert only on failure
     if (isDemoMode || !pushTalkMemberIdRef.current) return;
-
-    setUpdatingLiveAudio(true);
-    const { error } = await familyService.updateFamilyMemberPushTalk(pushTalkMemberIdRef.current, enabled);
-    setUpdatingLiveAudio(false);
-
-    if (error) {
-      setLiveAudioEnabled(!enabled);
-      pushTalkEnabledRef.current = !enabled;
-      Alert.alert('Audio mode failed', error);
-    }
+    familyService.updateFamilyMemberPushTalk(pushTalkMemberIdRef.current, enabled)
+      .then(({ error }) => {
+        if (error) {
+          setLiveAudioEnabled(!enabled);
+          pushTalkEnabledRef.current = !enabled;
+        }
+      });
   }
 
   async function handlePickPhoto() {
@@ -520,33 +518,23 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       />
       <View style={styles.listenModeBar}>
         <Pressable
-          style={[
-            styles.listenModeOption,
-            liveAudioEnabled && styles.listenModeOptionActive,
-            updatingLiveAudio && styles.attachmentButtonDisabled,
-          ]}
+          style={[styles.listenModeOption, liveAudioEnabled && styles.listenModeOptionActive]}
           onPress={() => handleSetLiveAudio(true)}
-          disabled={updatingLiveAudio}
           accessibilityRole="button"
           accessibilityLabel="Live audio"
         >
           <Text style={[styles.listenModeText, liveAudioEnabled && styles.listenModeTextActive]}>
-            Live Audio
+            🔔 Live Audio
           </Text>
         </Pressable>
         <Pressable
-          style={[
-            styles.listenModeOption,
-            !liveAudioEnabled && styles.listenModeOptionActive,
-            updatingLiveAudio && styles.attachmentButtonDisabled,
-          ]}
+          style={[styles.listenModeOption, !liveAudioEnabled && styles.listenModeOptionActive]}
           onPress={() => handleSetLiveAudio(false)}
-          disabled={updatingLiveAudio}
           accessibilityRole="button"
           accessibilityLabel="Play button"
         >
           <Text style={[styles.listenModeText, !liveAudioEnabled && styles.listenModeTextActive]}>
-            Play Button
+            ▶ Manual
           </Text>
         </Pressable>
       </View>
