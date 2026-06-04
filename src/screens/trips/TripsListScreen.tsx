@@ -218,8 +218,29 @@ export function TripsListScreen() {
                     {new Date(req.requested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </Text>
                 </View>
-                <View style={styles.requestStatusBadge}>
-                  <Text style={styles.requestStatusText}>Pending review</Text>
+                <View style={styles.requestActions}>
+                  <View style={styles.requestStatusBadge}>
+                    <Text style={styles.requestStatusText}>Pending</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert('Withdraw Request', 'Cancel your request to join this trip?', [
+                        { text: 'Keep', style: 'cancel' },
+                        {
+                          text: 'Withdraw',
+                          style: 'destructive',
+                          onPress: async () => {
+                            const { error } = await tripService.cancelJoinRequest(req.id);
+                            if (error) Alert.alert('Error', error);
+                            else setMyRequests((prev) => prev.filter((r) => r.id !== req.id));
+                          },
+                        },
+                      ])
+                    }
+                    hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                  >
+                    <Text style={styles.withdrawBtn}>Withdraw</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ))}
@@ -360,11 +381,13 @@ const styles = StyleSheet.create({
   },
   requestTripName: { fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text },
   requestMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  requestActions: { alignItems: 'flex-end', gap: 4 },
   requestStatusBadge: {
     backgroundColor: Colors.warning + '20', borderRadius: Radius.sm,
     paddingHorizontal: Spacing.sm, paddingVertical: 3,
   },
   requestStatusText: { fontSize: 11, color: Colors.warning, fontWeight: FontWeight.semiBold },
+  withdrawBtn: { fontSize: 11, color: Colors.danger, fontWeight: FontWeight.semiBold },
   tripCard: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,

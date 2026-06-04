@@ -187,6 +187,14 @@ export const tripService = {
     return { data: data as TripJoinRequest[], error: null };
   },
 
+  async cancelJoinRequest(requestId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('trip_join_requests')
+      .update({ status: 'cancelled' })
+      .eq('id', requestId);
+    return { data: null, error: error?.message ?? null };
+  },
+
   async getPendingJoinRequests(tripId: string): Promise<ServiceResult<TripJoinRequest[]>> {
     const { data, error } = await supabase
       .from('trip_join_requests')

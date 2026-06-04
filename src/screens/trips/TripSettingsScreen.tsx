@@ -53,8 +53,9 @@ export function TripSettingsScreen({ navigation, route }: Props) {
                  (m.role === 'trip_organizer' || m.role === 'trip_admin')
         );
         if (isManager || isGlobalAdmin) {
-          tripService.getPendingJoinRequests(tripId).then(({ data }) => {
-            if (data) setJoinRequests(data);
+          tripService.getPendingJoinRequests(tripId).then(({ data, error }) => {
+            if (error) Alert.alert('Join requests error', error);
+            setJoinRequests(data ?? []);
           });
         }
       }
