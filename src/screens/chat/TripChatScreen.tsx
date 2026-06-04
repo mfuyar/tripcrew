@@ -26,7 +26,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { Message } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
-import { chatService } from '../../services/chatService';
+import { chatService, setActiveChatTrip } from '../../services/chatService';
 import { mediaService } from '../../services/mediaService';
 import { familyService } from '../../services/familyService';
 import { demoMessages } from '../../lib/mockData';
@@ -124,6 +124,12 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       setLiveAudioEnabled(false);
     }
   }, [tripId, isDemoMode, user?.id, userFamily?.id]);
+
+  // Tell background player the chat screen is active so it skips auto-play
+  useEffect(() => {
+    setActiveChatTrip(tripId);
+    return () => setActiveChatTrip(null);
+  }, [tripId]);
 
   useEffect(() => {
     loadMessages();

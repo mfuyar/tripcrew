@@ -9,6 +9,12 @@ import { mediaService } from './mediaService';
 // remove the subscriber's channel by accident.
 const activeChannels = new Map<string, RealtimeChannel>();
 
+// Set by TripChatScreen on mount/unmount so background audio player
+// knows whether the chat screen is already handling push-talk playback.
+let _activeChatTripId: string | null = null;
+export function setActiveChatTrip(id: string | null) { _activeChatTripId = id; }
+export function getActiveChatTrip() { return _activeChatTripId; }
+
 export const chatService = {
   async getMessages(
     tripId: string,
@@ -68,7 +74,7 @@ export const chatService = {
 
     if (isPushTalk) {
       // Push talk: notify only opted-in family members
-      chatService.notifyPushTalkReceivers(tripId, userId, familyId);
+      chatService.notifyPushTalkReceivers(tripId, userId, familyId, mediaUrl);
     } else {
       // Regular message: notify all other trip members
       const preview = content.length > 60 ? content.slice(0, 57) + '…' : content;
@@ -138,7 +144,8 @@ export const chatService = {
   async notifyPushTalkReceivers(
     tripId: string,
     senderId: string,
-    familyId?: string
+    familyId?: string,
+    mediaUrl?: string
   ): Promise<void> {
     // Get family members who have push_talk_enabled
     if (!familyId) return;
@@ -158,7 +165,7 @@ export const chatService = {
       type: 'push_talk',
       title: '🎙️ Push Talk',
       body: 'A voice message was sent to your family',
-      data: { trip_id: tripId, family_id: familyId },
+      data: { trip_id: tripId, family_id: familyId, media_url: mediaUrl ?? null },
       is_read: false,
     }));
 

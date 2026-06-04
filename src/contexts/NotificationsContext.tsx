@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { useAudioPlayer } from 'expo-audio';
 import { Notification, ServiceResult } from '../types';
 import { notificationService } from '../services/notificationService';
+import { getActiveChatTrip } from '../services/chatService';
 import { useAuth } from './AuthContext';
 import { NOTIFICATION_SOUND } from '../constants/notifications';
 
@@ -33,11 +35,38 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   notificationsEnabled: false,
 });
 
+function BackgroundPushTalkPlayer({ url, onDone }: { url: string; onDone: () => void }) {
+  const player = useAudioPlayer(url, { updateInterval: 250 });
+
+  useEffect(() => {
+    let canceled = false;
+    async function play() {
+      try {
+        // Import setAudioModeAsync lazily to avoid circular deps
+        const { setAudioModeAsync } = await import('expo-audio');
+        await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+        if (!canceled) player.play();
+      } catch {
+        onDone();
+      }
+    }
+    play();
+    return () => { canceled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (player.currentStatus?.didJustFinish ?? false) onDone();
+  });
+
+  return null;
+}
+
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const { user, isDemoMode } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [pushTokenError, setPushTokenError] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [bgPushTalkUrl, setBgPushTalkUrl] = useState<string | null>(null);
 
   // Check current permission status on mount and after enabling
   const checkPermission = useCallback(async () => {
@@ -114,6 +143,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const unsub = notificationService.subscribeToNotifications(user.id, (n: Notification) => {
       setUnreadCount((c) => c + 1);
       void showLocalNotification(n);
+      // Background push-talk: play audio when user is NOT on the chat screen
+      if (
+        n.type === 'push_talk' &&
+        (n.data as any)?.media_url &&
+        getActiveChatTrip() !== (n.data as any)?.trip_id
+      ) {
+        setBgPushTalkUrl((n.data as any).media_url as string);
+      }
     });
     const receivedSub = Notifications.addNotificationReceivedListener((event) => {
       if (event.request.content.data?.source === LOCAL_NOTIFICATION_SOURCE) return;
@@ -128,6 +165,12 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   return (
     <NotificationsContext.Provider value={{ unreadCount, refreshUnread, enablePushNotifications, pushTokenError, notificationsEnabled }}>
       {children}
+      {bgPushTalkUrl && (
+        <BackgroundPushTalkPlayer
+          url={bgPushTalkUrl}
+          onDone={() => setBgPushTalkUrl(null)}
+        />
+      )}
     </NotificationsContext.Provider>
   );
 }
