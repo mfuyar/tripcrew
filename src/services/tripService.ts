@@ -198,7 +198,7 @@ export const tripService = {
   async getPendingJoinRequests(tripId: string): Promise<ServiceResult<TripJoinRequest[]>> {
     const { data, error } = await supabase
       .from('trip_join_requests')
-      .select('*, profile:profiles(*)')
+      .select('*, profile:profiles!user_id(*)')
       .eq('trip_id', tripId)
       .eq('status', 'pending')
       .order('requested_at', { ascending: true });
