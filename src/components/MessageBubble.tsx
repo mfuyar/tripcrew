@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Alert, Image, Text, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Message } from '../types';
@@ -23,9 +23,13 @@ function AudioMessageContent({ message, isOwn }: Props) {
   const status = useAudioPlayerStatus(player);
   const duration = formatDuration(message.duration_seconds ?? status.duration);
 
-  async function handleTogglePlayback() {
+  // Set audio mode once on mount — doing it on every tap adds 100–200ms latency
+  useEffect(() => {
+    setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+  }, []);
+
+  function handleTogglePlayback() {
     try {
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
       if (status.playing) {
         player.pause();
         return;

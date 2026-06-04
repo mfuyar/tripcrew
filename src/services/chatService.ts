@@ -5,6 +5,10 @@ import { notificationService } from './notificationService';
 import { sendBroadcast } from '../lib/realtimeBroadcast';
 import { mediaService } from './mediaService';
 
+// Keyed by tripId — reused for both receiving and sending so we never
+// remove the subscriber's channel by accident.
+const activeChannels = new Map<string, RealtimeChannel>();
+
 export const chatService = {
   async getMessages(
     tripId: string,
@@ -105,7 +109,6 @@ export const chatService = {
     tripId: string,
     onMessage: (message: Message) => void
   ): RealtimeChannel {
-    // Use Broadcast — doesn't require REPLICA IDENTITY or JWT for RLS
     const channel = supabase
       .channel(`chat:${tripId}`)
       .on('broadcast', { event: 'new_message' }, ({ payload }) => {
@@ -113,12 +116,7 @@ export const chatService = {
       })
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'messages',
-          filter: `trip_id=eq.${tripId}`,
-        },
+        { event: '*', schema: 'public', table: 'messages', filter: `trip_id=eq.${tripId}` },
         async ({ new: newRecord }) => {
           const messageId = (newRecord as { id?: string } | null)?.id;
           if (!messageId) return;
@@ -127,6 +125,7 @@ export const chatService = {
         }
       )
       .subscribe();
+    activeChannels.set(tripId, channel);
     return channel;
   },
 
@@ -178,20 +177,17 @@ export const chatService = {
   },
 
   broadcastMessage(tripId: string, message: Message): void {
-    // channel.send() on an unsubscribed channel silently drops in v2.46.
-    // Subscribe first so the WebSocket is JOINED, then send and tear down.
-    const channel = supabase
-      .channel(`chat:${tripId}`)
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void channel
-            .send({ type: 'broadcast', event: 'new_message', payload: message })
-            .finally(() => supabase.removeChannel(channel));
-        }
-      });
+    const channel = activeChannels.get(tripId);
+    if (channel) {
+      // Reuse the already-subscribed channel — never remove or recreate it.
+      void channel.send({ type: 'broadcast', event: 'new_message', payload: message });
+    }
   },
 
   unsubscribe(channel: RealtimeChannel): void {
+    for (const [tripId, ch] of activeChannels.entries()) {
+      if (ch === channel) { activeChannels.delete(tripId); break; }
+    }
     supabase.removeChannel(channel);
   },
 };
