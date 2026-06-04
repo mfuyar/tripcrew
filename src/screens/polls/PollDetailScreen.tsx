@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, Poll } from '../../types';
@@ -16,12 +16,11 @@ type Props = NativeStackScreenProps<MainStackParamList, 'PollDetail'>;
 
 export function PollDetailScreen({ navigation, route }: Props) {
   const { tripId, pollId } = route.params;
-  const { user, isDemoMode } = useAuth();
-  const { userFamily, canManageTrip } = useTripContext();
+  const { user, isDemoMode, isGlobalAdmin } = useAuth();
+  const { userFamily, isTripOrganizer } = useTripContext();
   const [poll, setPoll] = useState<Poll | null>(null);
   const [loading, setLoading] = useState(true);
   const [voting, setVoting] = useState<string | null>(null);
-  const [togglingMultiple, setTogglingMultiple] = useState(false);
 
   async function load() {
     if (isDemoMode) { setLoading(false); return; }
@@ -52,12 +51,15 @@ export function PollDetailScreen({ navigation, route }: Props) {
     else if (data) setPoll(data);
   }
 
-  async function handleToggleMultiple(value: boolean) {
-    if (!poll || isDemoMode) return;
-    setTogglingMultiple(true);
-    const { data } = await pollService.updatePollSettings(pollId, { allow_multiple: value });
-    if (data) setPoll({ ...poll, allow_multiple: value });
-    setTogglingMultiple(false);
+  function timeLeft(deadline?: string): string | null {
+    if (!deadline) return null;
+    const ms = new Date(deadline).getTime() - Date.now();
+    if (ms <= 0) return 'Ended';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    if (h >= 24) return `${Math.floor(h / 24)}d left`;
+    if (h > 0) return `${h}h ${m}m left`;
+    return `${m}m left`;
   }
 
   async function handleClose() {
@@ -88,7 +90,8 @@ export function PollDetailScreen({ navigation, route }: Props) {
   if (loading) return <LoadingView />;
   if (!poll) return null;
 
-  const canManagePoll = canManageTrip || poll.created_by === user?.id;
+  // Only poll creator, trip organizer, or global admin can close/delete
+  const canManagePoll = poll.created_by === user?.id || isTripOrganizer || isGlobalAdmin;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -98,14 +101,13 @@ export function PollDetailScreen({ navigation, route }: Props) {
         <Text style={styles.question}>{poll.question}</Text>
         {poll.description ? <Text style={styles.desc}>{poll.description}</Text> : null}
         <Text style={styles.meta}>{totalVotes} total vote{totalVotes !== 1 ? 's' : ''}</Text>
-        {!poll.allow_multiple && userVotedOption && poll.status === 'active' && (
+        {userVotedOption && poll.status === 'active' && (
           <Text style={styles.changeHint}>Tap another option to change your vote</Text>
         )}
-        {poll.allow_multiple && poll.status === 'active' && (
-          <Text style={styles.changeHint}>You count once per option. Tap a selected option again to remove it.</Text>
-        )}
         {poll.deadline && (
-          <Text style={styles.deadline}>Deadline: {new Date(poll.deadline).toLocaleDateString()}</Text>
+          <Text style={[styles.deadline, timeLeft(poll.deadline) === 'Ended' && styles.deadlineEnded]}>
+            ⏱ {timeLeft(poll.deadline) ?? ''}
+          </Text>
         )}
       </View>
 
@@ -143,41 +145,23 @@ export function PollDetailScreen({ navigation, route }: Props) {
         <View style={styles.creatorCard}>
           <Text style={styles.creatorTitle}>Poll Controls</Text>
           {poll.status === 'active' ? (
-            <>
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <Text style={styles.settingLabel}>Allow multiple choices</Text>
-                  <Text style={styles.settingDesc}>Members can select more than one option</Text>
-                </View>
-                <Switch
-                  value={poll.allow_multiple}
-                  onValueChange={handleToggleMultiple}
-                  disabled={togglingMultiple}
-                  trackColor={{ false: Colors.border, true: Colors.primary }}
-                  thumbColor={Colors.surface}
-                />
-              </View>
-              <AppButton
-                title="Close Poll"
-                onPress={handleClose}
-                variant="outline"
-                fullWidth
-                style={{ marginTop: Spacing.sm }}
-              />
-            </>
+            <AppButton
+              title="Close Poll"
+              onPress={handleClose}
+              variant="outline"
+              fullWidth
+            />
           ) : (
             <Text style={styles.settingDesc}>This poll is closed.</Text>
           )}
-          {canManageTrip ? (
-            <View style={styles.deleteWrap}>
-              <AppButton
-                title="Delete Poll"
-                onPress={handleDelete}
-                variant="danger"
-                fullWidth
-              />
-            </View>
-          ) : null}
+          <View style={styles.deleteWrap}>
+            <AppButton
+              title="Delete Poll"
+              onPress={handleDelete}
+              variant="danger"
+              fullWidth
+            />
+          </View>
         </View>
       )}
     </ScrollView>
@@ -191,7 +175,8 @@ const styles = StyleSheet.create({
   question: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.text },
   desc: { fontSize: FontSize.md, color: Colors.textSecondary },
   meta: { fontSize: FontSize.sm, color: Colors.textSecondary },
-  deadline: { fontSize: FontSize.sm, color: Colors.warning },
+  deadline: { fontSize: FontSize.sm, color: Colors.warning, fontWeight: FontWeight.semiBold },
+  deadlineEnded: { color: Colors.textSecondary },
   options: { gap: Spacing.sm },
   optionCard: { backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, borderWidth: 2, borderColor: 'transparent', ...Shadow.sm },
   optionCardVoted: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
