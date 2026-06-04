@@ -22,8 +22,9 @@ const PRIORITY_COLORS: Record<AnnouncementPriority, string> = {
 
 export function AnnouncementsScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
-  const { user, isDemoMode } = useAuth();
+  const { user, isDemoMode, isGlobalAdmin } = useAuth();
   const { canManageAnnouncements, members } = useTripContext();
+  const canManage = canManageAnnouncements || isGlobalAdmin;
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -116,12 +117,12 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
         }
         ListHeaderComponent={(
           <>
-            {canManageAnnouncements && (
+            {canManage && (
               <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)}>
                 <Text style={styles.addBtnText}>📢 Post Announcement</Text>
               </TouchableOpacity>
             )}
-            {canManageAnnouncements && (
+            {canManage && (
               <TouchableOpacity
                 style={styles.archivedToggle}
                 onPress={() => {
@@ -134,7 +135,7 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
                 </Text>
               </TouchableOpacity>
             )}
-            {showArchived && canManageAnnouncements && (
+            {showArchived && canManage && (
               <View style={styles.archivedSection}>
                 <Text style={styles.archivedTitle}>📦 Archived Announcements</Text>
                 {loadingArchived ? (
@@ -178,7 +179,7 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
                   {item.title}
                 </Text>
                 {!isRead && <View style={styles.unreadDot} />}
-                {canManageAnnouncements && (
+                {canManage && (
                   <TouchableOpacity
                     hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                     onPress={() =>
