@@ -93,6 +93,25 @@ export const announcementService = {
     return { data: null, error: error?.message ?? null };
   },
 
+  async unarchive(announcementId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('announcements')
+      .update({ is_archived: false })
+      .eq('id', announcementId);
+    return { data: null, error: error?.message ?? null };
+  },
+
+  async getArchived(tripId: string): Promise<ServiceResult<Announcement[]>> {
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('*, creator:profiles(*), reads:announcement_reads(*)')
+      .eq('trip_id', tripId)
+      .eq('is_archived', true)
+      .order('created_at', { ascending: false });
+    if (error) return { data: null, error: error.message };
+    return { data: data as Announcement[], error: null };
+  },
+
   async markRead(
     announcementId: string,
     userId: string

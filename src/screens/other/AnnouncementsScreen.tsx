@@ -32,6 +32,9 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
   const [content, setContent] = useState('');
   const [priority, setPriority] = useState<AnnouncementPriority>('normal');
   const [saving, setSaving] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archived, setArchived] = useState<Announcement[]>([]);
+  const [loadingArchived, setLoadingArchived] = useState(false);
 
   const load = useCallback(async () => {
     if (isDemoMode) { setAnnouncements(demoAnnouncements as Announcement[]); setLoading(false); setRefreshing(false); return; }
@@ -85,6 +88,21 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
     }));
   }
 
+  async function loadArchived() {
+    if (isDemoMode) return;
+    setLoadingArchived(true);
+    const { data } = await announcementService.getArchived(tripId);
+    setArchived(data ?? []);
+    setLoadingArchived(false);
+  }
+
+  async function handleUnarchive(id: string) {
+    const { error } = await announcementService.unarchive(id);
+    if (error) { Alert.alert('Error', error); return; }
+    setArchived((prev) => prev.filter((a) => a.id !== id));
+    load(); // refresh active list
+  }
+
   if (loading) return <LoadingView />;
 
   return (
@@ -96,11 +114,54 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.primary} />
         }
-        ListHeaderComponent={canManageAnnouncements ? (
-          <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)}>
-            <Text style={styles.addBtnText}>📢 Post Announcement</Text>
-          </TouchableOpacity>
-        ) : null}
+        ListHeaderComponent={(
+          <>
+            {canManageAnnouncements && (
+              <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)}>
+                <Text style={styles.addBtnText}>📢 Post Announcement</Text>
+              </TouchableOpacity>
+            )}
+            {canManageAnnouncements && (
+              <TouchableOpacity
+                style={styles.archivedToggle}
+                onPress={() => {
+                  if (!showArchived) loadArchived();
+                  setShowArchived((v) => !v);
+                }}
+              >
+                <Text style={styles.archivedToggleText}>
+                  {showArchived ? '▲ Hide archived' : '▾ Show archived'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {showArchived && canManageAnnouncements && (
+              <View style={styles.archivedSection}>
+                <Text style={styles.archivedTitle}>📦 Archived Announcements</Text>
+                {loadingArchived ? (
+                  <Text style={styles.archivedEmpty}>Loading...</Text>
+                ) : archived.length === 0 ? (
+                  <Text style={styles.archivedEmpty}>No archived announcements.</Text>
+                ) : archived.map((item) => (
+                  <View key={item.id} style={styles.archivedCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.archivedCardTitle}>{item.title}</Text>
+                      <Text style={styles.archivedCardContent} numberOfLines={2}>{item.content}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.unarchiveBtn}
+                      onPress={() => Alert.alert('Unarchive', `Restore "${item.title}"?`, [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Restore', onPress: () => handleUnarchive(item.id) },
+                      ])}
+                    >
+                      <Text style={styles.unarchiveBtnText}>Restore</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
+        )}
         ListEmptyComponent={
           <EmptyState icon="📢" title="No announcements" subtitle="Organizers can post trip-wide announcements here." />
         }
@@ -205,6 +266,24 @@ const styles = StyleSheet.create({
   cardContent: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 20, marginBottom: Spacing.sm },
   cardMeta: { fontSize: FontSize.xs, color: Colors.textSecondary },
   deleteIcon: { fontSize: 16, marginLeft: Spacing.xs },
+  archivedToggle: { alignItems: 'center', paddingVertical: Spacing.sm, marginBottom: Spacing.sm },
+  archivedToggleText: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
+  archivedSection: { marginBottom: Spacing.md },
+  archivedTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.textSecondary, marginBottom: Spacing.sm },
+  archivedEmpty: { fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center', padding: Spacing.md },
+  archivedCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.border + '40',
+    borderRadius: Radius.md, padding: Spacing.sm,
+    marginBottom: Spacing.sm, gap: Spacing.sm,
+  },
+  archivedCardTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.textSecondary },
+  archivedCardContent: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  unarchiveBtn: {
+    borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm, paddingVertical: 4,
+  },
+  unarchiveBtnText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl },
   modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.text, marginBottom: Spacing.md },
