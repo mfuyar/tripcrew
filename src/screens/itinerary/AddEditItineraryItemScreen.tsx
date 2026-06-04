@@ -11,6 +11,7 @@ import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { AddressAutocomplete } from '../../components/AddressAutocomplete';
+import { DatePickerField, TimePickerField } from '../../components/DatePickerField';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'AddEditItineraryItem'>;
@@ -24,6 +25,17 @@ const TYPES: { value: ItineraryType; label: string; emoji: string }[] = [
   { value: 'other', label: 'Other', emoji: '📌' },
 ];
 
+function splitDatetime(iso: string): { date: string; time: string } {
+  if (!iso) return { date: '', time: '' };
+  const [datePart, timePart] = iso.split('T');
+  return { date: datePart ?? '', time: timePart ? timePart.slice(0, 5) : '' };
+}
+
+function buildDatetime(date: string, time: string): string {
+  if (!date) return '';
+  return `${date}T${time || '00:00'}:00`;
+}
+
 export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   const { tripId, itemId, prefill } = route.params;
   const { user, isDemoMode } = useAuth();
@@ -32,41 +44,45 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   const [title, setTitle] = useState(prefill?.title ?? '');
   const [type, setType] = useState<ItineraryType>(prefill?.itemType ?? 'activity');
   const [location, setLocation] = useState(prefill?.location ?? '');
-  const [startDatetime, setStartDatetime] = useState(prefill?.startDate ? `${prefill.startDate}T10:00:00` : '');
-  const [endDatetime, setEndDatetime] = useState('');
+  const [startDate, setStartDate] = useState(prefill?.startDate ?? '');
+  const [startTime, setStartTime] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [costEstimate, setCostEstimate] = useState('');
   const [notes, setNotes] = useState(prefill?.notes ?? '');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (isDemoMode || !isEdit || !itemId) return;
-    if (isEdit && itemId) {
-      itineraryService.getItems(tripId).then(({ data }) => {
-        const item = data?.find((i) => i.id === itemId);
-        if (item) {
-          setTitle(item.title);
-          setType(item.item_type);
-          setLocation(item.location ?? '');
-          setStartDatetime(item.start_datetime);
-          setEndDatetime(item.end_datetime ?? '');
-          setCostEstimate(item.cost_estimate ? String(item.cost_estimate) : '');
-          setNotes(item.notes ?? '');
-        }
-      });
-    }
+    itineraryService.getItems(tripId).then(({ data }) => {
+      const item = data?.find((i) => i.id === itemId);
+      if (item) {
+        setTitle(item.title);
+        setType(item.item_type);
+        setLocation(item.location ?? '');
+        const s = splitDatetime(item.start_datetime);
+        setStartDate(s.date);
+        setStartTime(s.time);
+        const e = splitDatetime(item.end_datetime ?? '');
+        setEndDate(e.date);
+        setEndTime(e.time);
+        setCostEstimate(item.cost_estimate ? String(item.cost_estimate) : '');
+        setNotes(item.notes ?? '');
+      }
+    });
   }, [itemId]);
 
   async function handleSave() {
     if (!title.trim()) { Alert.alert('Error', 'Title is required'); return; }
-    if (!startDatetime) { Alert.alert('Error', 'Start date/time is required'); return; }
+    if (!startDate) { Alert.alert('Error', 'Start date is required'); return; }
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Editing itinerary is disabled in demo.'); return; }
     setLoading(true);
     const payload = {
       title: title.trim(),
       item_type: type,
       location: location.trim() || undefined,
-      start_datetime: startDatetime,
-      end_datetime: endDatetime || undefined,
+      start_datetime: buildDatetime(startDate, startTime),
+      end_datetime: endDate ? buildDatetime(endDate, endTime) : undefined,
       cost_estimate: costEstimate ? parseFloat(costEstimate) : undefined,
       notes: notes.trim() || undefined,
     };
@@ -116,20 +132,13 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
           onSelect={(suggestion) => setLocation(suggestion.label)}
           placeholder="Rosemary Beach"
         />
-        <AppTextInput
-          label="Start Date & Time *"
-          value={startDatetime}
-          onChangeText={setStartDatetime}
-          placeholder="2025-07-15T10:00:00"
-          keyboardType="numbers-and-punctuation"
-        />
-        <AppTextInput
-          label="End Date & Time"
-          value={endDatetime}
-          onChangeText={setEndDatetime}
-          placeholder="2025-07-15T14:00:00"
-          keyboardType="numbers-and-punctuation"
-        />
+
+        <DatePickerField label="Start Date" value={startDate} onChange={setStartDate} required />
+        <TimePickerField label="Start Time" value={startTime} onChange={setStartTime} />
+
+        <DatePickerField label="End Date" value={endDate} onChange={setEndDate} minimumDate={startDate ? new Date(startDate + 'T12:00:00') : undefined} />
+        <TimePickerField label="End Time" value={endTime} onChange={setEndTime} />
+
         <AppTextInput
           label="Cost Estimate"
           value={costEstimate}

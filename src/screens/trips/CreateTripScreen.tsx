@@ -12,6 +12,7 @@ import { tripService } from '../../services/tripService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
+import { DatePickerField } from '../../components/DatePickerField';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateTrip'>;
@@ -90,21 +91,13 @@ export function CreateTripScreen({ navigation }: Props) {
           placeholder="A week at the beach..."
           multiline
         />
-        <AppTextInput
-          label="Start Date *"
-          value={startDate}
-          onChangeText={setStartDate}
-          placeholder="YYYY-MM-DD"
-          error={errors.startDate}
-          keyboardType="numbers-and-punctuation"
-        />
-        <AppTextInput
-          label="End Date *"
+        <DatePickerField label="Start Date" value={startDate} onChange={setStartDate} required />
+        <DatePickerField
+          label="End Date"
           value={endDate}
-          onChangeText={setEndDate}
-          placeholder="YYYY-MM-DD"
-          error={errors.endDate}
-          keyboardType="numbers-and-punctuation"
+          onChange={setEndDate}
+          required
+          minimumDate={startDate ? new Date(startDate + 'T12:00:00') : undefined}
         />
 
         {/* Currency Picker */}
