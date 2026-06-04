@@ -1,7 +1,7 @@
 /**
  * SPEC: Trip Service
  *
- * Tests trip creation, listing, joining by invite code, and deletion.
+ * Tests trip creation, listing, requesting access by invite code, and deletion.
  * Covers SPEC §2.1, §2.2, §2.3.
  */
 
@@ -12,6 +12,7 @@ const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
+const mockRpc = jest.fn();
 
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
@@ -33,7 +34,7 @@ const mockGetUser = jest.fn().mockResolvedValue({
 });
 
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: mockFrom, auth: { getSession: mockGetSession, getUser: mockGetUser } },
+  supabase: { from: mockFrom, rpc: mockRpc, auth: { getSession: mockGetSession, getUser: mockGetUser } },
 }));
 
 import { tripService } from '../../services/tripService';
@@ -125,45 +126,60 @@ describe('tripService', () => {
     });
   });
 
-  describe('joinTrip', () => {
-    // SPEC §2.2: Valid invite code → user added as member
-    it('adds user to trip on valid invite code when not already a member', async () => {
-      // Call 1: find trip by invite code
-      mockSingle.mockResolvedValueOnce({ data: mockTrip, error: null });
-      // Call 2: check existing membership → not found
-      mockSingle.mockResolvedValueOnce({ data: null, error: { message: 'No rows' } });
-      // Call 3: insert member → uses default mock (result ignored)
+  describe('requestJoinTrip', () => {
+    it('creates a pending join request for a valid invite code', async () => {
+      mockRpc.mockResolvedValueOnce({
+        data: { id: 'req-1', trip_id: tripId, user_id: userId, status: 'pending' },
+        error: null,
+      });
+
+      const { data, error } = await tripService.requestJoinTrip(userId, 'abc12345');
+
+      expect(error).toBeNull();
+      expect(data?.status).toBe('pending');
+      expect(mockRpc).toHaveBeenCalledWith('request_trip_join_by_code', {
+        p_invite_code: 'ABC12345',
+        p_user_id: userId,
+      });
+    });
+
+    it('joinTrip remains a compatibility wrapper for requesting access', async () => {
+      mockRpc.mockResolvedValueOnce({
+        data: { id: 'req-1', trip_id: tripId, user_id: userId, status: 'pending' },
+        error: null,
+      });
 
       const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
 
-      expect(mockFrom).toHaveBeenCalledWith('trips');
-      expect(mockFrom).toHaveBeenCalledWith('trip_members');
       expect(error).toBeNull();
-      expect(data?.id).toBe(tripId);
+      expect(data?.status).toBe('pending');
+      expect(mockRpc).toHaveBeenCalledWith('request_trip_join_by_code', expect.any(Object));
     });
 
-    // Already a member → returns trip without re-inserting
-    it('returns existing trip if user is already a member', async () => {
-      mockSingle.mockResolvedValueOnce({ data: mockTrip, error: null }); // trip lookup
-      mockSingle.mockResolvedValueOnce({ data: { id: 'mem-1' }, error: null }); // existing member
-
-      const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
-
-      expect(error).toBeNull();
-      expect(data?.id).toBe(tripId);
-      // trip_members insert should NOT be called a second time
-      const insertCalls = (mockFrom as jest.Mock).mock.calls.filter(([t]) => t === 'trip_members');
-      expect(insertCalls).toHaveLength(1); // only the select check, no insert
-    });
-
-    // SPEC §2.2: Invalid invite code → error
     it('returns error on invalid invite code', async () => {
-      mockSingle.mockResolvedValueOnce({ data: null, error: { message: 'Not found' } });
+      mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'Invalid invite code' } });
 
-      const { data, error } = await tripService.joinTrip(userId, 'INVALID');
+      const { data, error } = await tripService.requestJoinTrip(userId, 'INVALID');
 
       expect(data).toBeNull();
       expect(error).toBe('Invalid invite code');
+    });
+
+    it('reviews a join request through the approval RPC', async () => {
+      mockRpc.mockResolvedValueOnce({
+        data: { id: 'req-1', trip_id: tripId, user_id: 'new-user', status: 'approved' },
+        error: null,
+      });
+
+      const { data, error } = await tripService.reviewJoinRequest('req-1', userId, 'approved');
+
+      expect(error).toBeNull();
+      expect(data?.status).toBe('approved');
+      expect(mockRpc).toHaveBeenCalledWith('review_trip_join_request', {
+        p_request_id: 'req-1',
+        p_reviewer_id: userId,
+        p_status: 'approved',
+      });
     });
   });
 

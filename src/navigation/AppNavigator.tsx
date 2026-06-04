@@ -68,6 +68,7 @@ import { MoreScreen } from '../screens/trips/MoreScreen';
 import { LiveLocationScreen } from '../screens/location/LiveLocationScreen';
 import { CommunitySpotsScreen } from '../screens/community/CommunitySpotsScreen';
 import { CreateCommunitySpotScreen } from '../screens/community/CreateCommunitySpotScreen';
+import { CommunitySpotReviewScreen } from '../screens/community/CommunitySpotReviewScreen';
 
 import {
   RootStackParamList,
@@ -276,6 +277,7 @@ function MainNavigator() {
       <MainStack.Screen name="Announcements" component={AnnouncementsScreen} options={{ title: 'Announcements' }} />
       <MainStack.Screen name="CommunitySpots" component={CommunitySpotsScreen} options={{ title: 'Community Spots' }} />
       <MainStack.Screen name="CreateCommunitySpot" component={CreateCommunitySpotScreen} options={{ title: 'Post Spot' }} />
+      <MainStack.Screen name="CommunitySpotReview" component={CommunitySpotReviewScreen} options={{ title: 'Spot Review' }} />
       <MainStack.Screen name="LiveLocation" component={LiveLocationScreen} options={{ title: 'Live Location' }} />
       <MainStack.Screen name="Notifications" component={NotificationCenterScreen} options={{ title: 'Notifications' }} />
     </MainStack.Navigator>

@@ -120,15 +120,17 @@ export function TripsListScreen() {
   async function handleJoin() {
     if (!user || !inviteCode.trim()) return;
     setJoining(true);
-    const { data, error: e } = await tripService.joinTrip(user.id, inviteCode.trim());
+    const { data, error: e } = await tripService.requestJoinTrip(user.id, inviteCode.trim());
     setJoining(false);
     if (e) {
       Alert.alert('Error', e);
     } else if (data) {
       setShowJoin(false);
       setInviteCode('');
-      await loadTrips();
-      openTrip(data);
+      Alert.alert(
+        'Request sent',
+        'The trip organizer will review your request before you can see or join the trip.'
+      );
     }
   }
 
@@ -204,8 +206,8 @@ export function TripsListScreen() {
           keyboardVerticalOffset={20}
         >
           <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Join a Trip</Text>
-            <Text style={styles.modalSubtitle}>Enter the 8-character invite code</Text>
+            <Text style={styles.modalTitle}>Request Trip Access</Text>
+            <Text style={styles.modalSubtitle}>Enter the 8-character invite code. An organizer must approve you before the trip appears.</Text>
             <TextInput
               style={styles.codeInput}
               value={inviteCode}
@@ -216,7 +218,7 @@ export function TripsListScreen() {
               autoFocus
               placeholderTextColor={Colors.textSecondary}
             />
-            <AppButton title="Join Trip" onPress={handleJoin} loading={joining} fullWidth />
+            <AppButton title="Request Access" onPress={handleJoin} loading={joining} fullWidth />
             <AppButton
               title="Cancel"
               onPress={() => setShowJoin(false)}

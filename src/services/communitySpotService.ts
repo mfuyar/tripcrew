@@ -2,11 +2,26 @@ import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
-import { CommunitySpot, CommunitySpotCategory, CommunitySpotComment, ServiceResult } from '../types';
+import { CommunitySpot, CommunitySpotCategory, CommunitySpotComment, ModerationStatus, ServiceResult } from '../types';
 
 const MEDIA_BUCKET = 'trip-media';
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_COMPRESS_QUALITY = 0.78;
+const BAD_LANGUAGE_PATTERNS = [
+  /\bfuck(?:ing|er|ed)?\b/i,
+  /\bshit(?:ty)?\b/i,
+  /\bbitch(?:es)?\b/i,
+  /\basshole\b/i,
+  /\bcunt\b/i,
+  /\bdick\b/i,
+  /\bpussy\b/i,
+  /\bslut\b/i,
+  /\bwhore\b/i,
+  /\bfag(?:got)?\b/i,
+  /\bnigg(?:a|er)s?\b/i,
+  /\bretard(?:ed)?\b/i,
+];
+
 function getGeminiApiKey(): string | undefined {
   return process.env.EXPO_PUBLIC_GEMINI_API_KEY;
 }
@@ -23,6 +38,11 @@ export interface CommunitySpotInput {
   latitude: number;
   longitude: number;
   photoUri?: string;
+}
+
+interface ModerationDecision {
+  status: ModerationStatus;
+  reason?: string;
 }
 
 async function preparePhoto(uri: string): Promise<File> {
@@ -43,8 +63,7 @@ async function preparePhoto(uri: string): Promise<File> {
   return new File(result.uri);
 }
 
-async function uploadSpotPhoto(userId: string, uri: string): Promise<ServiceResult<string>> {
-  const file = await preparePhoto(uri);
+async function uploadPreparedSpotPhoto(userId: string, file: File): Promise<ServiceResult<string>> {
   const fileName = `community-spots/${userId}/${Date.now()}.jpg`;
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token ?? supabaseAnonKey;
@@ -70,6 +89,96 @@ async function uploadSpotPhoto(userId: string, uri: string): Promise<ServiceResu
 
   const { data: urlData } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
   return { data: urlData.publicUrl, error: null };
+}
+
+function containsBadLanguage(...values: Array<string | undefined>): boolean {
+  const text = values.filter(Boolean).join(' ');
+  return BAD_LANGUAGE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function parseGeminiJsonObject(text: string): any {
+  const cleaned = text
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  const jsonText = start >= 0 && end >= start ? cleaned.slice(start, end + 1) : cleaned;
+  return JSON.parse(jsonText);
+}
+
+async function moderatePhoto(file: File): Promise<ModerationDecision> {
+  const geminiApiKey = getGeminiApiKey();
+  if (!geminiApiKey) {
+    return {
+      status: 'pending_review',
+      reason: 'Photo needs manual review because Gemini moderation is not configured.',
+    };
+  }
+
+  try {
+    const base64 = await file.base64();
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [
+              {
+                text: [
+                  'Moderate this user-submitted travel spot photo.',
+                  'Return only JSON: {"adult": boolean, "unsafe": boolean, "reason": string}.',
+                  'adult should be true for nudity, sexual content, explicit poses, pornography, or clearly +18 imagery.',
+                  'unsafe should be true for graphic violence or hateful symbols.',
+                ].join('\n'),
+              },
+              { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
+            ],
+          }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      return {
+        status: 'pending_review',
+        reason: 'Photo needs manual review because automatic moderation failed.',
+      };
+    }
+
+    const result = parseGeminiJsonObject(extractGeminiText(await response.json()));
+    if (result.adult || result.unsafe) {
+      return {
+        status: 'pending_review',
+        reason: String(result.reason || 'Photo may contain +18 or unsafe content.'),
+      };
+    }
+    return { status: 'approved' };
+  } catch {
+    return {
+      status: 'pending_review',
+      reason: 'Photo needs manual review because automatic moderation failed.',
+    };
+  }
+}
+
+async function moderateSpotInput(input: CommunitySpotInput, photoFile?: File): Promise<ModerationDecision> {
+  if (containsBadLanguage(input.name, input.description, input.address)) {
+    return {
+      status: 'pending_review',
+      reason: 'Text may contain bad language.',
+    };
+  }
+  if (!photoFile) return { status: 'approved' };
+  return moderatePhoto(photoFile);
 }
 
 function categoryLabel(category: CommunitySpotCategory): string {
@@ -172,11 +281,19 @@ export function summarizeNearbySpots(spots: CommunitySpot[]): string {
 
 export const communitySpotService = {
   isMissingCommunitySchema,
+  containsBadLanguage,
 
   async create(userId: string, input: CommunitySpotInput): Promise<ServiceResult<CommunitySpot>> {
+    let photoFile: File | null = null;
     let photoUrl: string | null = null;
     if (input.photoUri) {
-      const upload = await uploadSpotPhoto(userId, input.photoUri);
+      photoFile = await preparePhoto(input.photoUri);
+    }
+
+    const moderation = await moderateSpotInput(input, photoFile ?? undefined);
+
+    if (photoFile) {
+      const upload = await uploadPreparedSpotPhoto(userId, photoFile);
       if (upload.error || !upload.data) return { data: null, error: upload.error };
       photoUrl = upload.data;
     }
@@ -192,6 +309,8 @@ export const communitySpotService = {
         latitude: input.latitude,
         longitude: input.longitude,
         photo_url: photoUrl,
+        moderation_status: moderation.status,
+        moderation_reason: moderation.reason ?? null,
       })
       .select('*, author:profiles(*)')
       .single();
@@ -224,6 +343,7 @@ export const communitySpotService = {
     const { data, error } = await supabase
       .from('community_spots')
       .select('*, author:profiles(*), comments:community_spot_comments(*, author:profiles(*))')
+      .eq('moderation_status', 'approved')
       .order('created_at', { ascending: false })
       .limit(25);
     if (error) {
@@ -260,6 +380,9 @@ export const communitySpotService = {
   },
 
   async addComment(spotId: string, userId: string, content: string): Promise<ServiceResult<CommunitySpotComment>> {
+    if (containsBadLanguage(content)) {
+      return { data: null, error: 'Comment needs review because it may contain bad language.' };
+    }
     const { data, error } = await supabase
       .from('community_spot_comments')
       .insert({ spot_id: spotId, user_id: userId, content })
@@ -267,6 +390,30 @@ export const communitySpotService = {
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as CommunitySpotComment, error: null };
+  },
+
+  async getPendingReview(): Promise<ServiceResult<CommunitySpot[]>> {
+    const { data, error } = await supabase
+      .from('community_spots')
+      .select('*, author:profiles(*)')
+      .eq('moderation_status', 'pending_review')
+      .order('created_at', { ascending: true });
+    if (error) return { data: null, error: error.message };
+    return { data: data as CommunitySpot[], error: null };
+  },
+
+  async reviewSpot(
+    spotId: string,
+    moderatorId: string,
+    status: 'approved' | 'rejected'
+  ): Promise<ServiceResult<CommunitySpot>> {
+    const { data, error } = await supabase.rpc('review_community_spot', {
+      p_spot_id: spotId,
+      p_moderator_id: moderatorId,
+      p_status: status,
+    });
+    if (error) return { data: null, error: error.message };
+    return { data: data as CommunitySpot, error: null };
   },
 
   async getGeminiFavorites(

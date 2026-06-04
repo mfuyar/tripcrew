@@ -36,6 +36,7 @@ export type PackingStatus = 'unpacked' | 'packed' | 'left_behind';
 export type ItineraryType = 'activity' | 'meal' | 'transport' | 'accommodation' | 'free_time' | 'other';
 
 export type CommunitySpotCategory = 'outdoor' | 'food' | 'culture' | 'hidden_gem' | 'other';
+export type ModerationStatus = 'approved' | 'pending_review' | 'rejected';
 
 // ─── Core Entities ───────────────────────────────────────────────────────────
 
@@ -77,6 +78,18 @@ export interface TripMember {
   // Joined data
   profile?: Profile;
   family?: Family;
+}
+
+export interface TripJoinRequest {
+  id: string;
+  trip_id: string;
+  user_id: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requested_at: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  profile?: Profile;
+  trip?: Trip;
 }
 
 export interface Family {
@@ -481,6 +494,10 @@ export interface CommunitySpot {
   id: string;
   source?: 'community' | 'gemini';
   user_id: string;
+  moderation_status?: ModerationStatus;
+  moderation_reason?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
   name: string;
   category: CommunitySpotCategory;
   description: string;
@@ -551,7 +568,17 @@ export type MainStackParamList = {
   ReceiptScanner: { tripId: string; returnToExpense?: boolean };
   MediaDetail: { tripId: string; mediaId: string };
   Itinerary: { tripId: string };
-  AddEditItineraryItem: { tripId: string; itemId?: string };
+  AddEditItineraryItem: {
+    tripId: string;
+    itemId?: string;
+    prefill?: {
+      title?: string;
+      itemType?: ItineraryType;
+      location?: string;
+      startDate?: string;
+      notes?: string;
+    };
+  };
   DailyPlan: { tripId: string; date: string };
   GroceryList: { tripId: string };
   PackingList: { tripId: string };
@@ -563,8 +590,9 @@ export type MainStackParamList = {
   EmergencyInfo: { tripId: string };
   Fairness: { tripId: string };
   Announcements: { tripId: string };
-  CommunitySpots: { tripId?: string } | undefined;
+  CommunitySpots: { tripId?: string; startDate?: string } | undefined;
   CreateCommunitySpot: { tripId?: string } | undefined;
+  CommunitySpotReview: undefined;
   TripSettings: { tripId: string };
   LiveLocation: { tripId: string };
   CreateTrip: undefined;

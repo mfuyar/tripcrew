@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, Linking, Switch, Platform,
@@ -80,6 +80,14 @@ export function LiveLocationScreen({ route }: Props) {
   const stopSharingRef = useRef<(() => void) | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
+  const handleMyLocationUpdate = useCallback((location: LiveLocation) => {
+    setLocations((prev) => {
+      const next = new Map(prev);
+      next.set(location.userId, location);
+      return next;
+    });
+  }, []);
+
   // Tick to refresh "X ago" timestamps
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -90,9 +98,19 @@ export function LiveLocationScreen({ route }: Props) {
   // Subscribe to other members' locations
   useEffect(() => {
     if (isDemoMode) return;
+    let removeSharingListener: (() => void) | undefined;
     locationService.getLiveLocations(tripId).then((initialLocations) => {
       setLocations(new Map(initialLocations.map((location) => [location.userId, location])));
     });
+    if (user?.id && locationService.isSharing(tripId, user.id)) {
+      setIsSharing(true);
+      stopSharingRef.current = () => locationService.stopSharing(tripId, user.id);
+      removeSharingListener = locationService.registerSharingListener(
+        tripId,
+        user.id,
+        handleMyLocationUpdate
+      );
+    }
     unsubscribeRef.current = locationService.subscribeToLocations(
       tripId,
       (updated) => setLocations((prev) => {
@@ -103,9 +121,12 @@ export function LiveLocationScreen({ route }: Props) {
     );
     return () => {
       unsubscribeRef.current?.();
-      stopSharingRef.current?.();
+      removeSharingListener?.();
+      if (user?.id) {
+        locationService.unregisterSharingListener(tripId, user.id, handleMyLocationUpdate);
+      }
     };
-  }, [tripId, isDemoMode]);
+  }, [tripId, isDemoMode, user?.id, handleMyLocationUpdate]);
 
   async function handleToggleSharing(enabled: boolean) {
     if (isDemoMode) {
@@ -135,11 +156,7 @@ export function LiveLocationScreen({ route }: Props) {
           userFamily?.id,
           profile?.full_name ?? 'Unknown',
           userFamily?.name,
-          (location) => setLocations((prev) => {
-            const next = new Map(prev);
-            next.set(location.userId, location);
-            return next;
-          })
+          handleMyLocationUpdate
         );
         stopSharingRef.current = stop;
         setIsSharing(true);

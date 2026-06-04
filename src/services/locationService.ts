@@ -8,6 +8,16 @@ const BROADCAST_EVENT = 'location-update';
 const STOP_EVENT = 'location-stop';
 
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
+type LocationListener = (location: LiveLocation) => void;
+
+interface ActiveSharingSession {
+  tripId: string;
+  userId: string;
+  listeners: Set<LocationListener>;
+  stop: () => void;
+}
+
+let activeSharingSession: ActiveSharingSession | null = null;
 
 function mapLiveLocation(row: any): LiveLocation {
   return {
@@ -49,9 +59,13 @@ export const locationService = {
     familyId: string | undefined,
     userName: string,
     familyName: string | undefined,
-    onLocation?: (location: LiveLocation) => void
+    onLocation?: LocationListener
   ): Promise<() => void> {
+    activeSharingSession?.stop();
+
     const channel = supabase.channel(CHANNEL(tripId));
+    const listeners = new Set<LocationListener>();
+    if (onLocation) listeners.add(onLocation);
 
     // Subscribe with a 6-second timeout so the UI never hangs indefinitely
     await new Promise<void>((resolve) => {
@@ -74,7 +88,7 @@ export const locationService = {
         timestamp: new Date(pos.timestamp).toISOString(),
         isLive: true,
       };
-      onLocation?.(payload);
+      listeners.forEach((listener) => listener(payload));
       channel.send({ type: 'broadcast', event: BROADCAST_EVENT, payload });
       void (async () => {
         try {
@@ -104,7 +118,7 @@ export const locationService = {
       broadcast
     );
 
-    return () => {
+    const stop = () => {
       locationSub.remove();
       channel.send({ type: 'broadcast', event: STOP_EVENT, payload: { userId } });
       void (async () => {
@@ -117,7 +131,35 @@ export const locationService = {
         } catch {}
       })();
       supabase.removeChannel(channel);
+      if (activeSharingSession?.tripId === tripId && activeSharingSession.userId === userId) {
+        activeSharingSession = null;
+      }
     };
+
+    activeSharingSession = { tripId, userId, listeners, stop };
+    return stop;
+  },
+
+  isSharing(tripId: string, userId: string): boolean {
+    return activeSharingSession?.tripId === tripId && activeSharingSession.userId === userId;
+  },
+
+  stopSharing(tripId: string, userId: string): void {
+    if (this.isSharing(tripId, userId)) activeSharingSession?.stop();
+  },
+
+  registerSharingListener(tripId: string, userId: string, listener: LocationListener): () => void {
+    if (!this.isSharing(tripId, userId) || !activeSharingSession) return () => {};
+    activeSharingSession.listeners.add(listener);
+    return () => {
+      activeSharingSession?.listeners.delete(listener);
+    };
+  },
+
+  unregisterSharingListener(tripId: string, userId: string, listener: LocationListener): void {
+    if (this.isSharing(tripId, userId)) {
+      activeSharingSession?.listeners.delete(listener);
+    }
   },
 
   // ── Subscribing ─────────────────────────────────────────────────────────────

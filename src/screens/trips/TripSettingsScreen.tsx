@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { MainStackParamList } from '../../types';
+import { MainStackParamList, TripJoinRequest } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { tripService } from '../../services/tripService';
@@ -32,12 +32,15 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     families,
     setFamilies,
     isTripOrganizer,
+    canManageTrip,
     setCurrentTrip,
   } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(currentTrip?.name ?? '');
   const [destination, setDestination] = useState(currentTrip?.destination ?? '');
+  const [joinRequests, setJoinRequests] = useState<TripJoinRequest[]>([]);
+  const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
 
   // Re-fetch members on focus so role changes from any device are reflected
   useFocusEffect(useCallback(() => {
@@ -45,7 +48,14 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     tripService.getTripMembers(tripId).then(({ data }) => {
       if (data) setMembers(data);
     });
-  }, [tripId, isDemoMode]));
+    if (canManageTrip) {
+      tripService.getPendingJoinRequests(tripId).then(({ data }) => {
+        if (data) setJoinRequests(data);
+      });
+    } else {
+      setJoinRequests([]);
+    }
+  }, [tripId, isDemoMode, canManageTrip]));
 
   async function handleSave() {
     if (isDemoMode) { Alert.alert('Demo Mode', 'Editing trip settings is disabled in demo.'); return; }
@@ -115,6 +125,27 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     ]);
   }
 
+  async function refreshMembersAndRequests() {
+    const [freshMembers, freshRequests] = await Promise.all([
+      tripService.getTripMembers(tripId),
+      canManageTrip ? tripService.getPendingJoinRequests(tripId) : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (freshMembers.data) setMembers(freshMembers.data);
+    if (freshRequests.data) setJoinRequests(freshRequests.data);
+  }
+
+  async function handleReviewJoinRequest(request: TripJoinRequest, status: 'approved' | 'rejected') {
+    if (!user) return;
+    setReviewingRequestId(request.id);
+    const { error } = await tripService.reviewJoinRequest(request.id, user.id, status);
+    setReviewingRequestId(null);
+    if (error) {
+      Alert.alert('Request review failed', error);
+      return;
+    }
+    await refreshMembersAndRequests();
+  }
+
   return (
     <FormKeyboardView contentContainerStyle={styles.content}>
       {/* Invite Code */}
@@ -122,7 +153,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         <Text style={styles.sectionTitle}>Invite Code</Text>
         <View style={styles.codeBox}>
           <Text style={styles.inviteCode}>{currentTrip?.invite_code}</Text>
-          <Text style={styles.codeHint}>Share this code for others to join</Text>
+          <Text style={styles.codeHint}>Share this code so people can request access</Text>
         </View>
       </View>
 
@@ -161,6 +192,58 @@ export function TripSettingsScreen({ navigation, route }: Props) {
             placeholder="Hotel, venue, street address, or city"
           />
           <AppButton title="Save Changes" onPress={handleSave} loading={saving} fullWidth />
+        </View>
+      )}
+
+      {/* Join Requests */}
+      {canManageTrip && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, styles.sectionTitleInHeader]}>
+              Join Requests ({joinRequests.length})
+            </Text>
+            <TouchableOpacity
+              onPress={async () => {
+                const { data } = await tripService.getPendingJoinRequests(tripId);
+                if (data) setJoinRequests(data);
+              }}
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            >
+              <Text style={styles.refreshText}>↻ Refresh</Text>
+            </TouchableOpacity>
+          </View>
+          {joinRequests.length === 0 ? (
+            <Text style={styles.emptyText}>No pending access requests.</Text>
+          ) : (
+            joinRequests.map((request) => (
+              <View key={request.id} style={styles.memberRow}>
+                <FamilyAvatar name={request.profile?.full_name ?? request.profile?.email ?? '?'} size={36} />
+                <View style={styles.memberInfo}>
+                  <Text style={styles.memberName}>{request.profile?.full_name || request.profile?.email || 'New member'}</Text>
+                  <Text style={styles.memberRole}>
+                    Requested {new Date(request.requested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+                <View style={styles.memberActions}>
+                  <TouchableOpacity
+                    style={[styles.roleBtn, styles.approveBtn]}
+                    disabled={reviewingRequestId === request.id}
+                    onPress={() => handleReviewJoinRequest(request, 'approved')}
+                  >
+                    <Text style={[styles.roleBtnText, styles.approveBtnText]}>
+                      {reviewingRequestId === request.id ? '...' : 'Approve'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    disabled={reviewingRequestId === request.id}
+                    onPress={() => handleReviewJoinRequest(request, 'rejected')}
+                  >
+                    <Text style={styles.removeText}>Reject</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
         </View>
       )}
 
@@ -312,6 +395,7 @@ const styles = StyleSheet.create({
   sectionTitleInHeader: { marginBottom: 0 },
   refreshText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
   addFamilyText: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.primary },
+  emptyText: { fontSize: FontSize.sm, color: Colors.textSecondary },
   codeBox: {
     backgroundColor: Colors.primaryLight,
     borderRadius: Radius.lg,
@@ -393,4 +477,6 @@ const styles = StyleSheet.create({
   roleBtnActive: { backgroundColor: Colors.primary },
   roleBtnText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
   roleBtnActiveText: { color: Colors.surface },
+  approveBtn: { backgroundColor: Colors.success, borderColor: Colors.success },
+  approveBtnText: { color: Colors.surface },
 });

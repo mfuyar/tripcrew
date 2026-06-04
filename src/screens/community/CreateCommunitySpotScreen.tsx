@@ -59,16 +59,38 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
 
   async function handleUseCurrentLocation() {
     setLocating(true);
+    const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => true);
+    if (!servicesEnabled) {
+      setLocating(false);
+      Alert.alert('Location unavailable', 'Turn on Location Services or select an address above to set the pin.');
+      return;
+    }
+
     const permission = await Location.requestForegroundPermissionsAsync();
     if (permission.status !== 'granted') {
       setLocating(false);
-      Alert.alert('Location needed', 'Allow location access to pin this spot.');
+      Alert.alert('Location needed', 'Allow location access or select an address above to set the pin.');
       return;
     }
-    const position = await Location.getCurrentPositionAsync({});
-    setLatitude(String(position.coords.latitude));
-    setLongitude(String(position.coords.longitude));
-    setLocating(false);
+
+    try {
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setLatitude(String(position.coords.latitude));
+      setLongitude(String(position.coords.longitude));
+    } catch {
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: 15 * 60 * 1000,
+        requiredAccuracy: 5000,
+      }).catch(() => null);
+      if (lastKnown) {
+        setLatitude(String(lastKnown.coords.latitude));
+        setLongitude(String(lastKnown.coords.longitude));
+      } else {
+        Alert.alert('Location unavailable', 'Select an address above or enter latitude and longitude manually.');
+      }
+    } finally {
+      setLocating(false);
+    }
   }
 
   async function handleSave() {
@@ -85,7 +107,7 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
     }
 
     setSaving(true);
-    const { error } = await communitySpotService.create(user.id, {
+    const { data, error } = await communitySpotService.create(user.id, {
       name: name.trim(),
       category,
       description: description.trim(),
@@ -97,6 +119,14 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
     setSaving(false);
     if (error) {
       Alert.alert('Unable to post spot', error);
+      return;
+    }
+    if (data?.moderation_status === 'pending_review') {
+      Alert.alert(
+        'Sent for review',
+        'This spot is waiting for moderator approval before everyone can see it.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
       return;
     }
     navigation.goBack();

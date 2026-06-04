@@ -12,16 +12,19 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { CommunitySpot, CommunitySpotCategory, MainStackParamList } from '../../types';
+import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
+import { CommunitySpot, CommunitySpotCategory, ItineraryType, MainStackParamList } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTripContext } from '../../contexts/TripContext';
 import { communitySpotService } from '../../services/communitySpotService';
+import { addressSearchService } from '../../services/addressSearchService';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { AppButton } from '../../components/AppButton';
 import { Colors, FontSize, FontWeight, Radius, Shadow, Spacing } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
+type Props = NativeStackScreenProps<MainStackParamList, 'CommunitySpots'>;
 
 const CATEGORY_ICON: Record<CommunitySpotCategory, string> = {
   outdoor: '🌿',
@@ -39,9 +42,24 @@ const CATEGORY_LABEL: Record<CommunitySpotCategory, string> = {
   other: 'Other',
 };
 
-export function CommunitySpotsScreen() {
+const CATEGORY_TO_ITINERARY_TYPE: Record<CommunitySpotCategory, ItineraryType> = {
+  outdoor: 'activity',
+  food: 'meal',
+  culture: 'activity',
+  hidden_gem: 'activity',
+  other: 'other',
+};
+
+function publicName(fullName?: string): string {
+  const first = fullName?.trim().split(/\s+/)[0];
+  return first || 'Anonymous';
+}
+
+export function CommunitySpotsScreen({ route }: Props) {
   const navigation = useNavigation<Nav>();
+  const { tripId, startDate } = route.params ?? {};
   const { user } = useAuth();
+  const { currentTrip } = useTripContext();
   const [spots, setSpots] = useState<CommunitySpot[]>([]);
   const [guideSummary, setGuideSummary] = useState('');
   const [showingGemini, setShowingGemini] = useState(false);
@@ -63,17 +81,69 @@ export function CommunitySpotsScreen() {
 
   useFocusEffect(useCallback(() => { loadRecent(); }, [loadRecent]));
 
+  async function getTripDestinationFallback() {
+    const destination = currentTrip?.destination?.trim();
+    if (!destination) return null;
+
+    const { data } = await addressSearchService.search(destination, 1);
+    const match = data?.[0];
+    if (!match) return null;
+
+    return {
+      latitude: match.latitude,
+      longitude: match.longitude,
+      label: match.label || destination,
+    };
+  }
+
+  async function getLookAroundLocation() {
+    const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => true);
+    if (servicesEnabled) {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status === 'granted') {
+        try {
+          const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          return {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            label: 'your current location',
+            isFallback: false,
+          };
+        } catch {
+          const lastKnown = await Location.getLastKnownPositionAsync({
+            maxAge: 15 * 60 * 1000,
+            requiredAccuracy: 5000,
+          }).catch(() => null);
+          if (lastKnown) {
+            return {
+              latitude: lastKnown.coords.latitude,
+              longitude: lastKnown.coords.longitude,
+              label: 'your last known location',
+              isFallback: true,
+            };
+          }
+        }
+      }
+    }
+
+    const fallback = await getTripDestinationFallback();
+    if (!fallback) return null;
+    return { ...fallback, isFallback: true };
+  }
+
   async function handleLookAround() {
     setLookingAround(true);
-    const permission = await Location.requestForegroundPermissionsAsync();
-    if (permission.status !== 'granted') {
+    const lookupLocation = await getLookAroundLocation();
+    if (!lookupLocation) {
       setLookingAround(false);
-      Alert.alert('Location needed', 'Allow location access to find community spots around you.');
+      Alert.alert(
+        'Location unavailable',
+        'Turn on Location Services, set a Simulator location, or add a trip destination so Travel Crew can search around that area.'
+      );
       return;
     }
 
-    const position = await Location.getCurrentPositionAsync({});
-    const { latitude, longitude } = position.coords;
+    const { latitude, longitude } = lookupLocation;
     const { data, error } = await communitySpotService.getNearby(latitude, longitude, 10, user?.id);
     if (error) {
       setLookingAround(false);
@@ -102,8 +172,8 @@ export function CommunitySpotsScreen() {
     setShowingGemini(usingGemini);
     setGuideSummary(
       usingGemini
-        ? `No community posts were found nearby yet. Gemini suggested these favorite places around you:\n${communitySpotService.summarizeNearbySpots(nearby)}`
-        : communitySpotService.summarizeNearbySpots(nearby)
+        ? `No community posts were found near ${lookupLocation.label} yet. Gemini suggested these favorite places:\n${communitySpotService.summarizeNearbySpots(nearby)}`
+        : `${lookupLocation.isFallback ? `Using ${lookupLocation.label} because live location was unavailable.\n` : ''}${communitySpotService.summarizeNearbySpots(nearby)}`
     );
   }
 
@@ -153,6 +223,23 @@ export function CommunitySpotsScreen() {
     )));
   }
 
+  function handleAddToItinerary(spot: CommunitySpot) {
+    if (!tripId) return;
+    const location = spot.address || `${spot.latitude.toFixed(5)}, ${spot.longitude.toFixed(5)}`;
+    navigation.navigate('AddEditItineraryItem', {
+      tripId,
+      prefill: {
+        title: spot.name,
+        itemType: CATEGORY_TO_ITINERARY_TYPE[spot.category],
+        location,
+        startDate,
+        notes: spot.source === 'gemini'
+          ? `${spot.description}\n\nSuggested by Gemini local guide.`
+          : spot.description,
+      },
+    });
+  }
+
   if (loading) return <LoadingView />;
 
   return (
@@ -166,7 +253,7 @@ export function CommunitySpotsScreen() {
         />
         <AppButton
           title="Post Spot"
-          onPress={() => navigation.navigate('CreateCommunitySpot', {})}
+          onPress={() => navigation.navigate('CreateCommunitySpot', { tripId })}
           variant="outline"
           style={styles.actionButton}
         />
@@ -191,7 +278,7 @@ export function CommunitySpotsScreen() {
             title="No community spots yet"
             subtitle="Share a local favorite, hidden gem, food stop, or viewpoint for other travelers."
             actionLabel="Post Spot"
-            onAction={() => navigation.navigate('CreateCommunitySpot', {})}
+            onAction={() => navigation.navigate('CreateCommunitySpot', { tripId })}
           />
         }
         renderItem={({ item }) => (
@@ -220,32 +307,41 @@ export function CommunitySpotsScreen() {
               <Text style={styles.meta}>
                 {item.source === 'gemini'
                   ? 'Suggested by Gemini'
-                  : `By ${item.author?.full_name || 'Traveler'} • ${item.comments_count} comment${item.comments_count === 1 ? '' : 's'}`}
+                  : `By ${publicName(item.author?.full_name)} • ${item.comments_count} comment${item.comments_count === 1 ? '' : 's'}`}
               </Text>
+
+              {tripId ? (
+                <AppButton
+                  title="Add to Itinerary"
+                  onPress={() => handleAddToItinerary(item)}
+                  variant="outline"
+                  style={styles.itineraryButton}
+                />
+              ) : null}
 
               {item.source !== 'gemini' && (item.comments ?? []).slice(0, 2).map((comment) => (
                 <View key={comment.id} style={styles.comment}>
-                  <Text style={styles.commentAuthor}>{comment.author?.full_name || 'Traveler'}</Text>
+                  <Text style={styles.commentAuthor}>{publicName(comment.author?.full_name)}</Text>
                   <Text style={styles.commentText}>{comment.content}</Text>
                 </View>
               ))}
 
               {item.source !== 'gemini' ? (
                 <View style={styles.commentRow}>
-                <TextInput
-                  style={styles.commentInput}
-                  value={commentText[item.id] ?? ''}
-                  onChangeText={(value) => setCommentText((prev) => ({ ...prev, [item.id]: value }))}
-                  placeholder="Add a local note..."
-                  placeholderTextColor={Colors.textSecondary}
-                />
-                <TouchableOpacity
-                  style={[styles.commentButton, commenting === item.id && styles.commentButtonDisabled]}
-                  onPress={() => handleAddComment(item)}
-                  disabled={commenting === item.id}
-                >
-                  <Text style={styles.commentButtonText}>{commenting === item.id ? '...' : 'Post'}</Text>
-                </TouchableOpacity>
+                  <TextInput
+                    style={styles.commentInput}
+                    value={commentText[item.id] ?? ''}
+                    onChangeText={(value) => setCommentText((prev) => ({ ...prev, [item.id]: value }))}
+                    placeholder="Add a local note..."
+                    placeholderTextColor={Colors.textSecondary}
+                  />
+                  <TouchableOpacity
+                    style={[styles.commentButton, commenting === item.id && styles.commentButtonDisabled]}
+                    onPress={() => handleAddComment(item)}
+                    disabled={commenting === item.id}
+                  >
+                    <Text style={styles.commentButtonText}>{commenting === item.id ? '...' : 'Post'}</Text>
+                  </TouchableOpacity>
                 </View>
               ) : null}
             </View>
@@ -304,6 +400,7 @@ const styles = StyleSheet.create({
   address: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: Spacing.sm },
   description: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 20, marginTop: Spacing.sm },
   meta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: Spacing.sm },
+  itineraryButton: { marginTop: Spacing.md },
   comment: {
     backgroundColor: Colors.background,
     borderRadius: Radius.sm,

@@ -2,7 +2,7 @@
  * SPEC §2 — Trips
  *
  * §2.1 Create Trip: required fields, creator added as trip_organizer, invite code generated
- * §2.2 Join Trip: validates code, adds user as member role
+ * §2.2 Join Trip: validates code, creates pending request for organizer approval
  * §2.3 Trip List: only user's trips, sorted by start_date desc
  */
 
@@ -13,6 +13,7 @@ const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
+const mockRpc = jest.fn();
 
 const mockFrom = jest.fn((table: string) => ({
   select: mockSelect.mockReturnThis(),
@@ -37,6 +38,7 @@ const mockUpsert = jest.fn().mockResolvedValue({ error: null });
 jest.mock('../../lib/supabaseClient', () => ({
   supabase: {
     from: mockFrom,
+    rpc: mockRpc,
     auth: { getSession: mockGetSession, getUser: mockGetUser },
   },
 }));
@@ -120,69 +122,70 @@ describe('SPEC §2.1 — Create Trip', () => {
 // ─── §2.2 Join Trip ───────────────────────────────────────────────────────────
 
 describe('SPEC §2.2 — Join Trip', () => {
-  const mockTrip = { id: tripId, ...tripInput, created_by: 'other-user', invite_code: 'ABC12345' };
+  it('creates a pending request on valid invite code', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { id: 'req-1', trip_id: tripId, user_id: userId, status: 'pending' },
+      error: null,
+    });
 
-  it('returns trip on valid invite code for new member', async () => {
-    mockSingle
-      .mockResolvedValueOnce({ data: mockTrip, error: null })       // trip lookup
-      .mockResolvedValueOnce({ data: null, error: { message: 'No rows' } }); // not yet member
-
-    const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
+    const { data, error } = await tripService.requestJoinTrip(userId, 'ABC12345');
 
     expect(error).toBeNull();
-    expect(data?.id).toBe(tripId);
+    expect(data?.status).toBe('pending');
   });
 
-  it('new member is added with member role', async () => {
-    mockSingle
-      .mockResolvedValueOnce({ data: mockTrip, error: null })
-      .mockResolvedValueOnce({ data: null, error: { message: 'No rows' } });
+  it('does not insert a trip member before organizer approval', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { id: 'req-1', trip_id: tripId, user_id: userId, status: 'pending' },
+      error: null,
+    });
 
-    await tripService.joinTrip(userId, 'ABC12345');
+    await tripService.requestJoinTrip(userId, 'ABC12345');
 
     const insertCalls = (mockInsert as jest.Mock).mock.calls;
     const memberInsert = insertCalls.find((args) =>
       args[0] && args[0].role === 'member'
     );
-    expect(memberInsert).toBeDefined();
+    expect(memberInsert).toBeUndefined();
   });
 
-  it('invite code lookup is case-insensitive (uppercased before query)', async () => {
-    mockSingle
-      .mockResolvedValueOnce({ data: mockTrip, error: null })
-      .mockResolvedValueOnce({ data: null, error: { message: 'No rows' } });
+  it('invite code request is case-insensitive (uppercased before RPC)', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { id: 'req-1', trip_id: tripId, user_id: userId, status: 'pending' },
+      error: null,
+    });
 
-    await tripService.joinTrip(userId, 'abc12345'); // lowercase input
+    await tripService.requestJoinTrip(userId, 'abc12345');
 
-    const eqCalls = (mockEq as jest.Mock).mock.calls;
-    const inviteCodeCall = eqCalls.find(([col, val]) => col === 'invite_code' && val === 'ABC12345');
-    expect(inviteCodeCall).toBeDefined();
+    expect(mockRpc).toHaveBeenCalledWith('request_trip_join_by_code', expect.objectContaining({
+      p_invite_code: 'ABC12345',
+    }));
   });
 
   it('returns error on invalid invite code', async () => {
-    mockSingle.mockResolvedValueOnce({ data: null, error: { message: 'Not found' } });
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'Invalid invite code' } });
 
-    const { data, error } = await tripService.joinTrip(userId, 'XXXXXXXX');
+    const { data, error } = await tripService.requestJoinTrip(userId, 'XXXXXXXX');
 
     expect(data).toBeNull();
     expect(error).toBe('Invalid invite code');
   });
 
-  it('returns trip without re-inserting if already a member', async () => {
-    mockSingle
-      .mockResolvedValueOnce({ data: mockTrip, error: null })
-      .mockResolvedValueOnce({ data: { id: 'mem-1' }, error: null }); // already member
+  it('organizer approval is performed through the review RPC', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { id: 'req-1', trip_id: tripId, user_id: 'new-user', status: 'approved' },
+      error: null,
+    });
 
-    const { data, error } = await tripService.joinTrip(userId, 'ABC12345');
+    const { data, error } = await tripService.reviewJoinRequest('req-1', userId, 'approved');
 
     expect(error).toBeNull();
-    expect(data?.id).toBe(tripId);
-    // insert into trip_members should NOT be called a second time
-    const insertCalls = (mockInsert as jest.Mock).mock.calls;
-    const tripMemberInserts = insertCalls.filter(
-      (args) => args[0] && args[0].role === 'member'
-    );
-    expect(tripMemberInserts).toHaveLength(0);
+    expect(data?.status).toBe('approved');
+    expect(mockRpc).toHaveBeenCalledWith('review_trip_join_request', expect.objectContaining({
+      p_request_id: 'req-1',
+      p_reviewer_id: userId,
+      p_status: 'approved',
+    }));
   });
 });
 

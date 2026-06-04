@@ -29,10 +29,11 @@ jest.mock('../../lib/supabaseClient', () => ({
 }));
 
 jest.mock('expo-file-system', () => ({
-  File: function MockFile(this: { uri: string; type: string; size: number }, uri: string) {
+  File: function MockFile(this: { uri: string; type: string; size: number; base64: () => Promise<string> }, uri: string) {
     this.uri = uri;
     this.type = 'image/jpeg';
     this.size = 12345;
+    this.base64 = jest.fn().mockResolvedValue('base64-image');
   },
 }));
 
@@ -102,6 +103,13 @@ describe('communitySpotService.getNearby', () => {
 
     expect(error).toBeNull();
     expect(data).toEqual([]);
+  });
+});
+
+describe('communitySpotService moderation helpers', () => {
+  it('detects bad language in community spot text', () => {
+    expect(communitySpotService.containsBadLanguage('quiet beach')).toBe(false);
+    expect(communitySpotService.containsBadLanguage('this place is shit')).toBe(true);
   });
 });
 

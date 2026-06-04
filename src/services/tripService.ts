@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
-import { Trip, TripMember, ServiceResult } from '../types';
+import { Trip, TripJoinRequest, TripMember, ServiceResult } from '../types';
 
 function generateInviteCode(): string {
   const randomUUID = globalThis.crypto?.randomUUID?.();
@@ -120,33 +120,45 @@ export const tripService = {
     return { data: null, error: error?.message ?? null };
   },
 
-  async joinTrip(
+  async requestJoinTrip(
     userId: string,
     inviteCode: string
-  ): Promise<ServiceResult<Trip>> {
-    // Find trip by invite code
-    const { data: trip, error: tripError } = await supabase
-      .from('trips')
-      .select('*')
-      .eq('invite_code', inviteCode.toUpperCase())
-      .single();
-    if (tripError || !trip) return { data: null, error: 'Invalid invite code' };
-    // Check if already a member
-    const { data: existing } = await supabase
-      .from('trip_members')
-      .select('id')
-      .eq('trip_id', trip.id)
-      .eq('user_id', userId)
-      .single();
-    if (existing) return { data: trip as Trip, error: null }; // already joined
-    // Add as member
-    const { error: memberError } = await supabase.from('trip_members').insert({
-      trip_id: trip.id,
-      user_id: userId,
-      role: 'member',
+  ): Promise<ServiceResult<TripJoinRequest>> {
+    const { data, error } = await supabase.rpc('request_trip_join_by_code', {
+      p_invite_code: inviteCode.toUpperCase(),
+      p_user_id: userId,
     });
-    if (memberError) return { data: null, error: memberError.message };
-    return { data: trip as Trip, error: null };
+    if (error) return { data: null, error: error.message };
+    return { data: data as TripJoinRequest, error: null };
+  },
+
+  async joinTrip(userId: string, inviteCode: string): Promise<ServiceResult<TripJoinRequest>> {
+    return this.requestJoinTrip(userId, inviteCode);
+  },
+
+  async getPendingJoinRequests(tripId: string): Promise<ServiceResult<TripJoinRequest[]>> {
+    const { data, error } = await supabase
+      .from('trip_join_requests')
+      .select('*, profile:profiles(*)')
+      .eq('trip_id', tripId)
+      .eq('status', 'pending')
+      .order('requested_at', { ascending: true });
+    if (error) return { data: null, error: error.message };
+    return { data: data as TripJoinRequest[], error: null };
+  },
+
+  async reviewJoinRequest(
+    requestId: string,
+    reviewerId: string,
+    status: 'approved' | 'rejected'
+  ): Promise<ServiceResult<TripJoinRequest>> {
+    const { data, error } = await supabase.rpc('review_trip_join_request', {
+      p_request_id: requestId,
+      p_reviewer_id: reviewerId,
+      p_status: status,
+    });
+    if (error) return { data: null, error: error.message };
+    return { data: data as TripJoinRequest, error: null };
   },
 
   async getTripMembers(tripId: string): Promise<ServiceResult<TripMember[]>> {

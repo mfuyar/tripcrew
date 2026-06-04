@@ -25,17 +25,17 @@ const TYPES: { value: ItineraryType; label: string; emoji: string }[] = [
 ];
 
 export function AddEditItineraryItemScreen({ navigation, route }: Props) {
-  const { tripId, itemId } = route.params;
+  const { tripId, itemId, prefill } = route.params;
   const { user, isDemoMode } = useAuth();
   const isEdit = !!itemId;
 
-  const [title, setTitle] = useState('');
-  const [type, setType] = useState<ItineraryType>('activity');
-  const [location, setLocation] = useState('');
-  const [startDatetime, setStartDatetime] = useState('');
+  const [title, setTitle] = useState(prefill?.title ?? '');
+  const [type, setType] = useState<ItineraryType>(prefill?.itemType ?? 'activity');
+  const [location, setLocation] = useState(prefill?.location ?? '');
+  const [startDatetime, setStartDatetime] = useState(prefill?.startDate ? `${prefill.startDate}T10:00:00` : '');
   const [endDatetime, setEndDatetime] = useState('');
   const [costEstimate, setCostEstimate] = useState('');
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(prefill?.notes ?? '');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
