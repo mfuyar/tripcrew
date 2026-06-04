@@ -7,6 +7,13 @@ import { CommunitySpot, CommunitySpotCategory, CommunitySpotComment, ServiceResu
 const MEDIA_BUCKET = 'trip-media';
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_COMPRESS_QUALITY = 0.78;
+function getGeminiApiKey(): string | undefined {
+  return process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+}
+
+function getGeminiModel(): string {
+  return process.env.EXPO_PUBLIC_GEMINI_MODEL ?? 'gemini-2.0-flash';
+}
 
 export interface CommunitySpotInput {
   name: string;
@@ -71,6 +78,46 @@ function categoryLabel(category: CommunitySpotCategory): string {
     : category.charAt(0).toUpperCase() + category.slice(1);
 }
 
+function isMissingCommunitySchema(error?: string | null): boolean {
+  if (!error) return false;
+  return (
+    error.includes('community_spots') ||
+    error.includes('get_nearby_community_spots') ||
+    error.includes('schema cache') ||
+    error.includes('Could not find the table') ||
+    error.includes('Could not find the function')
+  );
+}
+
+function normalizeCategory(value: string | undefined): CommunitySpotCategory {
+  const normalized = (value ?? '').toLowerCase().replace(/\s+/g, '_');
+  if (['outdoor', 'food', 'culture', 'hidden_gem', 'other'].includes(normalized)) {
+    return normalized as CommunitySpotCategory;
+  }
+  if (normalized.includes('hidden')) return 'hidden_gem';
+  return 'other';
+}
+
+function extractGeminiText(response: any): string {
+  return response?.candidates?.[0]?.content?.parts
+    ?.map((part: { text?: string }) => part.text ?? '')
+    .join('')
+    .trim() ?? '';
+}
+
+function parseGeminiJsonArray(text: string): any[] {
+  const cleaned = text
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+  const start = cleaned.indexOf('[');
+  const end = cleaned.lastIndexOf(']');
+  const jsonText = start >= 0 && end >= start ? cleaned.slice(start, end + 1) : cleaned;
+  const parsed = JSON.parse(jsonText);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 export function buildNearbyGuidePrompt(
   latitude: number,
   longitude: number,
@@ -124,6 +171,8 @@ export function summarizeNearbySpots(spots: CommunitySpot[]): string {
 }
 
 export const communitySpotService = {
+  isMissingCommunitySchema,
+
   async create(userId: string, input: CommunitySpotInput): Promise<ServiceResult<CommunitySpot>> {
     let photoUrl: string | null = null;
     if (input.photoUri) {
@@ -164,7 +213,10 @@ export const communitySpotService = {
       p_user_id: userId ?? null,
       p_limit: 50,
     });
-    if (error) return { data: null, error: error.message };
+    if (error) {
+      if (isMissingCommunitySchema(error.message)) return { data: [], error: null };
+      return { data: null, error: error.message };
+    }
     return { data: data as CommunitySpot[], error: null };
   },
 
@@ -174,7 +226,10 @@ export const communitySpotService = {
       .select('*, author:profiles(*), comments:community_spot_comments(*, author:profiles(*))')
       .order('created_at', { ascending: false })
       .limit(25);
-    if (error) return { data: null, error: error.message };
+    if (error) {
+      if (isMissingCommunitySchema(error.message)) return { data: [], error: null };
+      return { data: null, error: error.message };
+    }
 
     const spots = (data as CommunitySpot[]).map((spot) => ({
       ...spot,
@@ -212,6 +267,76 @@ export const communitySpotService = {
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as CommunitySpotComment, error: null };
+  },
+
+  async getGeminiFavorites(
+    latitude: number,
+    longitude: number,
+    radiusMiles = 10
+  ): Promise<ServiceResult<CommunitySpot[]>> {
+    const geminiApiKey = getGeminiApiKey();
+    if (!geminiApiKey) {
+      return { data: null, error: 'Gemini API key is missing. Add EXPO_PUBLIC_GEMINI_API_KEY to .env.' };
+    }
+
+    const prompt = [
+      'You are a friendly local travel guide.',
+      `A traveler is at latitude ${latitude}, longitude ${longitude}.`,
+      `Suggest 6 favorite places within about ${radiusMiles} miles.`,
+      'Prefer real, visit-worthy places locals or travelers often like: outdoor spots, food areas, culture, and hidden gems.',
+      'Return only valid JSON, as an array. No markdown.',
+      'Each item must have: name, category, description, address, latitude, longitude.',
+      'category must be one of: outdoor, food, culture, hidden_gem, other.',
+      'description should be one friendly sentence explaining why it is worth checking out.',
+    ].join('\n');
+
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.55,
+              responseMimeType: 'application/json',
+            },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        return { data: null, error: errorText || 'Gemini places lookup failed' };
+      }
+
+      const text = extractGeminiText(await response.json());
+      const places = parseGeminiJsonArray(text);
+      const now = new Date().toISOString();
+      const spots = places
+        .map((place, index) => ({
+          id: `gemini-${latitude}-${longitude}-${index}`,
+          source: 'gemini' as const,
+          user_id: 'gemini',
+          name: String(place.name ?? 'Suggested place'),
+          category: normalizeCategory(place.category),
+          description: String(place.description ?? 'A nearby place worth checking out.'),
+          address: place.address ? String(place.address) : undefined,
+          latitude: Number(place.latitude),
+          longitude: Number(place.longitude),
+          upvotes_count: 0,
+          comments_count: 0,
+          created_at: now,
+          updated_at: now,
+          viewer_has_upvoted: false,
+        }))
+        .filter((spot) => Number.isFinite(spot.latitude) && Number.isFinite(spot.longitude));
+
+      return { data: spots, error: null };
+    } catch (error: any) {
+      return { data: null, error: error?.message ?? 'Gemini places lookup failed' };
+    }
   },
 
   buildNearbyGuidePrompt,

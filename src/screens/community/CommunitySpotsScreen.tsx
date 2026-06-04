@@ -44,6 +44,7 @@ export function CommunitySpotsScreen() {
   const { user } = useAuth();
   const [spots, setSpots] = useState<CommunitySpot[]>([]);
   const [guideSummary, setGuideSummary] = useState('');
+  const [showingGemini, setShowingGemini] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lookingAround, setLookingAround] = useState(false);
@@ -55,6 +56,7 @@ export function CommunitySpotsScreen() {
     if (error) Alert.alert('Unable to load spots', error);
     setSpots(data ?? []);
     setGuideSummary('');
+    setShowingGemini(false);
     setLoading(false);
     setRefreshing(false);
   }, [user?.id]);
@@ -73,18 +75,44 @@ export function CommunitySpotsScreen() {
     const position = await Location.getCurrentPositionAsync({});
     const { latitude, longitude } = position.coords;
     const { data, error } = await communitySpotService.getNearby(latitude, longitude, 10, user?.id);
-    setLookingAround(false);
     if (error) {
+      setLookingAround(false);
       Alert.alert('Unable to look around', error);
       return;
     }
-    const nearby = data ?? [];
+
+    let nearby = data ?? [];
+    let usingGemini = false;
+    if (nearby.length === 0) {
+      const gemini = await communitySpotService.getGeminiFavorites(latitude, longitude, 10);
+      if (gemini.error) {
+        setLookingAround(false);
+        Alert.alert('No community spots yet', gemini.error);
+        setSpots([]);
+        setGuideSummary(communitySpotService.summarizeNearbySpots([]));
+        setShowingGemini(false);
+        return;
+      }
+      nearby = gemini.data ?? [];
+      usingGemini = true;
+    }
+
+    setLookingAround(false);
     setSpots(nearby);
-    setGuideSummary(communitySpotService.summarizeNearbySpots(nearby));
+    setShowingGemini(usingGemini);
+    setGuideSummary(
+      usingGemini
+        ? `No community posts were found nearby yet. Gemini suggested these favorite places around you:\n${communitySpotService.summarizeNearbySpots(nearby)}`
+        : communitySpotService.summarizeNearbySpots(nearby)
+    );
   }
 
   async function handleToggleUpvote(spot: CommunitySpot) {
     if (!user) return;
+    if (spot.source === 'gemini') {
+      Alert.alert('Suggested place', 'Gemini suggestions cannot be upvoted yet. Post it as a community spot if you want others to vote on it.');
+      return;
+    }
     const { data, error } = await communitySpotService.toggleUpvote(spot.id, user.id);
     if (error) {
       Alert.alert('Unable to vote', error);
@@ -99,6 +127,10 @@ export function CommunitySpotsScreen() {
 
   async function handleAddComment(spot: CommunitySpot) {
     if (!user) return;
+    if (spot.source === 'gemini') {
+      Alert.alert('Suggested place', 'Comments are for community posts. Post this place as a spot first.');
+      return;
+    }
     const content = commentText[spot.id]?.trim();
     if (!content) return;
 
@@ -149,7 +181,7 @@ export function CommunitySpotsScreen() {
         contentContainerStyle={styles.content}
         ListHeaderComponent={guideSummary ? (
           <View style={styles.guideBox}>
-            <Text style={styles.guideTitle}>Local guide</Text>
+            <Text style={styles.guideTitle}>{showingGemini ? 'Gemini local guide' : 'Local guide'}</Text>
             <Text style={styles.guideText}>{guideSummary}</Text>
           </View>
         ) : null}
@@ -186,17 +218,20 @@ export function CommunitySpotsScreen() {
               {item.address ? <Text style={styles.address}>{item.address}</Text> : null}
               <Text style={styles.description}>{item.description}</Text>
               <Text style={styles.meta}>
-                By {item.author?.full_name || 'Traveler'} • {item.comments_count} comment{item.comments_count === 1 ? '' : 's'}
+                {item.source === 'gemini'
+                  ? 'Suggested by Gemini'
+                  : `By ${item.author?.full_name || 'Traveler'} • ${item.comments_count} comment${item.comments_count === 1 ? '' : 's'}`}
               </Text>
 
-              {(item.comments ?? []).slice(0, 2).map((comment) => (
+              {item.source !== 'gemini' && (item.comments ?? []).slice(0, 2).map((comment) => (
                 <View key={comment.id} style={styles.comment}>
                   <Text style={styles.commentAuthor}>{comment.author?.full_name || 'Traveler'}</Text>
                   <Text style={styles.commentText}>{comment.content}</Text>
                 </View>
               ))}
 
-              <View style={styles.commentRow}>
+              {item.source !== 'gemini' ? (
+                <View style={styles.commentRow}>
                 <TextInput
                   style={styles.commentInput}
                   value={commentText[item.id] ?? ''}
@@ -211,7 +246,8 @@ export function CommunitySpotsScreen() {
                 >
                   <Text style={styles.commentButtonText}>{commenting === item.id ? '...' : 'Post'}</Text>
                 </TouchableOpacity>
-              </View>
+                </View>
+              ) : null}
             </View>
           </View>
         )}

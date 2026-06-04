@@ -45,7 +45,19 @@ jest.mock('expo-image-manipulator', () => ({
 
 import { communitySpotService } from '../../services/communitySpotService';
 
-beforeEach(() => jest.clearAllMocks());
+const originalFetch = global.fetch;
+const originalGeminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  global.fetch = jest.fn();
+  process.env.EXPO_PUBLIC_GEMINI_API_KEY = originalGeminiKey;
+});
+
+afterAll(() => {
+  global.fetch = originalFetch;
+  process.env.EXPO_PUBLIC_GEMINI_API_KEY = originalGeminiKey;
+});
 
 const spot = {
   id: 'spot-1',
@@ -79,6 +91,18 @@ describe('communitySpotService.getNearby', () => {
       p_limit: 50,
     });
   });
+
+  it('treats missing community schema as no nearby spots', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Could not find the table 'public.community_spots' in the schema cache" },
+    });
+
+    const { data, error } = await communitySpotService.getNearby(40, -73, 10, 'user-1');
+
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
 });
 
 describe('communitySpotService AI helpers', () => {
@@ -98,5 +122,43 @@ describe('communitySpotService AI helpers', () => {
     expect(summary).toContain('Hidden gems');
     expect(summary).toContain('Secret Overlook');
     expect(summary).toContain('2.4 mi');
+  });
+
+  it('loads Gemini favorite places as spot-shaped suggestions', async () => {
+    process.env.EXPO_PUBLIC_GEMINI_API_KEY = 'gemini-key';
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify([{
+                name: 'Rosemary Beach Town Center',
+                category: 'food',
+                description: 'A walkable spot with cafes and shops near the beach.',
+                address: 'Rosemary Beach, FL',
+                latitude: 30.2791,
+                longitude: -86.0163,
+              }]),
+            }],
+          },
+        }],
+      }),
+    });
+
+    const { data, error } = await communitySpotService.getGeminiFavorites(30.28, -86.02, 10);
+
+    expect(error).toBeNull();
+    expect(data?.[0]).toMatchObject({
+      source: 'gemini',
+      name: 'Rosemary Beach Town Center',
+      category: 'food',
+      latitude: 30.2791,
+      longitude: -86.0163,
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('generativelanguage.googleapis.com'),
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 });

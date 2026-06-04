@@ -479,6 +479,7 @@ export interface LiveLocation {
 
 export interface CommunitySpot {
   id: string;
+  source?: 'community' | 'gemini';
   user_id: string;
   name: string;
   category: CommunitySpotCategory;
