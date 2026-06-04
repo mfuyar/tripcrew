@@ -86,7 +86,7 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
               <DateTimePicker
                 value={date}
                 mode="date"
-                display="inline"
+                display="spinner"
                 onChange={handleChange}
                 minimumDate={minimumDate}
                 maximumDate={maximumDate}
@@ -247,6 +247,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
     paddingBottom: Spacing.xl,
+    // Inline calendar on iOS needs ~380pt; ensure there's always room
+    minHeight: 460,
   },
   modalHeader: {
     flexDirection: 'row',
