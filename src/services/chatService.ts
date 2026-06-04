@@ -3,6 +3,7 @@ import { Message, ServiceResult } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { notificationService } from './notificationService';
 import { sendBroadcast } from '../lib/realtimeBroadcast';
+import { mediaService } from './mediaService';
 
 export const chatService = {
   async getMessages(
@@ -16,7 +17,19 @@ export const chatService = {
       .order('created_at', { ascending: true })
       .limit(limit);
     if (error) return { data: null, error: error.message };
-    return { data: data as Message[], error: null };
+    const messages = await mediaService.refreshChatMessageMediaUrls(data as Message[]);
+    return { data: messages, error: null };
+  },
+
+  async getMessageById(messageId: string): Promise<ServiceResult<Message>> {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*, profile:profiles(*), family:families(*)')
+      .eq('id', messageId)
+      .single();
+    if (error) return { data: null, error: error.message };
+    const [message] = await mediaService.refreshChatMessageMediaUrls([data as Message]);
+    return { data: message, error: null };
   },
 
   async sendMessage(
@@ -98,6 +111,21 @@ export const chatService = {
       .on('broadcast', { event: 'new_message' }, ({ payload }) => {
         onMessage(payload as Message);
       })
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: `trip_id=eq.${tripId}`,
+        },
+        async ({ new: newRecord }) => {
+          const messageId = (newRecord as { id?: string } | null)?.id;
+          if (!messageId) return;
+          const { data } = await chatService.getMessageById(messageId);
+          if (data) onMessage(data);
+        }
+      )
       .subscribe();
     return channel;
   },
@@ -150,9 +178,17 @@ export const chatService = {
   },
 
   broadcastMessage(tripId: string, message: Message): void {
-    const channel = supabase.channel(`chat:${tripId}`);
-    void sendBroadcast(channel, 'new_message', message)
-      .finally(() => supabase.removeChannel(channel));
+    // channel.send() on an unsubscribed channel silently drops in v2.46.
+    // Subscribe first so the WebSocket is JOINED, then send and tear down.
+    const channel = supabase
+      .channel(`chat:${tripId}`)
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          void channel
+            .send({ type: 'broadcast', event: 'new_message', payload: message })
+            .finally(() => supabase.removeChannel(channel));
+        }
+      });
   },
 
   unsubscribe(channel: RealtimeChannel): void {
