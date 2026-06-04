@@ -13,6 +13,7 @@ import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { DatePickerField } from '../../components/DatePickerField';
+import { todayDate, todayStr, parseDate, isBefore } from '../../utils/dateUtils';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateTrip'>;
@@ -34,11 +35,10 @@ export function CreateTripScreen({ navigation }: Props) {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = 'Trip name is required';
     if (!destination.trim()) e.destination = 'Destination is required';
-    if (!startDate.trim()) e.startDate = 'Start date is required';
-    if (!endDate.trim()) e.endDate = 'End date is required';
-    if (startDate && endDate && startDate > endDate) {
-      e.endDate = 'End date must be after start date';
-    }
+    if (!startDate) e.startDate = 'Start date is required';
+    else if (isBefore(startDate, todayStr())) e.startDate = 'Start date cannot be in the past';
+    if (!endDate) e.endDate = 'End date is required';
+    else if (startDate && isBefore(endDate, startDate)) e.endDate = 'End date must be on or after start date';
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -91,14 +91,22 @@ export function CreateTripScreen({ navigation }: Props) {
           placeholder="A week at the beach..."
           multiline
         />
-        <DatePickerField label="Start Date" value={startDate} onChange={setStartDate} required />
+        <DatePickerField
+          label="Start Date"
+          value={startDate}
+          onChange={(d) => { setStartDate(d); if (endDate && isBefore(endDate, d)) setEndDate(''); }}
+          required
+          minimumDate={todayDate()}
+        />
+        {errors.startDate ? <Text style={styles.fieldError}>{errors.startDate}</Text> : null}
         <DatePickerField
           label="End Date"
           value={endDate}
           onChange={setEndDate}
           required
-          minimumDate={startDate ? new Date(startDate + 'T12:00:00') : undefined}
+          minimumDate={startDate ? parseDate(startDate) : todayDate()}
         />
+        {errors.endDate ? <Text style={styles.fieldError}>{errors.endDate}</Text> : null}
 
         {/* Currency Picker */}
         <Text style={styles.label}>Currency</Text>
@@ -136,6 +144,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   errorText: { color: Colors.danger, fontSize: FontSize.sm },
+  fieldError: { fontSize: FontSize.xs, color: Colors.danger, marginTop: -Spacing.sm, marginBottom: Spacing.sm, marginLeft: Spacing.xs },
   label: {
     fontSize: FontSize.sm,
     fontWeight: FontWeight.medium,

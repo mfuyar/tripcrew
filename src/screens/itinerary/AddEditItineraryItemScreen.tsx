@@ -6,12 +6,14 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, ItineraryType } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTripContext } from '../../contexts/TripContext';
 import { itineraryService } from '../../services/itineraryService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { AddressAutocomplete } from '../../components/AddressAutocomplete';
 import { DatePickerField, TimePickerField } from '../../components/DatePickerField';
+import { parseDate, isBefore } from '../../utils/dateUtils';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'AddEditItineraryItem'>;
@@ -39,6 +41,7 @@ function buildDatetime(date: string, time: string): string {
 export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   const { tripId, itemId, prefill } = route.params;
   const { user, isDemoMode } = useAuth();
+  const { currentTrip } = useTripContext();
   const isEdit = !!itemId;
 
   const [title, setTitle] = useState(prefill?.title ?? '');
@@ -75,6 +78,15 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
   async function handleSave() {
     if (!title.trim()) { Alert.alert('Error', 'Title is required'); return; }
     if (!startDate) { Alert.alert('Error', 'Start date is required'); return; }
+    if (currentTrip?.start_date && isBefore(startDate, currentTrip.start_date)) {
+      Alert.alert('Invalid date', `Start date cannot be before the trip starts (${currentTrip.start_date}).`); return;
+    }
+    if (currentTrip?.end_date && isBefore(currentTrip.end_date, startDate)) {
+      Alert.alert('Invalid date', `Start date cannot be after the trip ends (${currentTrip.end_date}).`); return;
+    }
+    if (endDate && isBefore(endDate, startDate)) {
+      Alert.alert('Invalid date', 'End date must be on or after the start date.'); return;
+    }
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Editing itinerary is disabled in demo.'); return; }
     setLoading(true);
     const payload = {
@@ -133,10 +145,23 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
           placeholder="Rosemary Beach"
         />
 
-        <DatePickerField label="Start Date" value={startDate} onChange={setStartDate} required />
+        <DatePickerField
+          label="Start Date"
+          value={startDate}
+          onChange={(d) => { setStartDate(d); if (endDate && isBefore(endDate, d)) setEndDate(''); }}
+          required
+          minimumDate={currentTrip?.start_date ? parseDate(currentTrip.start_date) : undefined}
+          maximumDate={currentTrip?.end_date ? parseDate(currentTrip.end_date) : undefined}
+        />
         <TimePickerField label="Start Time" value={startTime} onChange={setStartTime} />
 
-        <DatePickerField label="End Date" value={endDate} onChange={setEndDate} minimumDate={startDate ? new Date(startDate + 'T12:00:00') : undefined} />
+        <DatePickerField
+          label="End Date"
+          value={endDate}
+          onChange={setEndDate}
+          minimumDate={startDate ? parseDate(startDate) : (currentTrip?.start_date ? parseDate(currentTrip.start_date) : undefined)}
+          maximumDate={currentTrip?.end_date ? parseDate(currentTrip.end_date) : undefined}
+        />
         <TimePickerField label="End Time" value={endTime} onChange={setEndTime} />
 
         <AppTextInput
