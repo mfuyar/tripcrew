@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MainStackParamList } from '../../types';
+import { Announcement, MainStackParamList } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
@@ -30,6 +30,7 @@ interface QuickLink {
 }
 
 const ALL_QUICK_LINKS: (QuickLink & { adminOnly?: boolean })[] = [
+  { emoji: '🧭', label: 'Explore', screen: 'CommunitySpots' },
   { emoji: '👨‍👩‍👧‍👦', label: 'Families', screen: 'Families' },
   { emoji: '⚖️', label: 'Balances', screen: 'Balances', adminOnly: true },
   { emoji: '💸', label: 'Settlements', screen: 'Settlements', adminOnly: true },
@@ -42,7 +43,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
   const { currentTrip, families, members, setMembers, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
-  const [announcements, setAnnouncements] = useState<{ id: string; title: string; priority: string }[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -60,6 +61,9 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
     ]);
     const total = (expResult.data ?? []).reduce((s, e) => s + e.amount, 0);
     setTotalExpenses(total);
+    if (annResult.error) {
+      Alert.alert('Unable to load announcements', annResult.error);
+    }
     setAnnouncements(annResult.data ?? []);
     setLoading(false);
     setRefreshing(false);
@@ -200,7 +204,11 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
                         {
                           text: 'Archive',
                           onPress: async () => {
-                            await announcementService.archive(ann.id);
+                            const { error } = await announcementService.archive(ann.id);
+                            if (error) {
+                              Alert.alert('Archive failed', error);
+                              return;
+                            }
                             setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
                           },
                         },
@@ -208,7 +216,11 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
                           text: 'Delete',
                           style: 'destructive',
                           onPress: async () => {
-                            await announcementService.delete(ann.id);
+                            const { error } = await announcementService.delete(ann.id);
+                            if (error) {
+                              Alert.alert('Delete failed', error);
+                              return;
+                            }
                             setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
                           },
                         },
@@ -297,6 +309,20 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
           </ScrollView>
         </View>
       )}
+
+      {/* Explore community spots banner */}
+      <TouchableOpacity
+        style={styles.exploreCard}
+        onPress={() => (navigation as any).navigate('CommunitySpots', { tripId })}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.exploreEmoji}>🧭</Text>
+        <View style={styles.exploreCopy}>
+          <Text style={styles.exploreTitle}>Explore Community Spots</Text>
+          <Text style={styles.exploreSubtitle}>Discover local gems near your destination</Text>
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </TouchableOpacity>
 
       {/* Quick Links Grid */}
       <View style={styles.section}>
@@ -505,6 +531,22 @@ const styles = StyleSheet.create({
   },
   setupBannerSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary },
   chevron: { fontSize: 20, color: Colors.primary, marginLeft: 'auto' },
+  exploreCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginHorizontal: Spacing.md,
+    marginBottom: Spacing.md,
+    borderWidth: 1.5,
+    borderColor: Colors.primary + '40',
+    ...Shadow.sm,
+  },
+  exploreEmoji: { fontSize: 32, marginRight: Spacing.md },
+  exploreCopy: { flex: 1 },
+  exploreTitle: { fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text },
+  exploreSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: 2 },
   familiesRow: { flexDirection: 'row' },
   familyChip: {
     flexDirection: 'row',

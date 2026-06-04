@@ -404,6 +404,31 @@ export const communitySpotService = {
     return { data: data as CommunitySpotComment, error: null };
   },
 
+  async deleteSpot(spotId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('community_spots')
+      .delete()
+      .eq('id', spotId);
+    return { data: null, error: error?.message ?? null };
+  },
+
+  async updateSpot(
+    spotId: string,
+    updates: Pick<CommunitySpot, 'name' | 'category' | 'description' | 'address'>
+  ): Promise<ServiceResult<CommunitySpot>> {
+    if (containsBadLanguage(updates.name, updates.description, updates.address)) {
+      return { data: null, error: 'Spot content cannot be posted.' };
+    }
+    const { data, error } = await supabase
+      .from('community_spots')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', spotId)
+      .select('*, author:profiles(*), comments:community_spot_comments(*, author:profiles(*))')
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as CommunitySpot, error: null };
+  },
+
   async updateComment(commentId: string, content: string): Promise<ServiceResult<CommunitySpotComment>> {
     const trimmed = content.trim();
     if (!trimmed) return { data: null, error: 'Comment cannot be empty.' };

@@ -70,6 +70,10 @@ export function CommunitySpotsScreen({ route }: Props) {
   // commentId → draft text while editing
   const [editingComment, setEditingComment] = useState<Record<string, string>>({});
   const [savingComment, setSavingComment] = useState<string | null>(null);
+  // spotId → true when that spot is in edit mode
+  const [editingSpot, setEditingSpot] = useState<string | null>(null);
+  const [spotEditDraft, setSpotEditDraft] = useState<Partial<CommunitySpot>>({});
+  const [savingSpot, setSavingSpot] = useState(false);
 
   const loadRecent = useCallback(async () => {
     const { data, error } = await communitySpotService.getRecent(user?.id);
@@ -240,6 +244,40 @@ export function CommunitySpotsScreen({ route }: Props) {
     ));
   }
 
+  async function handleDeleteSpot(spotId: string) {
+    Alert.alert('Delete Spot', 'Remove this community spot permanently?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await communitySpotService.deleteSpot(spotId);
+          if (error) { Alert.alert('Error', error); return; }
+          setSpots((prev) => prev.filter((s) => s.id !== spotId));
+        },
+      },
+    ]);
+  }
+
+  async function handleSaveSpotEdit(spotId: string) {
+    const draft = spotEditDraft;
+    if (!draft.name?.trim() || !draft.description?.trim()) {
+      Alert.alert('Required', 'Name and description are required.');
+      return;
+    }
+    setSavingSpot(true);
+    const { data, error } = await communitySpotService.updateSpot(spotId, {
+      name: draft.name.trim(),
+      category: (draft.category ?? 'other') as CommunitySpot['category'],
+      description: draft.description.trim(),
+      address: draft.address?.trim(),
+    });
+    setSavingSpot(false);
+    if (error) { Alert.alert('Error', error); return; }
+    setEditingSpot(null);
+    setSpots((prev) => prev.map((s) => s.id === spotId ? { ...s, ...data } : s));
+  }
+
   function handleAddToItinerary(spot: CommunitySpot) {
     if (!tripId) return;
     const location = spot.address || `${spot.latitude.toFixed(5)}, ${spot.longitude.toFixed(5)}`;
@@ -340,6 +378,69 @@ export function CommunitySpotsScreen({ route }: Props) {
                   ? 'Suggested by Gemini'
                   : `By ${publicName(item.author?.full_name)} • ${item.comments_count} comment${item.comments_count === 1 ? '' : 's'}`}
               </Text>
+
+              {/* Spot owner / admin actions */}
+              {item.source !== 'gemini' && (item.user_id === user?.id || canManageTrip) && (
+                editingSpot === item.id ? (
+                  <View style={styles.spotEditBox}>
+                    <TextInput
+                      style={styles.spotEditInput}
+                      value={spotEditDraft.name ?? ''}
+                      onChangeText={(v) => setSpotEditDraft((d) => ({ ...d, name: v }))}
+                      placeholder="Name"
+                      placeholderTextColor={Colors.textSecondary}
+                    />
+                    <TextInput
+                      style={[styles.spotEditInput, { minHeight: 64, textAlignVertical: 'top' }]}
+                      value={spotEditDraft.description ?? ''}
+                      onChangeText={(v) => setSpotEditDraft((d) => ({ ...d, description: v }))}
+                      placeholder="Description"
+                      placeholderTextColor={Colors.textSecondary}
+                      multiline
+                    />
+                    <TextInput
+                      style={styles.spotEditInput}
+                      value={spotEditDraft.address ?? ''}
+                      onChangeText={(v) => setSpotEditDraft((d) => ({ ...d, address: v }))}
+                      placeholder="Address (optional)"
+                      placeholderTextColor={Colors.textSecondary}
+                    />
+                    <View style={styles.spotEditActions}>
+                      <TouchableOpacity
+                        style={[styles.spotSaveBtn, savingSpot && styles.commentButtonDisabled]}
+                        onPress={() => handleSaveSpotEdit(item.id)}
+                        disabled={savingSpot}
+                      >
+                        <Text style={styles.spotSaveBtnText}>{savingSpot ? 'Saving…' : 'Save'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.commentCancelBtn}
+                        onPress={() => setEditingSpot(null)}
+                      >
+                        <Text style={styles.commentCancelText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.spotOwnerActions}>
+                    <TouchableOpacity
+                      hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+                      onPress={() => {
+                        setSpotEditDraft({ name: item.name, description: item.description, category: item.category, address: item.address });
+                        setEditingSpot(item.id);
+                      }}
+                    >
+                      <Text style={styles.commentEditLink}>Edit spot</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+                      onPress={() => handleDeleteSpot(item.id)}
+                    >
+                      <Text style={styles.spotDeleteLink}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
+              )}
 
               {tripId ? (
                 <AppButton
@@ -530,6 +631,19 @@ const styles = StyleSheet.create({
   },
   commentButtonDisabled: { opacity: 0.5 },
   commentButtonText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
+  spotOwnerActions: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.sm },
+  spotDeleteLink: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: FontWeight.semiBold },
+  spotEditBox: { marginTop: Spacing.sm, gap: Spacing.sm },
+  spotEditInput: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
+    padding: Spacing.sm, fontSize: FontSize.sm, color: Colors.text, backgroundColor: Colors.surface,
+  },
+  spotEditActions: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
+  spotSaveBtn: {
+    flex: 1, backgroundColor: Colors.primary, borderRadius: Radius.md,
+    paddingVertical: Spacing.sm, alignItems: 'center',
+  },
+  spotSaveBtnText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
   commentHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   commentEditLink: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
   commentCancelBtn: {
