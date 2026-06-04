@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MainStackParamList, Trip } from '../../types';
+import { MainStackParamList, Trip, TripJoinRequest } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
@@ -79,6 +79,7 @@ export function TripsListScreen() {
   const [showJoin, setShowJoin] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
   const [joining, setJoining] = useState(false);
+  const [myRequests, setMyRequests] = useState<TripJoinRequest[]>([]);
 
   const loadTrips = useCallback(async () => {
     if (!user) return;
@@ -88,9 +89,14 @@ export function TripsListScreen() {
       setRefreshing(false);
       return;
     }
-    const { data, error: e } = await tripService.getMyTrips(user.id);
-    if (e) setError(e);
-    else setTrips(data ?? []);
+    const [tripsResult, requestsResult] = await Promise.all([
+      tripService.getMyTrips(user.id),
+      tripService.getMyJoinRequests(user.id),
+    ]);
+    if (tripsResult.error) setError(tripsResult.error);
+    else setTrips(tripsResult.data ?? []);
+    // Only show pending requests (approved ones will appear as trips)
+    setMyRequests((requestsResult.data ?? []).filter((r) => r.status === 'pending'));
     setLoading(false);
     setRefreshing(false);
   }, [user, isDemoMode]);
@@ -198,7 +204,28 @@ export function TripsListScreen() {
             loadTrips();
           }} tintColor={Colors.primary} />
         }
-        ListEmptyComponent={
+        ListHeaderComponent={myRequests.length > 0 ? (
+          <View style={styles.requestsSection}>
+            <Text style={styles.requestsTitle}>⏳ Pending Requests</Text>
+            {myRequests.map((req) => (
+              <View key={req.id} style={styles.requestCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.requestTripName}>
+                    {(req as any).trip?.name ?? 'Trip'}
+                  </Text>
+                  <Text style={styles.requestMeta}>
+                    {(req as any).trip?.destination ?? ''} · Requested{' '}
+                    {new Date(req.requested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+                <View style={styles.requestStatusBadge}>
+                  <Text style={styles.requestStatusText}>Pending review</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        ListEmptyComponent={myRequests.length === 0 ? (
           <EmptyState
             icon="✈️"
             title="No trips yet"
@@ -206,7 +233,7 @@ export function TripsListScreen() {
             actionLabel="Create a Trip"
             onAction={() => navigation.navigate('CreateTrip')}
           />
-        }
+        ) : null}
       />
 
       {/* Join Trip Modal */}
@@ -323,6 +350,21 @@ const styles = StyleSheet.create({
   },
   headerBtnTextWhite: { color: Colors.surface },
   list: { padding: Spacing.md, flexGrow: 1 },
+  requestsSection: { marginBottom: Spacing.md },
+  requestsTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.textSecondary, marginBottom: Spacing.sm },
+  requestCard: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.surface, borderRadius: Radius.md,
+    padding: Spacing.md, marginBottom: Spacing.sm,
+    borderLeftWidth: 3, borderLeftColor: Colors.warning,
+  },
+  requestTripName: { fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text },
+  requestMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  requestStatusBadge: {
+    backgroundColor: Colors.warning + '20', borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm, paddingVertical: 3,
+  },
+  requestStatusText: { fontSize: 11, color: Colors.warning, fontWeight: FontWeight.semiBold },
   tripCard: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,

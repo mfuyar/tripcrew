@@ -175,6 +175,18 @@ export const tripService = {
     return this.requestJoinTrip(userId, inviteCode);
   },
 
+  async getMyJoinRequests(userId: string): Promise<ServiceResult<TripJoinRequest[]>> {
+    const { data, error } = await supabase
+      .from('trip_join_requests')
+      .select('*, trip:trips(id, name, destination, start_date, end_date)')
+      .eq('user_id', userId)
+      .in('status', ['pending', 'approved', 'rejected'])
+      .order('requested_at', { ascending: false })
+      .limit(20);
+    if (error) return { data: null, error: error.message };
+    return { data: data as TripJoinRequest[], error: null };
+  },
+
   async getPendingJoinRequests(tripId: string): Promise<ServiceResult<TripJoinRequest[]>> {
     const { data, error } = await supabase
       .from('trip_join_requests')
