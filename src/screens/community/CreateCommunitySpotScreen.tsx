@@ -17,6 +17,7 @@ import { communitySpotService } from '../../services/communitySpotService';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { AddressAutocomplete } from '../../components/AddressAutocomplete';
+import { addressSearchService } from '../../services/addressSearchService';
 import { Colors, FontSize, FontWeight, Radius, Spacing } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateCommunitySpot'>;
@@ -101,9 +102,24 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
       Alert.alert('Missing info', 'Add a spot name and description.');
       return;
     }
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      Alert.alert('Pin needed', 'Use your current location or enter latitude and longitude.');
+    let finalLat = lat;
+    let finalLng = lng;
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    const hasAddress = address.trim().length > 0;
+    if (!hasCoords && !hasAddress) {
+      Alert.alert('Location required', 'Enter an address or use your current location so others can get directions.');
       return;
+    }
+    // If address provided but no pin set, geocode address to get coordinates
+    if (!hasCoords && hasAddress) {
+      const { data: geo } = await addressSearchService.search(address.trim(), 1);
+      if (geo?.[0]) {
+        finalLat = geo[0].latitude;
+        finalLng = geo[0].longitude;
+      } else {
+        Alert.alert('Address not found', 'Could not locate this address. Try using your current location instead.');
+        return;
+      }
     }
 
     setSaving(true);
@@ -112,8 +128,8 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
       category,
       description: description.trim(),
       address: address.trim() || undefined,
-      latitude: lat,
-      longitude: lng,
+      latitude: finalLat,
+      longitude: finalLng,
       photoUri,
     });
     setSaving(false);
@@ -169,7 +185,7 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
       />
 
       <AddressAutocomplete
-        label="Address"
+        label="Address *"
         value={address}
         onChangeText={setAddress}
         onSelect={(suggestion) => {

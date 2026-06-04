@@ -20,6 +20,7 @@ import { communitySpotService } from '../../services/communitySpotService';
 import { addressSearchService } from '../../services/addressSearchService';
 import { LoadingView } from '../../components/LoadingView';
 import { AppButton } from '../../components/AppButton';
+import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
 import { Colors, FontSize, FontWeight, Radius, Shadow, Spacing } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -58,7 +59,7 @@ export function CommunitySpotsScreen({ route }: Props) {
   const navigation = useNavigation<Nav>();
   const { tripId, startDate } = route.params ?? {};
   const { user } = useAuth();
-  const { currentTrip, canManageTrip } = useTripContext();
+  const { currentTrip, canManageTrip, isTripOrganizer } = useTripContext();
   const [spots, setSpots] = useState<CommunitySpot[]>([]);
   const [guideSummary, setGuideSummary] = useState('');
   const [showingGemini, setShowingGemini] = useState(false);
@@ -371,7 +372,25 @@ export function CommunitySpotsScreen({ route }: Props) {
                   </Text>
                 </TouchableOpacity>
               </View>
-              {item.address ? <Text style={styles.address}>{item.address}</Text> : null}
+              {(item.address || (item.latitude && item.longitude)) ? (
+                <View style={styles.directionsRow}>
+                  <Text style={styles.address} numberOfLines={1}>
+                    📍 {item.address || `${item.latitude?.toFixed(4)}, ${item.longitude?.toFixed(4)}`}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.dirBtn}
+                    onPress={() => openAppleMapsDirections(item.address || `${item.latitude},${item.longitude}`)}
+                  >
+                    <Text style={styles.dirBtnText}>Maps</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.dirBtn, styles.dirBtnGoogle]}
+                    onPress={() => openGoogleMapsDirections(item.address || `${item.latitude},${item.longitude}`)}
+                  >
+                    <Text style={styles.dirBtnText}>Google</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
               <Text style={styles.description}>{item.description}</Text>
               <Text style={styles.meta}>
                 {item.source === 'gemini'
@@ -379,8 +398,8 @@ export function CommunitySpotsScreen({ route }: Props) {
                   : `By ${publicName(item.author?.full_name)} • ${item.comments_count} comment${item.comments_count === 1 ? '' : 's'}`}
               </Text>
 
-              {/* Spot owner / admin actions */}
-              {item.source !== 'gemini' && (item.user_id === user?.id || canManageTrip) && (
+              {/* Spot owner / organizer actions */}
+              {item.source !== 'gemini' && (item.user_id === user?.id || isTripOrganizer) && (
                 editingSpot === item.id ? (
                   <View style={styles.spotEditBox}>
                     <TextInput
@@ -423,15 +442,19 @@ export function CommunitySpotsScreen({ route }: Props) {
                   </View>
                 ) : (
                   <View style={styles.spotOwnerActions}>
-                    <TouchableOpacity
-                      hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-                      onPress={() => {
-                        setSpotEditDraft({ name: item.name, description: item.description, category: item.category, address: item.address });
-                        setEditingSpot(item.id);
-                      }}
-                    >
-                      <Text style={styles.commentEditLink}>Edit spot</Text>
-                    </TouchableOpacity>
+                    {/* Only the poster can edit */}
+                    {item.user_id === user?.id && (
+                      <TouchableOpacity
+                        hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+                        onPress={() => {
+                          setSpotEditDraft({ name: item.name, description: item.description, category: item.category, address: item.address });
+                          setEditingSpot(item.id);
+                        }}
+                      >
+                        <Text style={styles.commentEditLink}>Edit</Text>
+                      </TouchableOpacity>
+                    )}
+                    {/* Poster OR organizer can delete */}
                     <TouchableOpacity
                       hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
                       onPress={() => handleDeleteSpot(item.id)}
@@ -631,6 +654,13 @@ const styles = StyleSheet.create({
   },
   commentButtonDisabled: { opacity: 0.5 },
   commentButtonText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
+  directionsRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.xs, flexWrap: 'wrap' },
+  dirBtn: {
+    paddingHorizontal: Spacing.sm, paddingVertical: 3,
+    borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.primary,
+  },
+  dirBtnGoogle: { borderColor: Colors.success },
+  dirBtnText: { fontSize: 11, color: Colors.primary, fontWeight: FontWeight.semiBold },
   spotOwnerActions: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.sm },
   spotDeleteLink: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: FontWeight.semiBold },
   spotEditBox: { marginTop: Spacing.sm, gap: Spacing.sm },
