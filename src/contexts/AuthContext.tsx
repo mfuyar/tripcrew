@@ -22,6 +22,7 @@ interface AuthContextValue {
   session: Session | null;
   loading: boolean;
   isDemoMode: boolean;
+  isGlobalAdmin: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   requestPasswordReset: (email: string) => Promise<{ error: string | null }>;
@@ -53,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false);
 
   function getUrlParams(url: string): URLSearchParams {
     const parsed = new URL(url);
@@ -108,8 +110,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function fetchProfile(userId: string) {
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (!error && data) setProfile(data as Profile);
+      const [profileResult, adminResult] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', userId).single(),
+        supabase.from('global_admins').select('user_id').eq('user_id', userId).maybeSingle(),
+      ]);
+      if (!profileResult.error && profileResult.data) setProfile(profileResult.data as Profile);
+      setIsGlobalAdmin(!!adminResult.data);
     } catch (_e) {} finally {
       setLoading(false);
     }
@@ -219,7 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, session, loading, isDemoMode,
+      user, profile, session, loading, isDemoMode, isGlobalAdmin,
       signIn, signUp, requestPasswordReset, updatePassword, signInWithGoogle,
       signInDemo, signOut, refreshProfile, isPasswordRecovery, finishPasswordRecovery,
     }}>

@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -46,11 +47,12 @@ export function MoreScreen({ route }: { route: { params: { tripId: string } } })
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
   const { canManageTrip } = useTripContext();
+  const { isGlobalAdmin } = useAuth();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.header}>All Features</Text>
-      {FEATURES.filter((f) => !f.adminOnly || canManageTrip).map((item) => (
+      {FEATURES.filter((f) => !f.adminOnly || canManageTrip || isGlobalAdmin).map((item) => (
         <TouchableOpacity
           key={item.title}
           style={styles.row}

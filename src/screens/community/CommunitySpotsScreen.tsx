@@ -58,7 +58,7 @@ function publicName(fullName?: string): string {
 export function CommunitySpotsScreen({ route }: Props) {
   const navigation = useNavigation<Nav>();
   const { tripId, startDate } = route.params ?? {};
-  const { user } = useAuth();
+  const { user, isGlobalAdmin } = useAuth();
   const { currentTrip, canManageTrip, isTripOrganizer } = useTripContext();
   const [spots, setSpots] = useState<CommunitySpot[]>([]);
   const [guideSummary, setGuideSummary] = useState('');
@@ -398,8 +398,8 @@ export function CommunitySpotsScreen({ route }: Props) {
                   : `By ${publicName(item.author?.full_name)} • ${item.comments_count} comment${item.comments_count === 1 ? '' : 's'}`}
               </Text>
 
-              {/* Spot owner / organizer actions */}
-              {item.source !== 'gemini' && (item.user_id === user?.id || isTripOrganizer) && (
+              {/* Spot owner / organizer / global admin actions */}
+              {item.source !== 'gemini' && (item.user_id === user?.id || isTripOrganizer || isGlobalAdmin) && (
                 editingSpot === item.id ? (
                   <View style={styles.spotEditBox}>
                     <TextInput
@@ -442,8 +442,8 @@ export function CommunitySpotsScreen({ route }: Props) {
                   </View>
                 ) : (
                   <View style={styles.spotOwnerActions}>
-                    {/* Only the poster can edit */}
-                    {item.user_id === user?.id && (
+                    {/* Poster or global admin can edit */}
+                    {(item.user_id === user?.id || isGlobalAdmin) && (
                       <TouchableOpacity
                         hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
                         onPress={() => {
@@ -476,7 +476,7 @@ export function CommunitySpotsScreen({ route }: Props) {
 
               {item.source !== 'gemini' && (item.comments ?? []).slice(0, 2).map((comment) => {
                 const isEditing = comment.id in editingComment;
-                const canEdit = comment.user_id === user?.id || canManageTrip;
+                const canEdit = comment.user_id === user?.id || canManageTrip || isGlobalAdmin;
                 return (
                   <View key={comment.id} style={styles.comment}>
                     <View style={styles.commentHeader}>
