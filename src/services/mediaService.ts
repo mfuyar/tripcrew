@@ -53,21 +53,20 @@ function getContentType(file: File, ext: string, mediaType: MediaType): string {
 }
 
 async function prepareImageForUpload(uri: string): Promise<string> {
-  const context = ImageManipulator.manipulate(uri);
-  const image = await context.renderAsync();
-  const resize =
-    image.width > image.height
-      ? { width: Math.min(image.width, MAX_IMAGE_DIMENSION) }
-      : { height: Math.min(image.height, MAX_IMAGE_DIMENSION) };
-
-  context.reset();
-  context.resize(resize);
-  const renderedImage = await context.renderAsync();
-  const result = await renderedImage.saveAsync({
-    compress: IMAGE_COMPRESS_QUALITY,
-    format: SaveFormat.JPEG,
-  });
-  return result.uri;
+  try {
+    // Resize so the longer side is at most MAX_IMAGE_DIMENSION, compress to JPEG
+    const context = ImageManipulator.manipulate(uri);
+    context.resize({ width: MAX_IMAGE_DIMENSION });
+    const rendered = await context.renderAsync();
+    const result = await rendered.saveAsync({
+      compress: IMAGE_COMPRESS_QUALITY,
+      format: SaveFormat.JPEG,
+    });
+    return result.uri;
+  } catch {
+    // If manipulator fails (e.g. unsupported format), upload the original
+    return uri;
+  }
 }
 
 async function prepareFileForUpload(uri: string, mediaType: MediaType): Promise<{
