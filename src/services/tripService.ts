@@ -182,6 +182,38 @@ export const tripService = {
     return { data: null, error: error?.message ?? null };
   },
 
+  // ── Global admin methods ──────────────────────────────────────────────────
+
+  async getAllTrips(): Promise<ServiceResult<Trip[]>> {
+    const { data, error } = await supabase
+      .from('trips')
+      .select('*, trip_members(id), families(id)')
+      .order('created_at', { ascending: false });
+    if (error) return { data: null, error: error.message };
+    const trips = (data ?? []).map((row: any) => ({
+      ...row,
+      member_count: row.trip_members?.length ?? 0,
+      family_count: row.families?.length ?? 0,
+    })) as Trip[];
+    return { data: trips, error: null };
+  },
+
+  async holdTrip(tripId: string, reason: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('trips')
+      .update({ is_held: true, held_reason: reason })
+      .eq('id', tripId);
+    return { data: null, error: error?.message ?? null };
+  },
+
+  async unholdTrip(tripId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('trips')
+      .update({ is_held: false, held_reason: null })
+      .eq('id', tripId);
+    return { data: null, error: error?.message ?? null };
+  },
+
   async setMemberRole(
     tripId: string,
     userId: string,

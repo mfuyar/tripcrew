@@ -29,7 +29,7 @@ interface TripContextValue {
 const TripContext = createContext<TripContextValue | undefined>(undefined);
 
 export function TripProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isGlobalAdmin } = useAuth();
   const [currentTrip, setCurrentTrip] = useState<Trip | null>(null);
   const [members, setMembers] = useState<TripMember[]>([]);
   const [families, setFamilies] = useState<Family[]>([]);
@@ -43,8 +43,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
   const userRole: TripRole | null = currentMember?.role ?? null;
   const isTripOrganizer = userRole === 'trip_organizer';
   const isTripAdmin = userRole === 'trip_admin';
-  const canManageAnnouncements = isTripOrganizer || isTripAdmin;
-  const canManageTrip = isTripOrganizer || isTripAdmin;
+  const canManageAnnouncements = isTripOrganizer || isTripAdmin || isGlobalAdmin;
+  const canManageTrip = isTripOrganizer || isTripAdmin || isGlobalAdmin;
 
   const getFamilyById = useCallback(
     (id: string) => families.find((f) => f.id === id),

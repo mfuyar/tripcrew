@@ -69,7 +69,7 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
 
 export function TripsListScreen() {
   const navigation = useNavigation<Nav>();
-  const { user, isDemoMode } = useAuth();
+  const { user, isDemoMode, isGlobalAdmin } = useAuth();
   const { unreadCount } = useNotifications();
   const { setCurrentTrip, setFamilies, setMembers } = useTripContext();
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -143,11 +143,21 @@ export function TripsListScreen() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>My Trips</Text>
-          <TouchableOpacity
-            style={styles.notificationBtn}
-            onPress={() => navigation.navigate('Notifications')}
-            activeOpacity={0.8}
-          >
+          <View style={styles.headerIcons}>
+            {isGlobalAdmin && (
+              <TouchableOpacity
+                style={styles.adminBtn}
+                onPress={() => navigation.navigate('GlobalAdmin')}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.adminBtnText}>🛡</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.notificationBtn}
+              onPress={() => navigation.navigate('Notifications')}
+              activeOpacity={0.8}
+            >
             <Text style={styles.notificationIcon}>🔔</Text>
             {unreadCount > 0 && (
               <View style={styles.notificationBadge}>
@@ -155,6 +165,7 @@ export function TripsListScreen() {
               </View>
             )}
           </TouchableOpacity>
+          </View>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
@@ -255,6 +266,13 @@ const styles = StyleSheet.create({
     color: Colors.text,
     flex: 1,
   },
+  headerIcons: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  adminBtn: {
+    height: 36, paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.danger,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  adminBtnText: { fontSize: 18, lineHeight: 22 },
   notificationBtn: {
     flexDirection: 'row',
     alignItems: 'center',

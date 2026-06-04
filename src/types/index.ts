@@ -61,6 +61,8 @@ export interface Trip {
   cover_image_url?: string;
   created_by: string;
   is_active: boolean;
+  is_held?: boolean;
+  held_reason?: string;
   invite_code: string;
   created_at: string;
   updated_at: string;
@@ -181,6 +183,7 @@ export interface Message {
   mime_type?: string;
   duration_seconds?: number;
   is_push_talk?: boolean;
+  is_held?: boolean;
   created_at: string;
   edited_at?: string;
   // Joined data
@@ -593,6 +596,7 @@ export type MainStackParamList = {
   CommunitySpots: { tripId?: string; startDate?: string } | undefined;
   CreateCommunitySpot: { tripId?: string } | undefined;
   CommunitySpotReview: undefined;
+  GlobalAdmin: undefined;
   TripSettings: { tripId: string };
   LiveLocation: { tripId: string };
   CreateTrip: undefined;

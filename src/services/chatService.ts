@@ -196,6 +196,22 @@ export const chatService = {
     }
   },
 
+  async holdMessage(messageId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('messages')
+      .update({ is_held: true })
+      .eq('id', messageId);
+    return { data: null, error: error?.message ?? null };
+  },
+
+  async unholdMessage(messageId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('messages')
+      .update({ is_held: false })
+      .eq('id', messageId);
+    return { data: null, error: error?.message ?? null };
+  },
+
   broadcastTyping(tripId: string, userId: string, name: string): void {
     const channel = activeChannels.get(tripId);
     if (channel) {
