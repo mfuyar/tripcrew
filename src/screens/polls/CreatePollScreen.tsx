@@ -66,7 +66,7 @@ export function CreatePollScreen({ navigation, route }: Props) {
 
   return (
     <FormKeyboardView contentContainerStyle={styles.container}>
-        <AppTextInput label="Question *" value={question} onChangeText={setQuestion} placeholder="Where should we have dinner?" />
+        <AppTextInput label="Question" required value={question} onChangeText={setQuestion} placeholder="Where should we have dinner?" />
         <AppTextInput label="Description" value={description} onChangeText={setDescription} placeholder="Optional details..." multiline />
 
         <Text style={styles.label}>Options</Text>

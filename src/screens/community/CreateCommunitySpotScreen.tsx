@@ -185,7 +185,7 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
       />
 
       <AddressAutocomplete
-        label="Address *"
+        label="Address" required
         value={address}
         onChangeText={setAddress}
         onSelect={(suggestion) => {

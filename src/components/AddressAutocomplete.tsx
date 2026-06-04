@@ -16,9 +16,10 @@ interface Props {
   onChangeText: (value: string) => void;
   onSelect?: (suggestion: AddressSuggestion) => void;
   placeholder?: string;
+  required?: boolean;
 }
 
-export function AddressAutocomplete({ label, value, onChangeText, onSelect, placeholder }: Props) {
+export function AddressAutocomplete({ label, value, onChangeText, onSelect, placeholder, required }: Props) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -58,7 +59,7 @@ export function AddressAutocomplete({ label, value, onChangeText, onSelect, plac
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label}>{label}{required ? <Text style={styles.requiredStar}> *</Text> : null}</Text>
       <View style={[styles.inputWrap, focused && styles.inputWrapFocused]}>
         <TextInput
           style={styles.input}
@@ -101,6 +102,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: Spacing.sm,
   },
+  requiredStar: { color: Colors.danger, fontWeight: FontWeight.bold },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -71,14 +71,14 @@ export function CreateTripScreen({ navigation }: Props) {
         ) : null}
 
         <AppTextInput
-          label="Trip Name *"
+          label="Trip Name" required
           value={name}
           onChangeText={setName}
           placeholder="Summer Vacation 2025"
           error={errors.name}
         />
         <AppTextInput
-          label="Destination / Address *"
+          label="Destination / Address" required
           value={destination}
           onChangeText={setDestination}
           placeholder="Hotel, venue, street address, or city"

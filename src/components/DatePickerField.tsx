@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Modal } from 'react-native';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Modal, TextInput } from 'react-native';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../constants/theme';
+
+// Lazy-load the native picker so a missing native module doesn't crash the app
+let DateTimePicker: any = null;
+try {
+  DateTimePicker = require('@react-native-community/datetimepicker').default;
+} catch {
+  // Native module not linked yet — fall back to text input
+}
 
 interface Props {
   label: string;
@@ -23,7 +30,7 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
       })
     : 'Select date';
 
-  function handleChange(_: DateTimePickerEvent, selected?: Date) {
+  function handleChange(_: any, selected?: Date) {
     if (Platform.OS === 'android') setShow(false);
     if (selected) {
       const y = selected.getFullYear();
@@ -33,22 +40,45 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
     }
   }
 
+  // Fallback: simple text input when native module isn't linked
+  if (!DateTimePicker) {
+    return (
+      <View style={styles.wrapper}>
+        <Text style={styles.label}>
+          {label}{required ? <Text style={styles.requiredStar}> *</Text> : null}
+        </Text>
+        <TextInput
+          style={styles.textFallback}
+          value={value}
+          onChangeText={onChange}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor={Colors.textSecondary}
+          keyboardType="numbers-and-punctuation"
+        />
+        <Text style={styles.fallbackHint}>Rebuild the app to enable the calendar picker</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.wrapper}>
       <Text style={styles.label}>
-        {label}{required ? ' *' : ''}
+        {label}{required ? <Text style={styles.requiredStar}> *</Text> : null}
       </Text>
-      <TouchableOpacity style={styles.btn} onPress={() => setShow(true)} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={[styles.btn, !value && required && styles.btnRequired]}
+        onPress={() => setShow(true)}
+        activeOpacity={0.7}
+      >
         <Text style={[styles.btnText, !value && styles.placeholder]}>📅  {display}</Text>
       </TouchableOpacity>
 
-      {/* iOS: show inline in a modal */}
       {Platform.OS === 'ios' ? (
         <Modal visible={show} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalBox}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{label}</Text>
+                <Text style={styles.modalTitle}>{label}{required ? <Text style={styles.requiredStar}> *</Text> : null}</Text>
                 <TouchableOpacity onPress={() => setShow(false)}>
                   <Text style={styles.doneBtn}>Done</Text>
                 </TouchableOpacity>
@@ -107,13 +137,30 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
       })
     : 'Optional time';
 
-  function handleChange(_: DateTimePickerEvent, selected?: Date) {
+  function handleChange(_: any, selected?: Date) {
     if (Platform.OS === 'android') setShow(false);
     if (selected) {
       const h = String(selected.getHours()).padStart(2, '0');
       const m = String(selected.getMinutes()).padStart(2, '0');
       onChange(`${h}:${m}`);
     }
+  }
+
+  // Fallback
+  if (!DateTimePicker) {
+    return (
+      <View style={styles.wrapper}>
+        <Text style={styles.label}>{label} <Text style={styles.optional}>(optional)</Text></Text>
+        <TextInput
+          style={styles.textFallback}
+          value={value}
+          onChangeText={onChange}
+          placeholder="HH:MM (optional)"
+          placeholderTextColor={Colors.textSecondary}
+          keyboardType="numbers-and-punctuation"
+        />
+      </View>
+    );
   }
 
   return (
@@ -167,7 +214,8 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
 const styles = StyleSheet.create({
   wrapper: { marginBottom: Spacing.md },
   label: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.sm },
-  optional: { fontWeight: FontWeight.regular, color: Colors.textSecondary },
+  optional: { fontWeight: '400', color: Colors.textSecondary },
+  requiredStar: { color: Colors.danger, fontWeight: FontWeight.bold },
   btn: {
     borderWidth: 1,
     borderColor: Colors.border,
@@ -176,6 +224,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: Colors.surface,
   },
+  btnRequired: { borderColor: Colors.danger + '80' },
   btnText: { fontSize: FontSize.md, color: Colors.text },
   placeholder: { color: Colors.textSecondary },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
@@ -186,6 +235,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   clearBtnText: { fontSize: 13, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
+  textFallback: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: 12,
+    fontSize: FontSize.md, color: Colors.text, backgroundColor: Colors.surface,
+  },
+  fallbackHint: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 4 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalBox: {
     backgroundColor: Colors.surface,

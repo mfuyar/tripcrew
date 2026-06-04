@@ -98,7 +98,7 @@ export function AddEditCarScreen({ navigation, route }: Props) {
 
   return (
     <FormKeyboardView contentContainerStyle={styles.container}>
-        <AppTextInput label="Car Name *" value={name} onChangeText={setName} placeholder="Blue Honda" />
+        <AppTextInput label="Car Name" required value={name} onChangeText={setName} placeholder="Blue Honda" />
         <AppTextInput label="Total Seats" value={totalSeats} onChangeText={setTotalSeats} keyboardType="number-pad" placeholder="5" />
 
         <Text style={styles.label}>Driver Family</Text>

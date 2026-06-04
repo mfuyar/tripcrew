@@ -13,12 +13,14 @@ import { Colors, Radius, FontSize, Spacing, FontWeight } from '../constants/them
 interface Props extends TextInputProps {
   label?: string;
   error?: string;
+  required?: boolean;
   containerStyle?: ViewStyle;
 }
 
 export function AppTextInput({
   label,
   error,
+  required,
   secureTextEntry,
   containerStyle,
   multiline,
@@ -30,7 +32,11 @@ export function AppTextInput({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? (
+        <Text style={styles.label}>
+          {label}{required ? <Text style={styles.requiredStar}> *</Text> : null}
+        </Text>
+      ) : null}
       <View style={[
         styles.inputWrapper,
         focused && styles.inputWrapperFocused,
@@ -112,5 +118,9 @@ const styles = StyleSheet.create({
     color: Colors.danger,
     marginTop: Spacing.xs,
     marginLeft: Spacing.xs,
+  },
+  requiredStar: {
+    color: Colors.danger,
+    fontWeight: FontWeight.bold,
   },
 });

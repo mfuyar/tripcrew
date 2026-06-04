@@ -109,7 +109,7 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
 
   return (
     <FormKeyboardView contentContainerStyle={styles.container} keyboardVerticalOffset={120}>
-        <AppTextInput label="Title *" value={title} onChangeText={setTitle} placeholder="Beach picnic..." />
+        <AppTextInput label="Title" required value={title} onChangeText={setTitle} placeholder="Beach picnic..." />
 
         <Text style={styles.label}>Type</Text>
         <View style={styles.typeRow}>

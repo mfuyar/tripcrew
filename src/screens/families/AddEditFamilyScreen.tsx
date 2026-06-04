@@ -135,7 +135,7 @@ export function AddEditFamilyScreen({ navigation, route }: Props) {
         {error ? <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View> : null}
 
         <AppTextInput
-          label="Family Name *"
+          label="Family Name" required
           value={name}
           onChangeText={setName}
           placeholder="The Smith Family"

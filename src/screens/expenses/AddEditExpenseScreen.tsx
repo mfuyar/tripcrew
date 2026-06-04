@@ -211,9 +211,9 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        <AppTextInput label="Title *" value={title} onChangeText={setTitle} placeholder="Grocery run at Mercado..." />
+        <AppTextInput label="Title" required value={title} onChangeText={setTitle} placeholder="Grocery run at Mercado..." />
         <AppTextInput
-          label="Amount *"
+          label="Amount" required
           value={amount}
           onChangeText={setAmount}
           placeholder="0.00"
