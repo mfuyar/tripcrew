@@ -12,6 +12,7 @@
       "bundleIdentifier": "com.muhemmet.travelcrew",
       "appleTeamId": "B6N8Y2FHV5",
       "deploymentTarget": "16.4",
+      "buildNumber": "2",
       "infoPlist": {
         "NSCameraUsageDescription": "Travel Crew needs camera access to scan receipts and take trip photos.",
         "NSLocationWhenInUseUsageDescription": "Travel Crew needs location access to share your live position with trip members and find community spots around you.",
