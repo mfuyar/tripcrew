@@ -155,6 +155,15 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const receivedSub = Notifications.addNotificationReceivedListener((event) => {
       if (event.request.content.data?.source === LOCAL_NOTIFICATION_SOURCE) return;
       setUnreadCount((c) => c + 1);
+      // Play push-talk audio from OS push notification when app is backgrounded
+      const data = event.request.content.data as Record<string, any>;
+      if (
+        data?.type === 'push_talk' &&
+        data?.media_url &&
+        getActiveChatTrip() !== data?.trip_id
+      ) {
+        setBgPushTalkUrl(data.media_url as string);
+      }
     });
     return () => {
       unsub();

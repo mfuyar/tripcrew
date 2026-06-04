@@ -178,7 +178,7 @@ export const chatService = {
       userIds,
       '🎙️ Push Talk',
       'A voice message was sent to your family',
-      { trip_id: tripId, family_id: familyId }
+      { trip_id: tripId, family_id: familyId, type: 'push_talk', media_url: mediaUrl ?? null }
     );
 
     // Broadcast real-time to each recipient
