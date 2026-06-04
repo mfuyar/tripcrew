@@ -72,6 +72,43 @@ export function TripSettingsScreen({ navigation, route }: Props) {
 
   async function handleLeave() {
     if (!user) return;
+
+    if (isTripOrganizer) {
+      const admins = members.filter(
+        (m) => m.role === 'trip_admin' && m.user_id !== user.id
+      );
+
+      if (admins.length === 0) {
+        // No admins — block leaving
+        Alert.alert(
+          'Cannot Leave Yet',
+          'You are the only organizer. Promote at least one member to admin first, then transfer organizer role before leaving.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Has admins — ask who should become organizer
+      Alert.alert(
+        'Transfer Organizer Role',
+        'Before leaving, select a new organizer:',
+        [
+          ...admins.map((a) => ({
+            text: a.profile?.full_name ?? a.user_id,
+            onPress: async () => {
+              await tripService.setMemberRole(tripId, a.user_id, 'trip_organizer');
+              await tripService.setMemberRole(tripId, user.id, 'member');
+              await tripService.removeMember(tripId, user.id);
+              setCurrentTrip(null);
+              navigation.navigate('Tabs');
+            },
+          })),
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
     Alert.alert('Leave Trip', 'Are you sure you want to leave this trip?', [
       { text: 'Cancel', style: 'cancel' },
       {
