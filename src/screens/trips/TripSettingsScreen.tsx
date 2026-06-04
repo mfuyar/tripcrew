@@ -34,27 +34,32 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     canManageTrip,
     setCurrentTrip,
   } = useTripContext();
-  const { user, isDemoMode } = useAuth();
+  const { user, isDemoMode, isGlobalAdmin } = useAuth();
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(currentTrip?.name ?? '');
   const [destination, setDestination] = useState(currentTrip?.destination ?? '');
   const [joinRequests, setJoinRequests] = useState<TripJoinRequest[]>([]);
   const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
 
-  // Re-fetch members on focus so role changes from any device are reflected
+  // Re-fetch members on focus, then load join requests once we know the user's role
   useFocusEffect(useCallback(() => {
     if (isDemoMode) return;
-    tripService.getTripMembers(tripId).then(({ data }) => {
-      if (data) setMembers(data);
+    tripService.getTripMembers(tripId).then(({ data: freshMembers }) => {
+      if (freshMembers) {
+        setMembers(freshMembers);
+        // Check role from fresh data — don't rely on stale canManageTrip state
+        const isManager = freshMembers.some(
+          (m) => m.user_id === user?.id &&
+                 (m.role === 'trip_organizer' || m.role === 'trip_admin')
+        );
+        if (isManager || isGlobalAdmin) {
+          tripService.getPendingJoinRequests(tripId).then(({ data }) => {
+            if (data) setJoinRequests(data);
+          });
+        }
+      }
     });
-    if (canManageTrip) {
-      tripService.getPendingJoinRequests(tripId).then(({ data }) => {
-        if (data) setJoinRequests(data);
-      });
-    } else {
-      setJoinRequests([]);
-    }
-  }, [tripId, isDemoMode, canManageTrip]));
+  }, [tripId, isDemoMode, user?.id, isGlobalAdmin]));
 
   async function handleSave() {
     if (isDemoMode) { Alert.alert('Demo Mode', 'Editing trip settings is disabled in demo.'); return; }
