@@ -454,8 +454,10 @@ export const communitySpotService = {
       );
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        return { data: null, error: errorText || 'Gemini places lookup failed' };
+        if (response.status === 400 || response.status === 403) {
+          return { data: null, error: 'Gemini API key is invalid. Update EXPO_PUBLIC_GEMINI_API_KEY in .env.' };
+        }
+        return { data: null, error: 'Could not load suggested places right now.' };
       }
 
       const text = extractGeminiText(await response.json());

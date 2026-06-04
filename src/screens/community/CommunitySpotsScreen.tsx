@@ -155,14 +155,7 @@ export function CommunitySpotsScreen({ route }: Props) {
     let usingGemini = false;
     if (nearby.length === 0) {
       const gemini = await communitySpotService.getGeminiFavorites(latitude, longitude, 10);
-      if (gemini.error) {
-        setLookingAround(false);
-        Alert.alert('No community spots yet', gemini.error);
-        setSpots([]);
-        setGuideSummary(communitySpotService.summarizeNearbySpots([]));
-        setShowingGemini(false);
-        return;
-      }
+      // Silently fall back if Gemini is unavailable — no error shown to user
       nearby = gemini.data ?? [];
       usingGemini = true;
     }
