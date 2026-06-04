@@ -56,11 +56,11 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
     }
     const [expResult, annResult] = await Promise.all([
       expenseService.getExpenses(tripId),
-      announcementService.getAll(tripId),
+      announcementService.getLatest(tripId, 3),
     ]);
     const total = (expResult.data ?? []).reduce((s, e) => s + e.amount, 0);
     setTotalExpenses(total);
-    setAnnouncements(annResult.data?.slice(0, 3) ?? []);
+    setAnnouncements(annResult.data ?? []);
     setLoading(false);
     setRefreshing(false);
   }, [tripId]);
@@ -175,15 +175,15 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       </View>
 
       {/* Announcements */}
-      {announcements.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>📢 Announcements</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Announcements', { tripId })}>
-              <Text style={styles.seeAll}>See all</Text>
-            </TouchableOpacity>
-          </View>
-          {announcements.map((ann) => (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>📢 Announcements</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Announcements', { tripId })}>
+            <Text style={styles.seeAll}>{announcements.length > 0 ? 'See all' : canManageAnnouncements ? 'Post' : 'Open'}</Text>
+          </TouchableOpacity>
+        </View>
+        {announcements.length > 0 ? (
+          announcements.map((ann) => (
             <View key={ann.id} style={styles.announcementRow}>
               <Text style={styles.annPriority}>
                 {ann.priority === 'urgent' ? '🔴' : ann.priority === 'high' ? '🟠' : '🟢'}
@@ -221,9 +221,21 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
                 </TouchableOpacity>
               )}
             </View>
-          ))}
-        </View>
-      )}
+          ))
+        ) : (
+          <TouchableOpacity
+            style={styles.announcementEmpty}
+            onPress={() => navigation.navigate('Announcements', { tripId })}
+          >
+            <Text style={styles.announcementEmptyTitle}>No announcements yet</Text>
+            <Text style={styles.announcementEmptyText}>
+              {canManageAnnouncements
+                ? 'Post a trip update for everyone from here.'
+                : 'Trip updates from organizers and admins will appear here.'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Join-family prompt for users without a family */}
       {families.length > 0 && !userFamily && !isTripOrganizer && (
@@ -457,6 +469,24 @@ const styles = StyleSheet.create({
   annPriority: { fontSize: 16 },
   annTitle: { flex: 1, fontSize: FontSize.sm, color: Colors.text },
   annAction: { fontSize: 20, color: Colors.textSecondary, paddingLeft: Spacing.sm },
+  announcementEmpty: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  announcementEmptyTitle: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  announcementEmptyText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+  },
   setupBanner: {
     flexDirection: 'row',
     alignItems: 'center',

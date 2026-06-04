@@ -35,6 +35,8 @@ export type PackingStatus = 'unpacked' | 'packed' | 'left_behind';
 
 export type ItineraryType = 'activity' | 'meal' | 'transport' | 'accommodation' | 'free_time' | 'other';
 
+export type CommunitySpotCategory = 'outdoor' | 'food' | 'culture' | 'hidden_gem' | 'other';
+
 // ─── Core Entities ───────────────────────────────────────────────────────────
 
 export interface Profile {
@@ -473,6 +475,37 @@ export interface LiveLocation {
   isLive: boolean; // true = currently broadcasting
 }
 
+// ─── Community Spots ─────────────────────────────────────────────────────────
+
+export interface CommunitySpot {
+  id: string;
+  user_id: string;
+  name: string;
+  category: CommunitySpotCategory;
+  description: string;
+  address?: string;
+  latitude: number;
+  longitude: number;
+  photo_url?: string;
+  upvotes_count: number;
+  comments_count: number;
+  created_at: string;
+  updated_at: string;
+  distance_miles?: number;
+  viewer_has_upvoted?: boolean;
+  author?: Profile;
+  comments?: CommunitySpotComment[];
+}
+
+export interface CommunitySpotComment {
+  id: string;
+  spot_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  author?: Profile;
+}
+
 // ─── Service Return Type ──────────────────────────────────────────────────────
 
 export interface ServiceResult<T> {
@@ -529,6 +562,8 @@ export type MainStackParamList = {
   EmergencyInfo: { tripId: string };
   Fairness: { tripId: string };
   Announcements: { tripId: string };
+  CommunitySpots: { tripId?: string } | undefined;
+  CreateCommunitySpot: { tripId?: string } | undefined;
   TripSettings: { tripId: string };
   LiveLocation: { tripId: string };
   CreateTrip: undefined;

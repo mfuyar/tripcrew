@@ -6,16 +6,13 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "resizeMode": "contain",
-      "backgroundColor": "#4F7FFF"
-    },
+    "backgroundColor": "#4F7FFF",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.muhemmet.travelcrew",
       "infoPlist": {
         "NSCameraUsageDescription": "Travel Crew needs camera access to scan receipts and take trip photos.",
-        "NSLocationWhenInUseUsageDescription": "Travel Crew needs location access to share your live position with trip members.",
+        "NSLocationWhenInUseUsageDescription": "Travel Crew needs location access to share your live position with trip members and find community spots around you.",
         "NSPhotoLibraryUsageDescription": "Travel Crew needs photo library access to upload trip photos and scan receipts.",
         "NSPhotoLibraryAddUsageDescription": "Travel Crew saves photos to your photo library.",
         "ITSAppUsesNonExemptEncryption": false
@@ -59,7 +56,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Travel Crew needs location access to share your live position with trip members."
+          "locationWhenInUsePermission": "Travel Crew needs location access to share your live position with trip members and find community spots around you."
         }
       ],
       "expo-web-browser",
@@ -76,7 +73,8 @@
         {
           "microphonePermission": "Travel Crew needs microphone access to send voice messages."
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "scheme": "travelcrew",
     "extra": {

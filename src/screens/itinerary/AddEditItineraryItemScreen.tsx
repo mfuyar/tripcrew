@@ -10,6 +10,7 @@ import { itineraryService } from '../../services/itineraryService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
+import { AddressAutocomplete } from '../../components/AddressAutocomplete';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'AddEditItineraryItem'>;
@@ -108,7 +109,13 @@ export function AddEditItineraryItemScreen({ navigation, route }: Props) {
           ))}
         </View>
 
-        <AppTextInput label="Location" value={location} onChangeText={setLocation} placeholder="Barceloneta Beach" />
+        <AddressAutocomplete
+          label="Location"
+          value={location}
+          onChangeText={setLocation}
+          onSelect={(suggestion) => setLocation(suggestion.label)}
+          placeholder="Rosemary Beach"
+        />
         <AppTextInput
           label="Start Date & Time *"
           value={startDatetime}

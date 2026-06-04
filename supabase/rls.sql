@@ -521,6 +521,53 @@ CREATE POLICY "Users can delete their own location"
   ON live_locations FOR DELETE
   USING (user_id = auth.uid());
 
+-- ─── community_spots ─────────────────────────────────────────────────────────
+ALTER TABLE community_spots ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated users can view community spots"
+  ON community_spots FOR SELECT
+  USING (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can create their own community spots"
+  ON community_spots FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update their own community spots"
+  ON community_spots FOR UPDATE
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete their own community spots"
+  ON community_spots FOR DELETE
+  USING (user_id = auth.uid());
+
+-- ─── community_spot_comments ─────────────────────────────────────────────────
+ALTER TABLE community_spot_comments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated users can view community spot comments"
+  ON community_spot_comments FOR SELECT
+  USING (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can create their own community spot comments"
+  ON community_spot_comments FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete their own community spot comments"
+  ON community_spot_comments FOR DELETE
+  USING (user_id = auth.uid());
+
+-- ─── community_spot_votes ────────────────────────────────────────────────────
+ALTER TABLE community_spot_votes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated users can view community spot votes"
+  ON community_spot_votes FOR SELECT
+  USING (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can manage their own community spot votes"
+  ON community_spot_votes FOR ALL
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
 -- ─── Realtime enable ──────────────────────────────────────────────────────────
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE notifications;

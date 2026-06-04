@@ -39,6 +39,18 @@ export const announcementService = {
     return { data: data as Announcement[], error: null };
   },
 
+  async getLatest(tripId: string, limit = 3): Promise<ServiceResult<Announcement[]>> {
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('id, title, content, priority, created_at')
+      .eq('trip_id', tripId)
+      .eq('is_archived', false)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) return { data: null, error: error.message };
+    return { data: data as Announcement[], error: null };
+  },
+
   async archive(announcementId: string): Promise<ServiceResult<null>> {
     const { error } = await supabase
       .from('announcements')

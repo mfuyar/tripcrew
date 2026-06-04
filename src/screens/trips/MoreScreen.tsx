@@ -35,6 +35,7 @@ const FEATURES: FeatureItem[] = [
   { emoji: '🗳️', title: 'Polls', subtitle: 'Group decision making', screen: 'Polls' },
   { emoji: '🚨', title: 'Emergency Info', subtitle: 'Medical & contacts', screen: 'EmergencyInfo' },
   { emoji: '📢', title: 'Announcements', subtitle: 'Trip-wide messages', screen: 'Announcements' },
+  { emoji: '🧭', title: 'Community Spots', subtitle: 'Look around for local finds', screen: 'CommunitySpots' },
   { emoji: '📷', title: 'Scan Receipt', subtitle: 'AI receipt parsing', screen: 'ReceiptScanner', adminOnly: true },
   { emoji: '📍', title: 'Live Location', subtitle: 'See where everyone is', screen: 'LiveLocation' },
   { emoji: '⚙️', title: 'Trip Settings', subtitle: 'Invite code, members, danger zone', screen: 'TripSettings' },
