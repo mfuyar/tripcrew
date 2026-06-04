@@ -32,12 +32,18 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
 
   function handleChange(_: any, selected?: Date) {
     if (Platform.OS === 'android') setShow(false);
-    if (selected) {
-      const y = selected.getFullYear();
-      const m = String(selected.getMonth() + 1).padStart(2, '0');
-      const d = String(selected.getDate()).padStart(2, '0');
-      onChange(`${y}-${m}-${d}`);
-    }
+    if (selected) formatAndSet(selected);
+  }
+
+  function handleValueChange(selected: Date) {
+    formatAndSet(selected);
+  }
+
+  function formatAndSet(selected: Date) {
+    const y = selected.getFullYear();
+    const m = String(selected.getMonth() + 1).padStart(2, '0');
+    const d = String(selected.getDate()).padStart(2, '0');
+    onChange(`${y}-${m}-${d}`);
   }
 
   // Fallback: simple text input when native module isn't linked
@@ -87,7 +93,7 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
                 value={date}
                 mode="date"
                 display="spinner"
-                onChange={handleChange}
+                onValueChange={handleValueChange}
                 minimumDate={minimumDate}
                 maximumDate={maximumDate}
                 style={styles.picker}
@@ -138,12 +144,15 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
     : 'Optional time';
 
   function handleChange(_: any, selected?: Date) {
-    if (Platform.OS === 'android') setShow(false);
-    if (selected) {
-      const h = String(selected.getHours()).padStart(2, '0');
-      const m = String(selected.getMinutes()).padStart(2, '0');
-      onChange(`${h}:${m}`);
-    }
+    if (Platform.OS === 'android') { setShow(false); if (selected) formatTime(selected); }
+  }
+
+  function handleValueChange(selected: Date) { formatTime(selected); }
+
+  function formatTime(selected: Date) {
+    const h = String(selected.getHours()).padStart(2, '0');
+    const m = String(selected.getMinutes()).padStart(2, '0');
+    onChange(`${h}:${m}`);
   }
 
   // Fallback
@@ -191,7 +200,7 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
                 value={timeDate}
                 mode="time"
                 display="spinner"
-                onChange={handleChange}
+                onValueChange={handleValueChange}
                 style={styles.picker}
               />
             </View>
