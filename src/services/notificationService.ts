@@ -245,7 +245,8 @@ export const notificationService = {
       .insert(rows)
       .select();
 
-    await notificationService.sendPushToUsers(userIds, title, body, data);
+    // Include type in push payload so notification tap can route correctly
+    await notificationService.sendPushToUsers(userIds, title, body, { ...data, type });
 
     // Broadcast to each user's personal channel for real-time delivery
     (inserted ?? []).forEach((n: Notification) => broadcastNotification(n));

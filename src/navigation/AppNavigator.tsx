@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
+import { createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, TouchableOpacity, View } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { Colors, FontSize } from '../constants/theme';
 import { LoadingView } from '../components/LoadingView';
@@ -298,13 +300,51 @@ function MainNavigator() {
   );
 }
 
+const navigationRef = createNavigationContainerRef();
+
+function handleNotificationNavigation(data: Record<string, unknown>) {
+  if (!navigationRef.isReady()) return;
+  const tripId = data?.trip_id as string | undefined;
+  if (!tripId) return;
+  const type = data?.type as string | undefined;
+  try {
+    (navigationRef as any).navigate('Main', {
+      screen: 'TripStack',
+      params: {
+        tripId,
+        screen: type === 'message' || type === 'push_talk' ? 'Chat' : 'Dashboard',
+      },
+    });
+  } catch { /* navigation may fail if screen isn't mounted yet */ }
+}
+
 export function AppNavigator() {
   const { user, loading, isPasswordRecovery } = useAuth();
+
+  useEffect(() => {
+    // App opened from killed state via notification tap
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) {
+        handleNotificationNavigation(
+          response.notification.request.content.data as Record<string, unknown>
+        );
+      }
+    });
+
+    // Notification tapped while app is running
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      handleNotificationNavigation(
+        response.notification.request.content.data as Record<string, unknown>
+      );
+    });
+
+    return () => sub.remove();
+  }, []);
 
   if (loading) return <LoadingView message="Loading Travel Crew..." />;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {user && !isPasswordRecovery ? (
           <RootStack.Screen name="Main" component={MainNavigator} />
