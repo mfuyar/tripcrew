@@ -9,6 +9,7 @@ import {
   TextInput,
   Dimensions,
   ScrollView,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, TripMedia } from '../../types';
@@ -75,6 +76,7 @@ export function MediaDetailScreen({ navigation, route }: Props) {
   const { width } = Dimensions.get('window');
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={96}>
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Image
         source={{ uri: media.url }}
@@ -122,6 +124,7 @@ export function MediaDetailScreen({ navigation, route }: Props) {
         </View>
       ) : null}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

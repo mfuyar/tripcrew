@@ -9,6 +9,8 @@ import {
   Alert,
   Image,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -299,6 +301,7 @@ export function CommunitySpotsScreen({ route }: Props) {
   if (loading) return <LoadingView />;
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={96}>
     <View style={styles.container}>
       <View style={styles.actions}>
         <AppButton
@@ -543,6 +546,7 @@ export function CommunitySpotsScreen({ route }: Props) {
         )}
       />
     </View>
+    </KeyboardAvoidingView>
   );
 }
 

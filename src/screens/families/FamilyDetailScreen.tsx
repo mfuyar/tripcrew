@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
   TouchableOpacity,
   Alert,
   Platform,
@@ -182,17 +183,27 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
 
     setSendingPush(true);
     const title = 'Push talk ping';
-    const body = `${profile?.full_name ?? 'A family member'} sent a push talk ping.`;
-    await Promise.all(recipients.map((recipient) => notificationService.createNotification({
-      user_id: recipient.user_id,
-      trip_id: tripId,
-      type: 'push_talk',
+    const body = `${profile?.full_name ?? 'A family member'} pinged ${family.name}.`;
+    const { error } = await notificationService.notifyUsers(
+      recipients.map((recipient) => recipient.user_id),
+      tripId,
+      'push_talk',
       title,
       body,
-      data: { family_id: familyId, family_name: family.name, sender_id: user.id },
-      is_read: false,
-    })));
+      {
+        trip_id: tripId,
+        family_id: familyId,
+        family_name: family.name,
+        sender_id: user.id,
+        family_only: true,
+        push_talk_ping: true,
+      }
+    );
     setSendingPush(false);
+    if (error) {
+      Alert.alert('Push talk failed', error);
+      return;
+    }
     Alert.alert('Push talk sent', `Sent to ${recipients.length} opted-in member${recipients.length === 1 ? '' : 's'}.`);
   }
 
@@ -217,6 +228,11 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
   }
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={96}
+    >
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -390,6 +406,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         />
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
