@@ -319,26 +319,42 @@ export function TripSettingsScreen({ navigation, route }: Props) {
             <Text style={styles.refreshText}>↻ Refresh</Text>
           </TouchableOpacity>
         </View>
+        {/* Role colour legend */}
+        <View style={styles.roleLegend}>
+          <Text style={[styles.legendDot, { color: Colors.primary }]}>● Trip Organizer</Text>
+          <Text style={[styles.legendDot, { color: Colors.success }]}>● Trip Admin</Text>
+          <Text style={[styles.legendDot, { color: Colors.warning }]}>● Family Admin</Text>
+          <Text style={[styles.legendDot, { color: Colors.textSecondary }]}>● Member</Text>
+        </View>
         {members.map((m) => {
-          const isAdmin = m.role === 'trip_admin';
-          const canPromote = canManageTrip && m.user_id !== user?.id && m.role !== 'trip_organizer';
+          const isTripAdmin = m.role === 'trip_admin';
+          const canPromote = isTripOrganizer && m.user_id !== user?.id && m.role !== 'trip_organizer';
+          const roleLabel = m.role === 'trip_organizer' ? 'Trip Organizer'
+            : m.role === 'trip_admin' ? 'Trip Admin'
+            : m.role === 'family_admin' ? 'Family Admin'
+            : m.role === 'viewer' ? 'Viewer'
+            : 'Member';
+          const roleColor = m.role === 'trip_organizer' ? Colors.primary
+            : m.role === 'trip_admin' ? Colors.success
+            : m.role === 'family_admin' ? Colors.warning
+            : Colors.textSecondary;
           return (
             <View key={m.id} style={styles.memberRow}>
               <FamilyAvatar name={m.profile?.full_name ?? '?'} size={36} />
               <View style={styles.memberInfo}>
                 <Text style={styles.memberName}>{displayName(m.profile?.full_name, m.family?.name)}</Text>
-                <Text style={styles.memberRole}>{m.role.replace(/_/g, ' ')}</Text>
+                <Text style={[styles.memberRole, { color: roleColor }]}>{roleLabel}</Text>
               </View>
               {canPromote && (
                 <View style={styles.memberActions}>
                   <TouchableOpacity
-                    style={[styles.roleBtn, isAdmin && styles.roleBtnActive]}
+                    style={[styles.roleBtn, isTripAdmin && styles.roleBtnActive]}
                     onPress={() => {
-                      const newRole = isAdmin ? 'member' : 'trip_admin';
-                      const label = isAdmin ? 'Remove Admin' : 'Make Admin';
-                      const msg = isAdmin
-                        ? `Remove admin privileges from ${m.profile?.full_name}?`
-                        : `Give ${m.profile?.full_name} admin rights (can post/delete announcements)?`;
+                      const newRole = isTripAdmin ? 'member' : 'trip_admin';
+                      const label = isTripAdmin ? 'Remove Trip Admin' : 'Make Trip Admin';
+                      const msg = isTripAdmin
+                        ? `Remove Trip Admin privileges from ${m.profile?.full_name}? They will become a regular member.`
+                        : `Promote ${m.profile?.full_name} to Trip Admin?\n\nTrip Admins can create expenses, polls, announcements and manage join requests.`;
                       Alert.alert(label, msg, [
                         { text: 'Cancel', style: 'cancel' },
                         {
@@ -353,8 +369,8 @@ export function TripSettingsScreen({ navigation, route }: Props) {
                       ]);
                     }}
                   >
-                    <Text style={[styles.roleBtnText, isAdmin && styles.roleBtnActiveText]}>
-                      {isAdmin ? 'Admin ✓' : 'Make Admin'}
+                    <Text style={[styles.roleBtnText, isTripAdmin && styles.roleBtnActiveText]}>
+                      {isTripAdmin ? 'Trip Admin ✓' : 'Trip Admin'}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -413,6 +429,8 @@ const styles = StyleSheet.create({
   },
   sectionTitleInHeader: { marginBottom: 0 },
   refreshText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  roleLegend: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
+  legendDot: { fontSize: FontSize.xs, fontWeight: FontWeight.semiBold },
   addFamilyText: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.primary },
   emptyText: { fontSize: FontSize.sm, color: Colors.textSecondary },
   codeBox: {

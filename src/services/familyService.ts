@@ -149,6 +149,17 @@ export const familyService = {
     return { data: data as FamilyMember, error: null };
   },
 
+  async setFamilyMemberAdmin(memberId: string, isAdmin: boolean): Promise<ServiceResult<FamilyMember>> {
+    const { data, error } = await supabase
+      .from('family_members')
+      .update({ is_admin: isAdmin })
+      .eq('id', memberId)
+      .select('*, profile:profiles(*)')
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as FamilyMember, error: null };
+  },
+
   async getFamilyMembers(familyId: string): Promise<ServiceResult<FamilyMember[]>> {
     const { data, error } = await supabase
       .from('family_members')

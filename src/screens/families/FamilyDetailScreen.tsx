@@ -294,7 +294,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                   <Text style={styles.memberName}>{m.profile?.full_name?.split(' ')[0] ?? 'Unknown'}</Text>
                   {m.is_admin && (
                     <View style={styles.adminBadge}>
-                      <Text style={styles.adminText}>Admin</Text>
+                      <Text style={styles.adminText}>Family Admin</Text>
                     </View>
                   )}
                 </View>
@@ -317,13 +317,40 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                 </Text>
               )}
 
-              {canManageFamily && (!m.is_admin || canManageTrip) && !isMe && (
-                <TouchableOpacity
-                  onPress={() => handleRemoveMember(m.id, m.user_id)}
-                  style={{ marginLeft: Spacing.sm }}
-                >
-                  <Text style={styles.removeText}>Remove</Text>
-                </TouchableOpacity>
+              {canManageFamily && !isMe && (
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  {/* Family Admin toggle — only trip managers can promote */}
+                  {canManageTrip && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        const label = m.is_admin ? 'Remove Family Admin' : 'Make Family Admin';
+                        const msg = m.is_admin
+                          ? `Remove Family Admin from ${m.profile?.full_name}? They can no longer manage family members.`
+                          : `Make ${m.profile?.full_name} a Family Admin? They can add/remove members in this family.`;
+                        Alert.alert(label, msg, [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: label,
+                            onPress: async () => {
+                              const { data, error } = await familyService.setFamilyMemberAdmin(m.id, !m.is_admin);
+                              if (error) Alert.alert('Error', error);
+                              else if (data) setFamilyMembers((prev) => prev.map((x) => x.id === m.id ? data : x));
+                            },
+                          },
+                        ]);
+                      }}
+                    >
+                      <Text style={[styles.adminToggleText, m.is_admin && styles.adminToggleActiveText]}>
+                        {m.is_admin ? 'Family Admin ✓' : 'Family Admin'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {(!m.is_admin || canManageTrip) && (
+                    <TouchableOpacity onPress={() => handleRemoveMember(m.id, m.user_id)}>
+                      <Text style={styles.removeText}>Remove</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
             </View>
           );
@@ -433,12 +460,14 @@ const styles = StyleSheet.create({
   memberName: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text },
   memberEmail: { fontSize: FontSize.xs, color: Colors.textSecondary },
   adminBadge: {
-    backgroundColor: Colors.primary + '20',
+    backgroundColor: Colors.warning + '20',
     borderRadius: Radius.full,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 2,
   },
-  adminText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  adminText: { fontSize: FontSize.xs, color: Colors.warning, fontWeight: FontWeight.semiBold },
+  adminToggleText: { fontSize: FontSize.xs, color: Colors.warning, fontWeight: FontWeight.semiBold },
+  adminToggleActiveText: { color: Colors.success },
   pushTalkBtn: { marginBottom: Spacing.lg },
   pushTalkLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
