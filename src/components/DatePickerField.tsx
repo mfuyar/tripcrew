@@ -35,8 +35,8 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
     if (selected) formatAndSet(selected);
   }
 
-  function handleValueChange(selected: Date) {
-    formatAndSet(selected);
+  function handleValueChange(selected: Date | undefined) {
+    if (selected) formatAndSet(selected);
   }
 
   function formatAndSet(selected: Date) {
@@ -147,7 +147,7 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
     if (Platform.OS === 'android') { setShow(false); if (selected) formatTime(selected); }
   }
 
-  function handleValueChange(selected: Date) { formatTime(selected); }
+  function handleValueChange(selected: Date | undefined) { if (selected) formatTime(selected); }
 
   function formatTime(selected: Date) {
     const h = String(selected.getHours()).padStart(2, '0');
