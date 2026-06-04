@@ -1,6 +1,6 @@
 import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { Message, TripMedia, MediaType, ServiceResult } from '../types';
 
@@ -54,17 +54,13 @@ function getContentType(file: File, ext: string, mediaType: MediaType): string {
 
 async function prepareImageForUpload(uri: string): Promise<string> {
   try {
-    // Resize so the longer side is at most MAX_IMAGE_DIMENSION, compress to JPEG
-    const context = ImageManipulator.manipulate(uri);
-    context.resize({ width: MAX_IMAGE_DIMENSION });
-    const rendered = await context.renderAsync();
-    const result = await rendered.saveAsync({
-      compress: IMAGE_COMPRESS_QUALITY,
-      format: SaveFormat.JPEG,
-    });
+    const result = await manipulateAsync(
+      uri,
+      [{ resize: { width: MAX_IMAGE_DIMENSION } }],
+      { compress: IMAGE_COMPRESS_QUALITY, format: SaveFormat.JPEG }
+    );
     return result.uri;
   } catch {
-    // If manipulator fails (e.g. unsupported format), upload the original
     return uri;
   }
 }
