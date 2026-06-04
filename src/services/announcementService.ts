@@ -2,6 +2,15 @@ import { supabase } from '../lib/supabaseClient';
 import { Announcement, ServiceResult } from '../types';
 import { notificationService } from './notificationService';
 
+function isMissingArchiveColumn(error?: string | null): boolean {
+  if (!error) return false;
+  return (
+    error.includes('is_archived') ||
+    error.includes('schema cache') ||
+    error.includes('Could not find the column')
+  );
+}
+
 export const announcementService = {
   async create(
     tripId: string,
@@ -29,24 +38,49 @@ export const announcementService = {
   },
 
   async getAll(tripId: string): Promise<ServiceResult<Announcement[]>> {
-    const { data, error } = await supabase
+    let query = supabase
       .from('announcements')
       .select('*, creator:profiles(*), reads:announcement_reads(*)')
-      .eq('trip_id', tripId)
+      .eq('trip_id', tripId);
+
+    let { data, error } = await query
       .eq('is_archived', false)
       .order('created_at', { ascending: false });
+
+    if (error && isMissingArchiveColumn(error.message)) {
+      const retry = await supabase
+        .from('announcements')
+        .select('*, creator:profiles(*), reads:announcement_reads(*)')
+        .eq('trip_id', tripId)
+        .order('created_at', { ascending: false });
+      data = retry.data;
+      error = retry.error;
+    }
+
     if (error) return { data: null, error: error.message };
     return { data: data as Announcement[], error: null };
   },
 
   async getLatest(tripId: string, limit = 3): Promise<ServiceResult<Announcement[]>> {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('announcements')
       .select('id, title, content, priority, created_at')
       .eq('trip_id', tripId)
       .eq('is_archived', false)
       .order('created_at', { ascending: false })
       .limit(limit);
+
+    if (error && isMissingArchiveColumn(error.message)) {
+      const retry = await supabase
+        .from('announcements')
+        .select('id, title, content, priority, created_at')
+        .eq('trip_id', tripId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      data = retry.data;
+      error = retry.error;
+    }
+
     if (error) return { data: null, error: error.message };
     return { data: data as Announcement[], error: null };
   },

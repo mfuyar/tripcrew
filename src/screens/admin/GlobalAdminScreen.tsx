@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, RefreshControl, TextInput, Modal, Platform,
+  Alert, RefreshControl, TextInput, Modal, Platform, KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MainStackParamList, Trip } from '../../types';
+import { MainStackParamList, Trip, TripMember, TripRole } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { tripService } from '../../services/tripService';
@@ -25,6 +26,9 @@ export function GlobalAdminScreen() {
   const [search, setSearch] = useState('');
   const [holdModalTrip, setHoldModalTrip] = useState<Trip | null>(null);
   const [holdReason, setHoldReason] = useState('');
+  const [memberModalTrip, setMemberModalTrip] = useState<Trip | null>(null);
+  const [memberModalMembers, setMemberModalMembers] = useState<TripMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [acting, setActing] = useState(false);
 
   const load = useCallback(async () => {
@@ -75,6 +79,93 @@ export function GlobalAdminScreen() {
     ));
   }
 
+  async function loadMembersForTrip(trip: Trip) {
+    setMembersLoading(true);
+    const { data, error } = await tripService.getTripMembers(trip.id);
+    setMembersLoading(false);
+    if (error) {
+      Alert.alert('Unable to load members', error);
+      return;
+    }
+    setMemberModalMembers(data ?? []);
+  }
+
+  async function openMembers(trip: Trip) {
+    setMemberModalTrip(trip);
+    setMemberModalMembers([]);
+    await loadMembersForTrip(trip);
+  }
+
+  async function refreshAdminTrips() {
+    const { data } = await tripService.getAllTrips();
+    if (data) setTrips(data);
+  }
+
+  function updateRole(member: TripMember, role: TripRole) {
+    if (!memberModalTrip) return;
+    const memberName = member.profile?.full_name || member.profile?.email || 'this member';
+    Alert.alert(
+      'Change Role',
+      `Set ${memberName} to ${role.replace(/_/g, ' ')}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Change',
+          onPress: async () => {
+            setActing(true);
+            const { error } = await tripService.setMemberRole(memberModalTrip.id, member.user_id, role);
+            setActing(false);
+            if (error) { Alert.alert('Role update failed', error); return; }
+            await loadMembersForTrip(memberModalTrip);
+          },
+        },
+      ]
+    );
+  }
+
+  function showMemberActions(member: TripMember) {
+    const name = member.profile?.full_name || member.profile?.email || 'Member';
+    const roleOptions: TripRole[] = ['trip_organizer', 'trip_admin', 'family_admin', 'member', 'viewer'];
+    Alert.alert(
+      name,
+      member.profile?.email ?? member.role.replace(/_/g, ' '),
+      [
+        ...roleOptions
+          .filter((role) => role !== member.role)
+          .map((role) => ({
+            text: `Set ${role.replace(/_/g, ' ')}`,
+            onPress: () => updateRole(member, role),
+          })),
+        { text: 'Remove from Trip', style: 'destructive', onPress: () => removeTripMember(member) },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  }
+
+  function removeTripMember(member: TripMember) {
+    if (!memberModalTrip) return;
+    const name = member.profile?.full_name || member.profile?.email || 'this member';
+    Alert.alert(
+      'Remove Member',
+      `Remove ${name} from "${memberModalTrip.name}"? They will lose access to this trip.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            if (!memberModalTrip) return;
+            setActing(true);
+            const { error } = await tripService.removeMember(memberModalTrip.id, member.user_id);
+            setActing(false);
+            if (error) { Alert.alert('Remove failed', error); return; }
+            await Promise.all([loadMembersForTrip(memberModalTrip), refreshAdminTrips()]);
+          },
+        },
+      ]
+    );
+  }
+
   async function handleDelete(trip: Trip) {
     Alert.alert(
       'Delete Trip',
@@ -110,6 +201,7 @@ export function GlobalAdminScreen() {
             }
           },
         },
+        { text: 'View Members', onPress: () => openMembers(trip) },
         { text: 'Delete Trip', style: 'destructive', onPress: () => handleDelete(trip) },
         { text: 'Open Trip', onPress: () => openTrip(trip) },
         { text: 'Cancel', style: 'cancel' },
@@ -166,9 +258,88 @@ export function GlobalAdminScreen() {
                 <Text style={styles.actionBtnText}>⋯</Text>
               </TouchableOpacity>
             </View>
+            <View style={styles.cardActions}>
+              <TouchableOpacity style={styles.inlineBtn} onPress={() => openMembers(item)}>
+                <Text style={styles.inlineBtnText}>Members</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.inlineBtn, item.is_held ? styles.inlineBtnSuccess : styles.inlineBtnDanger]}
+                onPress={() => {
+                  if (item.is_held) {
+                    handleUnhold(item);
+                  } else {
+                    setHoldModalTrip(item);
+                    setHoldReason('');
+                  }
+                }}
+              >
+                <Text style={[
+                  styles.inlineBtnText,
+                  item.is_held ? styles.inlineBtnSuccessText : styles.inlineBtnDangerText,
+                ]}>
+                  {item.is_held ? 'Unhold' : 'Hold'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.inlineBtn, styles.inlineBtnDanger]} onPress={() => handleDelete(item)}>
+                <Text style={[styles.inlineBtnText, styles.inlineBtnDangerText]}>Delete</Text>
+              </TouchableOpacity>
+            </View>
           </TouchableOpacity>
         )}
       />
+
+      <Modal visible={!!memberModalTrip} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, styles.membersModalBox]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderText}>
+                <Text style={styles.modalTitle}>{memberModalTrip?.name}</Text>
+                <Text style={styles.modalSubtitle}>
+                  {membersLoading ? 'Loading members...' : `${memberModalMembers.length} trip members`}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closeBtn}
+                onPress={() => setMemberModalTrip(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Close members"
+              >
+                <Text style={styles.closeBtnText}>×</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.membersList}>
+              {memberModalMembers.map((member) => (
+                <View key={member.id} style={styles.memberRow}>
+                  <View style={styles.memberAvatar}>
+                    <Text style={styles.memberAvatarText}>
+                      {(member.profile?.full_name || member.profile?.email || '?').slice(0, 1).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.memberInfo}>
+                    <Text style={styles.memberName} numberOfLines={1}>
+                      {member.profile?.full_name || member.profile?.email || 'Unknown member'}
+                    </Text>
+                    <Text style={styles.memberMeta} numberOfLines={1}>
+                      {member.profile?.email ?? 'No email'} · {member.family?.name ?? 'No family'}
+                    </Text>
+                    <Text style={styles.memberRole}>{member.role.replace(/_/g, ' ')}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.memberActionBtn}
+                    onPress={() => showMemberActions(member)}
+                    disabled={acting}
+                  >
+                    <Text style={styles.memberActionText}>Manage</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {!membersLoading && memberModalMembers.length === 0 ? (
+                <Text style={styles.emptyMembers}>No members found for this trip.</Text>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Hold reason modal */}
       <Modal visible={!!holdModalTrip} transparent animationType="slide">
@@ -201,8 +372,6 @@ export function GlobalAdminScreen() {
     </View>
   );
 }
-
-import { KeyboardAvoidingView } from 'react-native';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
@@ -245,14 +414,85 @@ const styles = StyleSheet.create({
   heldReason: { fontSize: FontSize.xs, color: Colors.danger, marginTop: 4, fontStyle: 'italic' },
   actionBtn: { padding: Spacing.sm },
   actionBtnText: { fontSize: 22, color: Colors.textSecondary },
+  cardActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
+  },
+  inlineBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+  },
+  inlineBtnText: { color: Colors.primary, fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
+  inlineBtnDanger: { borderColor: Colors.danger },
+  inlineBtnDangerText: { color: Colors.danger },
+  inlineBtnSuccess: { borderColor: Colors.success },
+  inlineBtnSuccessText: { color: Colors.success },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox: {
     backgroundColor: Colors.surface,
     borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl,
     padding: Spacing.xl,
   },
+  membersModalBox: { maxHeight: '82%' },
+  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing.sm },
+  modalHeaderText: { flex: 1 },
   modalTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.text, marginBottom: 4 },
   modalSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: Spacing.md },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  closeBtnText: { fontSize: 26, lineHeight: 30, color: Colors.textSecondary },
+  membersList: { paddingBottom: Spacing.md },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  memberAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+    marginRight: Spacing.sm,
+  },
+  memberAvatarText: { color: '#fff', fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  memberInfo: { flex: 1 },
+  memberName: { fontSize: FontSize.md, color: Colors.text, fontWeight: FontWeight.semiBold },
+  memberMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  memberRole: {
+    alignSelf: 'flex-start',
+    fontSize: FontSize.xs,
+    color: Colors.primary,
+    marginTop: 4,
+    textTransform: 'capitalize',
+    fontWeight: FontWeight.semiBold,
+  },
+  memberActionBtn: {
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+    marginLeft: Spacing.sm,
+  },
+  memberActionText: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.semiBold },
+  emptyMembers: { color: Colors.textSecondary, textAlign: 'center', paddingVertical: Spacing.lg },
   modalInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
     padding: Spacing.md, fontSize: FontSize.md, color: Colors.text,

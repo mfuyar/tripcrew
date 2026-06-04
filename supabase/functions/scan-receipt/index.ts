@@ -5,6 +5,9 @@ type ReceiptLineItem = {
 };
 
 type ParsedReceipt = {
+  is_receipt: boolean | null;
+  confidence: number | null;
+  rejection_reason: string | null;
   merchant: string | null;
   total: number | null;
   date: string | null;
@@ -14,6 +17,7 @@ type ParsedReceipt = {
 
 type ReceiptScanRow = {
   id: string;
+  trip_id: string;
   image_url: string;
 };
 
@@ -25,6 +29,18 @@ const corsHeaders = {
 const receiptSchema = {
   type: 'object',
   properties: {
+    is_receipt: {
+      type: ['boolean', 'null'],
+      description: 'True only when the image is a real purchase receipt or invoice.',
+    },
+    confidence: {
+      type: ['number', 'null'],
+      description: '0 to 1 confidence that this is a legitimate receipt and the extracted total/date are reliable.',
+    },
+    rejection_reason: {
+      type: ['string', 'null'],
+      description: 'Short reason if the image is not a legitimate receipt or cannot be reliably read.',
+    },
     merchant: {
       type: ['string', 'null'],
       description: 'Merchant, store, restaurant, or vendor name from the receipt.',
@@ -56,7 +72,7 @@ const receiptSchema = {
       },
     },
   },
-  required: ['merchant', 'total', 'date', 'raw_text', 'items'],
+  required: ['is_receipt', 'confidence', 'rejection_reason', 'merchant', 'total', 'date', 'raw_text', 'items'],
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -89,6 +105,9 @@ function normalizeDate(value: string | null) {
 
 function normalizeParsedReceipt(parsed: ParsedReceipt): ParsedReceipt {
   return {
+    is_receipt: typeof parsed.is_receipt === 'boolean' ? parsed.is_receipt : null,
+    confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : null,
+    rejection_reason: parsed.rejection_reason?.trim() || null,
     merchant: parsed.merchant?.trim() || null,
     total: typeof parsed.total === 'number' && parsed.total > 0 ? parsed.total : null,
     date: normalizeDate(parsed.date),
@@ -103,6 +122,94 @@ function normalizeParsedReceipt(parsed: ParsedReceipt): ParsedReceipt {
           }))
       : [],
   };
+}
+
+function dateOnlyUtc(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function parseDateOnly(value: string | null) {
+  if (!value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+}
+
+function isDateReallyOff(value: string | null) {
+  const parsed = parseDateOnly(value);
+  if (!parsed) return false;
+  const today = dateOnlyUtc(new Date());
+  const diffDays = Math.round((parsed.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+  return diffDays < -370 || diffDays > 31;
+}
+
+function receiptEvidenceCount(parsed: ParsedReceipt) {
+  let count = 0;
+  if (parsed.merchant) count += 1;
+  if (parsed.total !== null) count += 1;
+  if (parsed.date) count += 1;
+  if ((parsed.raw_text?.length ?? 0) >= 20) count += 1;
+  if (parsed.items.some((item) => item.amount !== null)) count += 1;
+  return count;
+}
+
+function validationError(parsed: ParsedReceipt) {
+  if (parsed.is_receipt === false || (parsed.confidence !== null && parsed.confidence < 0.45)) {
+    return parsed.rejection_reason || 'This image does not look like a valid receipt.';
+  }
+  if (!parsed.total || !parsed.merchant) {
+    return 'I could not find a clear merchant and final total on this receipt.';
+  }
+  if (receiptEvidenceCount(parsed) < 3) {
+    return 'This does not have enough readable receipt details to scan safely.';
+  }
+  if (isDateReallyOff(parsed.date)) {
+    return 'The receipt date looks too far from today, so I did not process it.';
+  }
+  return null;
+}
+
+function storagePathFromPublicUrl(imageUrl: string) {
+  const marker = '/storage/v1/object/public/trip-media/';
+  const index = imageUrl.indexOf(marker);
+  if (index < 0) return null;
+  return decodeURIComponent(imageUrl.slice(index + marker.length).split('?')[0]);
+}
+
+async function deleteRejectedReceipt(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  receipt: ReceiptScanRow,
+) {
+  const path = storagePathFromPublicUrl(receipt.image_url);
+  if (path) {
+    await fetch(`${supabaseUrl}/storage/v1/object/trip-media/${path}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+      },
+    }).catch(() => null);
+  }
+
+  await fetch(`${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receipt.id}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: serviceRoleKey,
+    },
+  }).catch(() => null);
 }
 
 function extractGeminiText(response: any) {
@@ -132,7 +239,7 @@ Deno.serve(async (req) => {
     }
 
     const receiptResponse = await fetch(
-      `${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}&select=id,image_url&limit=1`,
+      `${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}&select=id,trip_id,image_url&limit=1`,
       {
         headers: {
           Authorization: authHeader,
@@ -171,10 +278,12 @@ Deno.serve(async (req) => {
               parts: [
                 {
                   text: [
-                    'Extract receipt data from this image.',
+                    'Decide if this image is a legitimate purchase receipt or invoice, then extract receipt data.',
+                    'Reject menus, screenshots, handwritten notes, random product photos, bank cards, people, documents, or unreadable/blurry images.',
                     'Return only fields visible or strongly implied by the receipt.',
                     'Use null for missing merchant, total, or date.',
                     'The total must be the final amount paid, not subtotal.',
+                    'Set is_receipt false and explain rejection_reason when the image is not clearly a receipt.',
                   ].join(' '),
                 },
                 {
@@ -203,6 +312,14 @@ Deno.serve(async (req) => {
     if (!text) return jsonResponse({ error: 'Gemini returned no receipt data' }, 502);
 
     const parsed = normalizeParsedReceipt(JSON.parse(text));
+    const invalidReason = validationError(parsed);
+    if (invalidReason) {
+      await deleteRejectedReceipt(supabaseUrl, supabaseServiceRoleKey, receipt);
+      return jsonResponse({
+        error: `${invalidReason} Please add this expense manually and attach the compressed photo there if you still want to keep it.`,
+      }, 422);
+    }
+
     const updateResponse = await fetch(`${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}`, {
       method: 'PATCH',
       headers: {

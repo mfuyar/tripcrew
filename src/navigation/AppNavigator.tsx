@@ -12,6 +12,7 @@ import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignUpScreen } from '../screens/auth/SignUpScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import { UpdatePasswordScreen } from '../screens/auth/UpdatePasswordScreen';
+import { PrivacyPolicyScreen } from '../screens/auth/PrivacyPolicyScreen';
 
 // Main Screens
 import { TripsListScreen } from '../screens/trips/TripsListScreen';
@@ -98,6 +99,17 @@ function AuthNavigator() {
       <AuthStack.Screen name="SignUp" component={SignUpScreen} />
       <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
       <AuthStack.Screen name="UpdatePassword" component={UpdatePasswordScreen} />
+      <AuthStack.Screen
+        name="PrivacyPolicy"
+        component={PrivacyPolicyScreen}
+        options={{
+          headerShown: true,
+          title: 'Privacy Policy',
+          headerTintColor: Colors.primary,
+          headerStyle: { backgroundColor: Colors.surface },
+          headerTitleStyle: { color: Colors.text, fontWeight: '700' },
+        }}
+      />
     </AuthStack.Navigator>
   );
 }

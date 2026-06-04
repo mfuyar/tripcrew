@@ -56,7 +56,7 @@ jest.mock('../../lib/supabaseClient', () => ({
   },
 }));
 
-import { locationService } from '../../services/locationService';
+import { isFreshLiveLocation, locationService } from '../../services/locationService';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -257,7 +257,7 @@ describe('SPEC §13 — getLiveLocations', () => {
         longitude: 2.3522,
         accuracy: 12,
         heading: 45,
-        updated_at: '2026-06-03T11:00:00Z',
+        updated_at: new Date().toISOString(),
         profile: { full_name: 'Sam' },
         family: { name: 'Demir Family' },
       }],
@@ -278,6 +278,38 @@ describe('SPEC §13 — getLiveLocations', () => {
       longitude: 2.3522,
       isLive: true,
     })]);
+  });
+
+  it('marks old persisted locations as last seen instead of live', async () => {
+    const staleTimestamp = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+    mockEq.mockResolvedValueOnce({
+      data: [{
+        user_id: 'user-2',
+        family_id: 'fam-2',
+        latitude: 48.8566,
+        longitude: 2.3522,
+        accuracy: 12,
+        heading: 45,
+        updated_at: staleTimestamp,
+        profile: { full_name: 'Sam' },
+        family: { name: 'Demir Family' },
+      }],
+      error: null,
+    });
+
+    const locations = await locationService.getLiveLocations(tripId);
+
+    expect(locations[0]).toEqual(expect.objectContaining({
+      userId: 'user-2',
+      isLive: false,
+    }));
+  });
+
+  it('treats persisted locations as fresh for five minutes', () => {
+    const now = new Date('2026-06-04T12:00:00Z').getTime();
+
+    expect(isFreshLiveLocation('2026-06-04T11:56:00Z', now)).toBe(true);
+    expect(isFreshLiveLocation('2026-06-04T11:54:59Z', now)).toBe(false);
   });
 });
 

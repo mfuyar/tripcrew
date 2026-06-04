@@ -16,6 +16,16 @@ interface NominatimResult {
   lon: string;
 }
 
+async function geocodeWithDevice(query: string, limit: number): Promise<AddressSuggestion[]> {
+  const locations = await Location.geocodeAsync(query);
+  return locations.slice(0, limit).map((item, index) => ({
+    id: `${query}-${index}`,
+    label: query,
+    latitude: item.latitude,
+    longitude: item.longitude,
+  }));
+}
+
 export const addressSearchService = {
   async search(query: string, limit = 5): Promise<ServiceResult<AddressSuggestion[]>> {
     const trimmed = query.trim();
@@ -34,33 +44,25 @@ export const addressSearchService = {
 
       if (response.ok) {
         const json = (await response.json()) as NominatimResult[];
-        return {
-          data: json
-            .map((item, index) => ({
-              id: String(item.place_id ?? item.osm_id ?? `${trimmed}-${index}`),
-              label: item.display_name ?? trimmed,
-              latitude: Number(item.lat),
-              longitude: Number(item.lon),
-            }))
-            .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude)),
-          error: null,
-        };
+        const suggestions = json
+          .map((item, index) => ({
+            id: String(item.place_id ?? item.osm_id ?? `${trimmed}-${index}`),
+            label: item.display_name ?? trimmed,
+            latitude: Number(item.lat),
+            longitude: Number(item.lon),
+          }))
+          .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude));
+
+        if (suggestions.length > 0) {
+          return { data: suggestions, error: null };
+        }
       }
     } catch {
       // Fall through to device geocoder. It is less rich, but works as a backup.
     }
 
     try {
-      const locations = await Location.geocodeAsync(trimmed);
-      return {
-        data: locations.slice(0, limit).map((item, index) => ({
-          id: `${trimmed}-${index}`,
-          label: trimmed,
-          latitude: item.latitude,
-          longitude: item.longitude,
-        })),
-        error: null,
-      };
+      return { data: await geocodeWithDevice(trimmed, limit), error: null };
     } catch (error: any) {
       return { data: null, error: error?.message ?? 'Address search failed' };
     }

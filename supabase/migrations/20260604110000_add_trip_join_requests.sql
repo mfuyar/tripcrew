@@ -2,7 +2,7 @@
 -- Organizers and trip admins must approve before a user becomes a trip member.
 
 CREATE TABLE IF NOT EXISTS public.trip_join_requests (
-  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   trip_id       UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
   user_id       UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   status        TEXT NOT NULL DEFAULT 'pending'
@@ -153,3 +153,5 @@ CREATE POLICY "Managers can update join requests"
     user_id = auth.uid()
     OR public.can_manage_trip(trip_id, auth.uid())
   );
+
+NOTIFY pgrst, 'reload schema';

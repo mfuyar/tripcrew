@@ -183,6 +183,7 @@ export function LiveLocationScreen({ route }: Props) {
     (l) => l.userId !== user?.id
   );
   const myLocation = user ? locations.get(user.id) : undefined;
+  const isActivelySharing = isSharing;
   const sharedLocations = useMemo(() => Array.from(locations.values()), [locations]);
   const mapRegion = useMemo(() => getMapRegion(sharedLocations), [sharedLocations]);
 
@@ -197,13 +198,13 @@ export function LiveLocationScreen({ route }: Props) {
             {isSharing ? '📍 Sharing your location' : '📍 Share your location'}
           </Text>
           <Text style={styles.sharingSubtitle}>
-            {isSharing
+            {isActivelySharing
               ? `${currentTrip?.name ?? 'Trip'} members can see where you are in real time.`
               : `Only ${currentTrip?.name ?? 'trip'} members can see your location.`}
           </Text>
         </View>
         <Switch
-          value={isSharing}
+          value={isActivelySharing}
           onValueChange={handleToggleSharing}
           trackColor={{ false: Colors.border, true: Colors.primary }}
           thumbColor={Colors.surface}

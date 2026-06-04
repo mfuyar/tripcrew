@@ -23,8 +23,13 @@ export function SignUpScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [acceptedPolicy, setAcceptedPolicy] = useState(false);
 
   async function handleSignUp() {
+    if (!acceptedPolicy) {
+      setError('Please agree to the Privacy Policy and Disclosure before creating an account.');
+      return;
+    }
     if (!fullName.trim()) {
       setError('Please enter your full name.');
       return;
@@ -107,6 +112,25 @@ export function SignUpScreen({ navigation }: Props) {
             autoComplete="new-password"
           />
 
+          <View style={styles.consentBox}>
+            <TouchableOpacity
+              style={[styles.checkbox, acceptedPolicy && styles.checkboxChecked]}
+              onPress={() => setAcceptedPolicy((prev) => !prev)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: acceptedPolicy }}
+              activeOpacity={0.8}
+            >
+              {acceptedPolicy ? <Text style={styles.checkboxMark}>✓</Text> : null}
+            </TouchableOpacity>
+            <Text style={styles.consentText}>
+              I agree to the{' '}
+              <Text style={styles.policyLink} onPress={() => navigation.navigate('PrivacyPolicy')}>
+                Privacy Policy and Disclosure
+              </Text>
+              .
+            </Text>
+          </View>
+
           <AppButton
             title="Create Account"
             onPress={handleSignUp}
@@ -175,6 +199,27 @@ const styles = StyleSheet.create({
     color: Colors.danger,
     fontSize: FontSize.sm,
   },
+  consentBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: Radius.sm,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  checkboxChecked: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  checkboxMark: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  consentText: { flex: 1, fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 18 },
+  policyLink: { color: Colors.primary, fontWeight: FontWeight.semiBold },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',

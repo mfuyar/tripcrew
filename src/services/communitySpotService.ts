@@ -216,6 +216,24 @@ function normalizeCategory(value: string | undefined): CommunitySpotCategory {
   return 'other';
 }
 
+function distanceMiles(
+  fromLatitude: number,
+  fromLongitude: number,
+  toLatitude: number,
+  toLongitude: number
+): number {
+  const earthRadiusMiles = 3958.8;
+  const toRad = (degrees: number) => (degrees * Math.PI) / 180;
+  const dLat = toRad(toLatitude - fromLatitude);
+  const dLon = toRad(toLongitude - fromLongitude);
+  const lat1 = toRad(fromLatitude);
+  const lat2 = toRad(toLatitude);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function extractGeminiText(response: any): string {
   return response?.candidates?.[0]?.content?.parts
     ?.map((part: { text?: string }) => part.text ?? '')
@@ -470,7 +488,8 @@ export const communitySpotService = {
   async getGeminiFavorites(
     latitude: number,
     longitude: number,
-    radiusMiles = 10
+    radiusMiles = 10,
+    locationLabel?: string
   ): Promise<ServiceResult<CommunitySpot[]>> {
     const geminiApiKey = getGeminiApiKey();
     if (!geminiApiKey) {
@@ -479,9 +498,12 @@ export const communitySpotService = {
 
     const prompt = [
       'You are a friendly local travel guide.',
-      `A traveler is at latitude ${latitude}, longitude ${longitude}.`,
+      locationLabel
+        ? `A traveler is exploring around ${locationLabel} at latitude ${latitude}, longitude ${longitude}.`
+        : `A traveler is at latitude ${latitude}, longitude ${longitude}.`,
       `Suggest 6 favorite places within about ${radiusMiles} miles.`,
       'Prefer real, visit-worthy places locals or travelers often like: outdoor spots, food areas, culture, and hidden gems.',
+      'Think like a TripAdvisor-style travel guide, but do not invent ratings or claim live TripAdvisor data.',
       'Return only valid JSON, as an array. No markdown.',
       'Each item must have: name, category, description, address, latitude, longitude.',
       'category must be one of: outdoor, food, culture, hidden_gem, other.',
@@ -531,7 +553,12 @@ export const communitySpotService = {
           updated_at: now,
           viewer_has_upvoted: false,
         }))
-        .filter((spot) => Number.isFinite(spot.latitude) && Number.isFinite(spot.longitude));
+        .filter((spot) => Number.isFinite(spot.latitude) && Number.isFinite(spot.longitude))
+        .map((spot) => ({
+          ...spot,
+          distance_miles: distanceMiles(latitude, longitude, spot.latitude, spot.longitude),
+        }))
+        .filter((spot) => spot.distance_miles <= radiusMiles + 1);
 
       return { data: spots, error: null };
     } catch (error: any) {

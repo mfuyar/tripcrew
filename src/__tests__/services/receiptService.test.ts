@@ -3,6 +3,10 @@ const mockEq = jest.fn();
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
+const mockResize = jest.fn().mockReturnThis();
+const mockReset = jest.fn().mockReturnThis();
+const mockRenderAsync = jest.fn();
+const mockSaveAsync = jest.fn();
 
 const mockFrom = jest.fn(() => ({
   insert: mockInsert.mockReturnThis(),
@@ -34,6 +38,7 @@ jest.mock('expo-file-system', () => ({
   File: class MockFile {
     uri: string;
     type = 'image/jpeg';
+    size = 12345;
 
     constructor(uri: string) {
       this.uri = uri;
@@ -45,11 +50,26 @@ jest.mock('expo/fetch', () => ({
   fetch: mockExpoFetch,
 }));
 
+jest.mock('expo-image-manipulator', () => ({
+  ImageManipulator: {
+    manipulate: jest.fn(() => ({
+      renderAsync: mockRenderAsync,
+      reset: mockReset,
+      resize: mockResize,
+    })),
+  },
+  SaveFormat: { JPEG: 'jpeg' },
+}));
+
 import { receiptService } from '../../services/receiptService';
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
+  mockRenderAsync
+    .mockResolvedValueOnce({ width: 3024, height: 4032 })
+    .mockResolvedValueOnce({ saveAsync: mockSaveAsync });
+  mockSaveAsync.mockResolvedValue({ uri: 'file:///cache/compressed-receipt.jpg' });
 });
 
 const tripId = 'trip-1';
@@ -100,6 +120,8 @@ describe('receiptService', () => {
           }),
         })
       );
+      expect(mockResize).toHaveBeenCalledWith({ height: 1600 });
+      expect(mockSaveAsync).toHaveBeenCalledWith({ compress: 0.78, format: 'jpeg' });
       expect(mockFrom).toHaveBeenCalledWith('receipt_scans');
       expect(error).toBeNull();
       expect(data?.image_url).toBe(imageUrl);
@@ -183,6 +205,21 @@ describe('receiptService', () => {
 
       expect(data).toBeNull();
       expect(error).toBe('GEMINI_API_KEY is not configured');
+    });
+
+    it('returns clear rejected-receipt messages from the scan function', async () => {
+      mockExpoFetch.mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({
+          error: 'This image does not look like a valid receipt. Please add this expense manually and attach the compressed photo there if you still want to keep it.',
+        }),
+      });
+
+      const { data, error } = await receiptService.scanReceipt(receiptId, imageUrl);
+
+      expect(data).toBeNull();
+      expect(error).toContain('does not look like a valid receipt');
+      expect(error).toContain('add this expense manually');
     });
   });
 });

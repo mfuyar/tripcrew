@@ -17,6 +17,8 @@ import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { CurrencyAmount } from '../../components/CurrencyAmount';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
+import { DatePickerField } from '../../components/DatePickerField';
+import { parseDate } from '../../utils/dateUtils';
 import {
   Colors, FontSize, FontWeight, Spacing, Radius,
   CATEGORY_ICONS, CATEGORY_COLORS,
@@ -219,12 +221,12 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           placeholder="0.00"
           keyboardType="decimal-pad"
         />
-        <AppTextInput
+        <DatePickerField
           label="Date"
           value={date}
-          onChangeText={setDate}
-          placeholder="YYYY-MM-DD"
-          keyboardType="numbers-and-punctuation"
+          onChange={setDate}
+          minimumDate={currentTrip?.start_date ? parseDate(currentTrip.start_date) : undefined}
+          maximumDate={currentTrip?.end_date ? parseDate(currentTrip.end_date) : undefined}
         />
 
         {/* Category picker */}

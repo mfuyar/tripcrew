@@ -47,7 +47,6 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [liveAudioEnabled, setLiveAudioEnabled] = useState(false);
   const [updatingLiveAudio, setUpdatingLiveAudio] = useState(false);
-  const [pendingPushTalks, setPendingPushTalks] = useState<{ id: string; url: string }[]>([]);
   const [playingPushTalk, setPlayingPushTalk] = useState<{ id: string; url: string } | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({}); // userId → name
   const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -65,6 +64,8 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const pendingStopRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
   const queuedPushTalkIdsRef = useRef<Set<string>>(new Set());
+  const pendingPushTalksRef = useRef<{ id: string; url: string }[]>([]);
+  const playingPushTalkRef = useRef<{ id: string; url: string } | null>(null);
   // Ref-backed upload guard so startPushTalk never reads a stale closure value
   const uploadingRef = useRef(false);
   // Tracks whether the push-talk player has actually started playing (isPlaying went true)
@@ -95,6 +96,41 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         ? 'Could not start the microphone. Wait a second and try again.'
         : message ?? 'Could not start audio recording.'
     );
+  }
+
+  async function playPushTalkNow(pushTalk: { id: string; url: string }) {
+    playingPushTalkRef.current = pushTalk;
+    pushTalkHasPlayedRef.current = false;
+    setPlayingPushTalk(pushTalk);
+    try {
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      if (playingPushTalkRef.current?.id !== pushTalk.id) return;
+      pushTalkPlayer.replace(pushTalk.url);
+      pushTalkPlayer.seekTo(0);
+      pushTalkPlayer.play();
+    } catch {
+      if (playingPushTalkRef.current?.id === pushTalk.id) {
+        playingPushTalkRef.current = null;
+        setPlayingPushTalk(null);
+        playNextQueuedPushTalk();
+      }
+    }
+  }
+
+  function playNextQueuedPushTalk() {
+    if (playingPushTalkRef.current || recordingRef.current || recordingInProgress) return;
+    const next = pendingPushTalksRef.current.shift();
+    if (next) void playPushTalkNow(next);
+  }
+
+  function enqueueIncomingPushTalk(pushTalk: { id: string; url: string }) {
+    if (queuedPushTalkIdsRef.current.has(pushTalk.id)) return;
+    queuedPushTalkIdsRef.current.add(pushTalk.id);
+    if (!playingPushTalkRef.current && !recordingRef.current && !recordingInProgress) {
+      void playPushTalkNow(pushTalk);
+      return;
+    }
+    pendingPushTalksRef.current.push(pushTalk);
   }
 
   const loadMessages = useCallback(async () => {
@@ -144,16 +180,15 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         return [...prev, msg];
       });
 
-      if (
+      const shouldLivePlay =
         msg.is_push_talk &&
         msg.media_url &&
         msg.user_id !== user?.id &&
         (!msg.family_id || !userFamily?.id || msg.family_id === userFamily.id) &&
-        pushTalkEnabledRef.current &&
-        !queuedPushTalkIdsRef.current.has(msg.id)
-      ) {
-        queuedPushTalkIdsRef.current.add(msg.id);
-        setPendingPushTalks((prev) => [...prev, { id: msg.id, url: msg.media_url! }]);
+        (pushTalkEnabledRef.current || liveAudioEnabled);
+
+      if (shouldLivePlay) {
+        enqueueIncomingPushTalk({ id: msg.id, url: msg.media_url! });
       }
     }, (typingUserId, typingName) => {
       // Ignore own typing events
@@ -184,35 +219,8 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   }, [messages.length]);
 
   useEffect(() => {
-    if (playingPushTalk || recordingInProgress || pendingPushTalks.length === 0) return;
-
-    const [next, ...rest] = pendingPushTalks;
-    setPendingPushTalks(rest);
-    setPlayingPushTalk(next);
-  }, [pendingPushTalks, playingPushTalk, recordingInProgress]);
-
-  useEffect(() => {
-    if (!playingPushTalk) return;
-
-    let canceled = false;
-    const pushTalk = playingPushTalk;
-    async function playIncomingPushTalk() {
-      try {
-        await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
-        if (canceled) return;
-        pushTalkPlayer.replace(pushTalk.url);
-        pushTalkPlayer.play();
-      } catch {
-        setPlayingPushTalk(null);
-        // Keep chat quiet; the message still appears with a manual play button.
-      }
-    }
-
-    playIncomingPushTalk();
-    return () => {
-      canceled = true;
-    };
-  }, [playingPushTalk, pushTalkPlayer]);
+    if (!recordingInProgress) playNextQueuedPushTalk();
+  }, [recordingInProgress]);
 
   // Detect finish via isPlaying transition (true→false) rather than the transient
   // didJustFinish flag which can be missed if React doesn't flush in the same 250ms poll.
@@ -222,7 +230,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       pushTalkHasPlayedRef.current = true;
     } else if (pushTalkHasPlayedRef.current) {
       pushTalkHasPlayedRef.current = false;
+      playingPushTalkRef.current = null;
       setPlayingPushTalk(null);
+      playNextQueuedPushTalk();
     }
   }, [playingPushTalk, pushTalkStatus.playing]);
 
@@ -231,7 +241,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     if (!playingPushTalk) return;
     const t = setTimeout(() => {
       pushTalkHasPlayedRef.current = false;
+      playingPushTalkRef.current = null;
       setPlayingPushTalk(null);
+      playNextQueuedPushTalk();
     }, 30000);
     return () => clearTimeout(t);
   }, [playingPushTalk]);
@@ -290,6 +302,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     if (enabled === liveAudioEnabled || updatingLiveAudio) return;
     setLiveAudioEnabled(enabled);
     pushTalkEnabledRef.current = enabled;
+    if (enabled) playNextQueuedPushTalk();
 
     if (isDemoMode || !pushTalkMemberIdRef.current) return;
 
@@ -373,6 +386,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       if (pushTalkStatus.playing || playingPushTalk) {
         pushTalkPlayer.pause();   // don't call replace(null) — expo-audio rejects null AudioSource
         pushTalkHasPlayedRef.current = false;
+        playingPushTalkRef.current = null;
         setPlayingPushTalk(null);
         await wait(150);
       }

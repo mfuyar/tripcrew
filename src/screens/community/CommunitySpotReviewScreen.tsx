@@ -66,7 +66,7 @@ export function CommunitySpotReviewScreen() {
         <EmptyState
           icon="✅"
           title="No spots waiting"
-          subtitle="Flagged language and +18 photo submissions will appear here for approval."
+          subtitle="Unclear submissions will appear here for approval."
         />
       }
       renderItem={({ item }) => (

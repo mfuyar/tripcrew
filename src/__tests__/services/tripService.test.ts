@@ -165,6 +165,20 @@ describe('tripService', () => {
       expect(error).toBe('Invalid invite code');
     });
 
+    it('returns a helpful error if the join request RPC is missing', async () => {
+      mockRpc.mockResolvedValueOnce({
+        data: null,
+        error: {
+          message: 'Could not find the function public.request_trip_join_by_code(p_invite_code, p_user_id) in the schema cache',
+        },
+      });
+
+      const { data, error } = await tripService.requestJoinTrip(userId, 'ABC12345');
+
+      expect(data).toBeNull();
+      expect(error).toBe('Trip access requests need a database update. Please run the latest Supabase migration and try again.');
+    });
+
     it('reviews a join request through the approval RPC', async () => {
       mockRpc.mockResolvedValueOnce({
         data: { id: 'req-1', trip_id: tripId, user_id: 'new-user', status: 'approved' },

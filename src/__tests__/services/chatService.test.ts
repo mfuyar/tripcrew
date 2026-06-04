@@ -44,6 +44,12 @@ jest.mock('../../lib/supabaseClient', () => ({
   },
 }));
 
+jest.mock('../../services/mediaService', () => ({
+  mediaService: {
+    refreshChatMessageMediaUrls: jest.fn(async (messages) => messages),
+  },
+}));
+
 // notificationService uses the same supabase mock — make member query return empty
 // so notifyTripMembers is a no-op in these tests
 beforeAll(() => {
@@ -221,7 +227,7 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
       'audio', 'https://cdn.example.com/push.m4a', 'audio/mp4', 4.1, true
     );
 
-    expect(notifySpy).toHaveBeenCalledWith(tripId, userId, familyId);
+    expect(notifySpy).toHaveBeenCalledWith(tripId, userId, familyId, 'https://cdn.example.com/push.m4a');
     notifySpy.mockRestore();
   });
 
@@ -259,6 +265,7 @@ describe('SPEC §8 — editMessage', () => {
   it('updates the sender text message content and marks it edited', async () => {
     const edited = makeMessage({ id: 'msg-1', content: 'Updated plan', edited_at: new Date().toISOString() });
     mockSingle.mockResolvedValueOnce({ data: edited, error: null });
+    chatService.subscribeToMessages(tripId, jest.fn());
 
     const { data, error } = await chatService.editMessage('msg-1', userId, '  Updated plan  ');
 

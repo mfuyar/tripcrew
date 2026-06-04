@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { memo, useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -20,6 +22,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { communitySpotService } from '../../services/communitySpotService';
 import { addressSearchService } from '../../services/addressSearchService';
+import { tripService } from '../../services/tripService';
 import { LoadingView } from '../../components/LoadingView';
 import { AppButton } from '../../components/AppButton';
 import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
@@ -27,6 +30,28 @@ import { Colors, FontSize, FontWeight, Radius, Shadow, Spacing } from '../../con
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Props = NativeStackScreenProps<MainStackParamList, 'CommunitySpots'>;
+
+type LookupLocation = {
+  latitude: number;
+  longitude: number;
+  label: string;
+  isFallback?: boolean;
+};
+
+const DEFAULT_RADIUS_MILES = 10;
+const MIN_RADIUS_MILES = 1;
+const MAX_RADIUS_MILES = 100;
+const RADIUS_OPTIONS = [1, 2, 5, 10, 15, 20, 25, 30, 50, 75, 100];
+
+function normalizeRadiusMiles(value: string): number {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_RADIUS_MILES;
+  return Math.min(MAX_RADIUS_MILES, Math.max(MIN_RADIUS_MILES, parsed));
+}
+
+function formatRadiusMiles(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
 
 const CATEGORY_ICON: Record<CommunitySpotCategory, string> = {
   outdoor: '🌿',
@@ -57,6 +82,101 @@ function publicName(fullName?: string): string {
   return first || 'Anonymous';
 }
 
+type ExplorePlaceModalProps = {
+  visible: boolean;
+  initialQuery: string;
+  tripDestination: string;
+  lookingAround: boolean;
+  radiusMiles: number;
+  onRadiusChange: (radius: number) => void;
+  onSearch: (query: string) => void;
+  onClose: () => void;
+};
+
+const ExplorePlaceModal = memo(function ExplorePlaceModal({
+  visible,
+  initialQuery,
+  tripDestination,
+  lookingAround,
+  radiusMiles,
+  onRadiusChange,
+  onSearch,
+  onClose,
+}: ExplorePlaceModalProps) {
+  const [query, setQuery] = useState(initialQuery);
+
+  useEffect(() => {
+    if (visible) setQuery(initialQuery);
+  }, [initialQuery, visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={styles.modalBox}>
+          <Text style={styles.modalTitle}>Explore a Place</Text>
+          <Text style={styles.modalSubtitle}>Search before you arrive. Community posts and AI guide picks will use your selected radius.</Text>
+          {tripDestination ? (
+            <TouchableOpacity
+              style={styles.tripSuggestionCard}
+              onPress={() => setQuery(tripDestination)}
+              disabled={lookingAround}
+            >
+              <Text style={styles.tripSuggestionLabel}>Suggested from trip</Text>
+              <Text style={styles.tripSuggestionText} numberOfLines={2}>{tripDestination}</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TextInput
+            style={styles.modalInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Rosemary Beach, FL or your hotel address"
+            placeholderTextColor={Colors.textSecondary}
+            autoFocus
+            returnKeyType="search"
+            onSubmitEditing={() => onSearch(query)}
+          />
+          <View style={styles.radiusBlock}>
+            <Text style={styles.radiusLabel}>Radius</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.radiusWheel}
+            >
+              {RADIUS_OPTIONS.map((option) => {
+                const selected = radiusMiles === option;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    style={[styles.radiusOption, selected && styles.radiusOptionSelected]}
+                    onPress={() => onRadiusChange(normalizeRadiusMiles(String(option)))}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.radiusOptionText, selected && styles.radiusOptionTextSelected]}>
+                      {option}
+                    </Text>
+                    <Text style={[styles.radiusOptionUnit, selected && styles.radiusOptionTextSelected]}>
+                      mi
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+          <AppButton
+            title={`Search ${formatRadiusMiles(radiusMiles)} Miles`}
+            onPress={() => onSearch(query)}
+            loading={lookingAround}
+            fullWidth
+          />
+          <TouchableOpacity style={styles.modalCancel} onPress={onClose}>
+            <Text style={styles.modalCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+});
+
 export function CommunitySpotsScreen({ route }: Props) {
   const navigation = useNavigation<Nav>();
   const { tripId, startDate } = route.params ?? {};
@@ -68,6 +188,11 @@ export function CommunitySpotsScreen({ route }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lookingAround, setLookingAround] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<LookupLocation | null>(null);
+  const [manualLocationVisible, setManualLocationVisible] = useState(false);
+  const [manualLocationInitialQuery, setManualLocationInitialQuery] = useState('');
+  const [radiusMiles, setRadiusMiles] = useState(DEFAULT_RADIUS_MILES);
+  const [tripDestinationOverride, setTripDestinationOverride] = useState('');
   const [commentText, setCommentText] = useState<Record<string, string>>({});
   const [commenting, setCommenting] = useState<string | null>(null);
   // commentId → draft text while editing
@@ -77,6 +202,9 @@ export function CommunitySpotsScreen({ route }: Props) {
   const [editingSpot, setEditingSpot] = useState<string | null>(null);
   const [spotEditDraft, setSpotEditDraft] = useState<Partial<CommunitySpot>>({});
   const [savingSpot, setSavingSpot] = useState(false);
+  const contextTripDestination =
+    (!tripId || currentTrip?.id === tripId) ? currentTrip?.destination?.trim() : undefined;
+  const tripDestination = contextTripDestination || tripDestinationOverride;
 
   const loadRecent = useCallback(async () => {
     const { data, error } = await communitySpotService.getRecent(user?.id);
@@ -88,10 +216,34 @@ export function CommunitySpotsScreen({ route }: Props) {
     setRefreshing(false);
   }, [user?.id]);
 
-  useFocusEffect(useCallback(() => { loadRecent(); }, [loadRecent]));
+  const loadTripDestination = useCallback(async () => {
+    if (!tripId || contextTripDestination) {
+      setTripDestinationOverride('');
+      return;
+    }
+    const { data } = await tripService.getTripById(tripId);
+    setTripDestinationOverride(data?.destination?.trim() ?? '');
+  }, [tripId, contextTripDestination]);
 
-  async function getTripDestinationFallback() {
-    const destination = currentTrip?.destination?.trim();
+  useFocusEffect(useCallback(() => {
+    loadRecent();
+    loadTripDestination();
+  }, [loadRecent, loadTripDestination]));
+
+  async function resolveTripDestination(): Promise<string | null> {
+    if (tripDestination) return tripDestination;
+    if (!tripId) return null;
+    const { data } = await tripService.getTripById(tripId);
+    const destination = data?.destination?.trim();
+    if (destination) {
+      setTripDestinationOverride(destination);
+      return destination;
+    }
+    return null;
+  }
+
+  async function getTripDestinationFallback(): Promise<LookupLocation | null> {
+    const destination = await resolveTripDestination();
     if (!destination) return null;
 
     const { data } = await addressSearchService.search(destination, 1);
@@ -105,7 +257,12 @@ export function CommunitySpotsScreen({ route }: Props) {
     };
   }
 
-  async function getLookAroundLocation() {
+  function openManualLocation(initialQuery = '') {
+    setManualLocationInitialQuery(initialQuery);
+    setManualLocationVisible(true);
+  }
+
+  async function getDeviceLocation(): Promise<LookupLocation | null> {
     const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => true);
     if (servicesEnabled) {
       const permission = await Location.requestForegroundPermissionsAsync();
@@ -135,53 +292,136 @@ export function CommunitySpotsScreen({ route }: Props) {
       }
     }
 
+    return null;
+  }
+
+  async function getLookAroundLocation(): Promise<LookupLocation | null> {
+    const deviceLocation = await getDeviceLocation();
+    if (deviceLocation) return deviceLocation;
+
     const fallback = await getTripDestinationFallback();
     if (!fallback) return null;
     return { ...fallback, isFallback: true };
   }
 
-  async function handleLookAround() {
+  async function runExplore(
+    lookupLocation: LookupLocation,
+    options: { includeCommunity: boolean; includeGemini: boolean }
+  ) {
     setLookingAround(true);
+    setSelectedLocation(lookupLocation);
+    const { latitude, longitude } = lookupLocation;
+    const searchRadius = radiusMiles;
+
+    const [community, gemini] = await Promise.all([
+      options.includeCommunity
+        ? communitySpotService.getNearby(latitude, longitude, searchRadius, user?.id)
+        : Promise.resolve({ data: [] as CommunitySpot[], error: null }),
+      options.includeGemini
+        ? communitySpotService.getGeminiFavorites(latitude, longitude, searchRadius, lookupLocation.label)
+        : Promise.resolve({ data: [] as CommunitySpot[], error: null }),
+    ]);
+
+    if (community.error) {
+      setLookingAround(false);
+      Alert.alert('Unable to look around', community.error);
+      return;
+    }
+
+    const communitySpots = community.data ?? [];
+    const geminiSpots = gemini.data ?? [];
+    const merged = [...communitySpots, ...geminiSpots];
+    const geminiError = options.includeGemini ? gemini.error : null;
+    const radiusLabel = formatRadiusMiles(searchRadius);
+    const summaryLines = [
+      lookupLocation.isFallback ? `Using ${lookupLocation.label} because live location was unavailable.` : null,
+      options.includeCommunity ? `${communitySpots.length} community spot${communitySpots.length === 1 ? '' : 's'} within ${radiusLabel} miles.` : null,
+      options.includeGemini
+        ? geminiSpots.length > 0
+          ? `${geminiSpots.length} AI travel-guide pick${geminiSpots.length === 1 ? '' : 's'} within about ${radiusLabel} miles.`
+          : `AI travel-guide picks could not load${geminiError ? `: ${geminiError}` : '.'}`
+        : null,
+      communitySpotService.summarizeNearbySpots(merged),
+    ].filter(Boolean);
+
+    setLookingAround(false);
+    setSpots(merged);
+    setShowingGemini(geminiSpots.length > 0);
+    setGuideSummary(`Around ${lookupLocation.label}\n${summaryLines.join('\n')}`);
+  }
+
+  async function handleLookAround() {
     const lookupLocation = await getLookAroundLocation();
     if (!lookupLocation) {
-      setLookingAround(false);
       Alert.alert(
         'Location unavailable',
-        'Turn on Location Services, set a Simulator location, or add a trip destination so Travel Crew can search around that area.'
+        'Turn on Location Services, set a Simulator location, choose a place, or add a trip destination so Travel Crew can search around that area.'
       );
       return;
     }
+    await runExplore(lookupLocation, { includeCommunity: true, includeGemini: true });
+  }
 
-    const { latitude, longitude } = lookupLocation;
-    const { data, error } = await communitySpotService.getNearby(latitude, longitude, 10, user?.id);
-    if (error) {
-      setLookingAround(false);
-      Alert.alert('Unable to look around', error);
+  async function handleTravelLocation() {
+    const lookupLocation = await getTripDestinationFallback();
+    if (!lookupLocation) {
+      const destination = await resolveTripDestination();
+      if (destination) {
+        openManualLocation(destination);
+        Alert.alert(
+          'Trip address needs search',
+          'I put the trip destination in the search box. Edit it if needed, choose the radius, then search.'
+        );
+      } else {
+        openManualLocation();
+        Alert.alert('Trip location needed', 'Add a trip destination or choose a place to explore before you arrive.');
+      }
       return;
     }
+    await runExplore(lookupLocation, { includeCommunity: true, includeGemini: true });
+  }
 
-    let nearby = data ?? [];
-    let usingGemini = false;
-    let geminiError: string | null = null;
-    if (nearby.length === 0) {
-      const gemini = await communitySpotService.getGeminiFavorites(latitude, longitude, 10);
-      if (gemini.data && gemini.data.length > 0) {
-        nearby = gemini.data;
-        usingGemini = true;
-      } else {
-        geminiError = gemini.error;
-      }
+  async function handleGeminiPicks() {
+    const lookupLocation = selectedLocation ?? await getTripDestinationFallback() ?? await getLookAroundLocation();
+    if (!lookupLocation) {
+      openManualLocation();
+      return;
     }
+    await runExplore(lookupLocation, { includeCommunity: false, includeGemini: true });
+  }
 
+  async function handleManualLocationSearch(searchText: string) {
+    const query = searchText.trim();
+    if (query.length < 3) {
+      Alert.alert('Choose Location', 'Type a city, beach, attraction, hotel, or address.');
+      return;
+    }
+    setLookingAround(true);
+    const { data, error } = await addressSearchService.search(query, 1);
     setLookingAround(false);
-    setSpots(nearby);
-    setShowingGemini(usingGemini);
-    setGuideSummary(
-      usingGemini
-        ? `No community posts were found near ${lookupLocation.label} yet. Gemini suggested these favorite places:\n${communitySpotService.summarizeNearbySpots(nearby)}`
-        : geminiError
-          ? `No community posts were found near ${lookupLocation.label} yet. Gemini could not load suggestions right now: ${geminiError}`
-        : `${lookupLocation.isFallback ? `Using ${lookupLocation.label} because live location was unavailable.\n` : ''}${communitySpotService.summarizeNearbySpots(nearby)}`
+    if (error) {
+      Alert.alert('Location search failed', error);
+      return;
+    }
+    const match = data?.[0];
+    if (!match) {
+      const deviceLocation = await getDeviceLocation();
+      if (!deviceLocation) {
+        Alert.alert(
+          'That does not look like a location',
+          'Type a real city, landmark, hotel, or address. Location access is unavailable, so I could not show spots around you.'
+        );
+        return;
+      }
+      setManualLocationVisible(false);
+      Alert.alert('That does not look like a location', 'Showing spots around your current location instead.');
+      await runExplore(deviceLocation, { includeCommunity: true, includeGemini: true });
+      return;
+    }
+    setManualLocationVisible(false);
+    await runExplore(
+      { latitude: match.latitude, longitude: match.longitude, label: match.label || query },
+      { includeCommunity: true, includeGemini: true }
     );
   }
 
@@ -305,7 +545,7 @@ export function CommunitySpotsScreen({ route }: Props) {
     <View style={styles.container}>
       <View style={styles.actions}>
         <AppButton
-          title="Look Around Me"
+          title="Current Location"
           onPress={handleLookAround}
           loading={lookingAround}
           style={styles.actionButton}
@@ -316,6 +556,23 @@ export function CommunitySpotsScreen({ route }: Props) {
           variant="outline"
           style={styles.actionButton}
         />
+      </View>
+      <View style={styles.secondaryActions}>
+        {tripDestination ? (
+          <TouchableOpacity style={[styles.secondaryButton, styles.tripSuggestionButton]} onPress={handleTravelLocation} disabled={lookingAround}>
+            <Text style={styles.secondaryButtonText} numberOfLines={1}>Trip: {tripDestination}</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleTravelLocation} disabled={lookingAround}>
+            <Text style={styles.secondaryButtonText}>Trip Location</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => openManualLocation()} disabled={lookingAround}>
+          <Text style={styles.secondaryButtonText}>Choose Place</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondaryButton, styles.aiButton]} onPress={handleGeminiPicks} disabled={lookingAround}>
+          <Text style={[styles.secondaryButtonText, styles.aiButtonText]}>AI Guide Picks</Text>
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -340,9 +597,15 @@ export function CommunitySpotsScreen({ route }: Props) {
             </Text>
             <View style={styles.emptyActions}>
               <AppButton
-                title="Find with Gemini"
+                title="Find around trip/current location"
                 onPress={handleLookAround}
                 loading={lookingAround}
+                style={styles.emptyButton}
+              />
+              <AppButton
+                title="Choose another place"
+                onPress={() => openManualLocation()}
+                variant="outline"
                 style={styles.emptyButton}
               />
               <AppButton
@@ -545,6 +808,16 @@ export function CommunitySpotsScreen({ route }: Props) {
           </View>
         )}
       />
+      <ExplorePlaceModal
+        visible={manualLocationVisible}
+        initialQuery={manualLocationInitialQuery}
+        tripDestination={tripDestination}
+        lookingAround={lookingAround}
+        radiusMiles={radiusMiles}
+        onRadiusChange={setRadiusMiles}
+        onSearch={handleManualLocationSearch}
+        onClose={() => setManualLocationVisible(false)}
+      />
     </View>
     </KeyboardAvoidingView>
   );
@@ -556,11 +829,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.sm,
     padding: Spacing.md,
+    paddingBottom: Spacing.sm,
+    backgroundColor: Colors.surface,
+  },
+  secondaryActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
   actionButton: { flex: 1 },
+  secondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  secondaryButtonText: {
+    fontSize: FontSize.xs,
+    color: Colors.primary,
+    fontWeight: FontWeight.semiBold,
+    textAlign: 'center',
+  },
+  aiButton: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  aiButtonText: { color: Colors.primary },
+  tripSuggestionButton: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
   content: { padding: Spacing.md, flexGrow: 1 },
   guideBox: {
     backgroundColor: Colors.primaryLight,
@@ -686,4 +993,79 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   commentCancelText: { fontSize: 12, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalBox: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    padding: Spacing.xl,
+  },
+  modalTitle: { fontSize: FontSize.xl, color: Colors.text, fontWeight: FontWeight.bold, marginBottom: Spacing.xs },
+  modalSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20, marginBottom: Spacing.md },
+  tripSuggestionCard: {
+    borderWidth: 1,
+    borderColor: Colors.primary + '55',
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    backgroundColor: Colors.primaryLight,
+    marginBottom: Spacing.md,
+  },
+  tripSuggestionLabel: {
+    fontSize: FontSize.xs,
+    color: Colors.primary,
+    fontWeight: FontWeight.semiBold,
+    marginBottom: 2,
+    textTransform: 'uppercase',
+  },
+  tripSuggestionText: { fontSize: FontSize.md, color: Colors.text, fontWeight: FontWeight.semiBold },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    fontSize: FontSize.md,
+    color: Colors.text,
+    marginBottom: Spacing.md,
+  },
+  radiusBlock: { marginBottom: Spacing.md },
+  radiusLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    fontWeight: FontWeight.semiBold,
+    marginBottom: Spacing.xs,
+  },
+  radiusWheel: {
+    gap: Spacing.sm,
+    paddingVertical: 2,
+    paddingRight: Spacing.md,
+  },
+  radiusOption: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    minWidth: 64,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  radiusOptionSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  radiusOptionText: {
+    fontSize: FontSize.lg,
+    color: Colors.text,
+    fontWeight: FontWeight.bold,
+  },
+  radiusOptionUnit: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    fontWeight: FontWeight.semiBold,
+    marginTop: -2,
+  },
+  radiusOptionTextSelected: { color: Colors.primary },
+  modalCancel: { alignItems: 'center', paddingTop: Spacing.md },
+  modalCancelText: { color: Colors.textSecondary, fontSize: FontSize.md, fontWeight: FontWeight.semiBold },
 });

@@ -545,6 +545,7 @@ export type AuthStackParamList = {
   Login: undefined;
   SignUp: undefined;
   ForgotPassword: undefined;
+  PrivacyPolicy: undefined;
   UpdatePassword: { code?: string; access_token?: string; refresh_token?: string } | undefined;
 };
 

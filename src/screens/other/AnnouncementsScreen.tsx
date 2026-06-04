@@ -35,7 +35,8 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
 
   const load = useCallback(async () => {
     if (isDemoMode) { setAnnouncements(demoAnnouncements as Announcement[]); setLoading(false); setRefreshing(false); return; }
-    const { data } = await announcementService.getAll(tripId);
+    const { data, error } = await announcementService.getAll(tripId);
+    if (error) Alert.alert('Unable to load announcements', error);
     setAnnouncements(data ?? []);
     setLoading(false);
     setRefreshing(false);
@@ -46,17 +47,42 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
   async function handleCreate() {
     if (!title.trim() || !content.trim() || !user) return;
     setSaving(true);
-    await announcementService.create(tripId, user.id, { title: title.trim(), content: content.trim(), priority });
+    const { data, error } = await announcementService.create(tripId, user.id, { title: title.trim(), content: content.trim(), priority });
     setSaving(false);
+    if (error || !data) {
+      Alert.alert('Unable to post announcement', error ?? 'Please try again.');
+      return;
+    }
     setTitle('');
     setContent('');
     setShowAdd(false);
-    load();
+    setAnnouncements((prev) => [data, ...prev]);
   }
 
   async function handleMarkRead(id: string) {
     if (!user) return;
-    await announcementService.markRead(id, user.id);
+    const { error } = await announcementService.markRead(id, user.id);
+    if (error) {
+      Alert.alert('Unable to mark read', error);
+      return;
+    }
+    setAnnouncements((prev) => prev.map((item) => {
+      if (item.id !== id) return item;
+      const reads = item.reads ?? [];
+      if (reads.some((read) => read.user_id === user.id)) return item;
+      return {
+        ...item,
+        reads: [
+          ...reads,
+          {
+            id: `local-${id}-${user.id}`,
+            announcement_id: id,
+            user_id: user.id,
+            read_at: new Date().toISOString(),
+          },
+        ],
+      };
+    }));
   }
 
   if (loading) return <LoadingView />;
@@ -101,8 +127,12 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
                           text: 'Delete',
                           style: 'destructive',
                           onPress: async () => {
-                            await announcementService.delete(item.id);
-                            load();
+                            const { error } = await announcementService.delete(item.id);
+                            if (error) {
+                              Alert.alert('Delete failed', error);
+                              return;
+                            }
+                            setAnnouncements((prev) => prev.filter((ann) => ann.id !== item.id));
                           },
                         },
                       ])
@@ -137,7 +167,15 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
                   style={[styles.priorityChip, priority === p && { borderColor: PRIORITY_COLORS[p], backgroundColor: PRIORITY_COLORS[p] + '20' }]}
                   onPress={() => setPriority(p)}
                 >
-                  <Text>{PRIORITY_ICONS[p]} {p}</Text>
+                  <View style={[styles.priorityDot, { backgroundColor: PRIORITY_COLORS[p] }]} />
+                  <Text
+                    style={styles.priorityLabel}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                  >
+                    {p}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -170,7 +208,21 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl },
   modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.text, marginBottom: Spacing.md },
-  priorityRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
-  priorityChip: { flex: 1, alignItems: 'center', paddingVertical: Spacing.sm, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border },
+  priorityRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },
+  priorityChip: {
+    width: '48%',
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  priorityDot: { width: 14, height: 14, borderRadius: 7, flexShrink: 0 },
+  priorityLabel: { flexShrink: 1, fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text },
   modalInput: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, padding: Spacing.md, fontSize: FontSize.md, color: Colors.text, marginBottom: Spacing.md },
 });

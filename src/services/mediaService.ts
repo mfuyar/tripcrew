@@ -2,7 +2,7 @@ import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
-import { TripMedia, MediaType, ServiceResult } from '../types';
+import { Message, TripMedia, MediaType, ServiceResult } from '../types';
 
 const MEDIA_BUCKET = 'trip-media';
 const MAX_IMAGE_DIMENSION = 1600;
@@ -243,6 +243,40 @@ export const mediaService = {
     mediaType: MediaType
   ): Promise<ServiceResult<{ url: string; mime_type: string }>> {
     return mediaService.uploadChatMedia(tripId, userId, uri, mediaType);
+  },
+
+  async refreshChatMessageMediaUrls<T extends Pick<Message, 'media_url' | 'message_type'>>(
+    messages: T[],
+    expiresIn = 60 * 60 * 24
+  ): Promise<T[]> {
+    const pathByIndex = new Map<number, string>();
+
+    messages.forEach((message, index) => {
+      if (!message.media_url || !['image', 'audio'].includes(message.message_type)) return;
+      const path = extractStoragePath(message.media_url);
+      if (path) pathByIndex.set(index, path);
+    });
+
+    if (pathByIndex.size === 0) return messages;
+
+    const paths = [...pathByIndex.values()];
+    const { data: signed, error } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrls(paths, expiresIn);
+
+    if (error || !signed) return messages;
+
+    const signedUrlByPath = new Map(
+      signed
+        .filter((item) => item.signedUrl)
+        .map((item) => [item.path, item.signedUrl as string])
+    );
+
+    return messages.map((message, index) => {
+      const path = pathByIndex.get(index);
+      const signedUrl = path ? signedUrlByPath.get(path) : undefined;
+      return signedUrl ? { ...message, media_url: signedUrl } : message;
+    });
   },
 
   async deleteExpiredChatMedia(tripId: string, olderThan = new Date(Date.now() - 24 * 60 * 60 * 1000)): Promise<ServiceResult<number>> {

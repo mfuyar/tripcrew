@@ -19,8 +19,16 @@ export function LoginScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
+  const [acceptedPolicy, setAcceptedPolicy] = useState(false);
+
+  function requirePolicyAgreement(): boolean {
+    if (acceptedPolicy) return true;
+    setError('Please agree to the Privacy Policy and Disclosure before using Travel Crew.');
+    return false;
+  }
 
   async function handleSignIn() {
+    if (!requirePolicyAgreement()) return;
     if (!email.trim() || !password) {
       setError('Please enter your email and password.');
       return;
@@ -33,11 +41,17 @@ export function LoginScreen({ navigation }: Props) {
   }
 
   async function handleGoogle() {
+    if (!requirePolicyAgreement()) return;
     setError('');
     setGoogleLoading(true);
     const { error: e } = await signInWithGoogle();
     setGoogleLoading(false);
     if (e) setError(e);
+  }
+
+  function handleDemo() {
+    if (!requirePolicyAgreement()) return;
+    signInDemo();
   }
 
   return (
@@ -79,6 +93,25 @@ export function LoginScreen({ navigation }: Props) {
             autoComplete="password"
           />
 
+          <View style={styles.consentBox}>
+            <TouchableOpacity
+              style={[styles.checkbox, acceptedPolicy && styles.checkboxChecked]}
+              onPress={() => setAcceptedPolicy((prev) => !prev)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: acceptedPolicy }}
+              activeOpacity={0.8}
+            >
+              {acceptedPolicy ? <Text style={styles.checkboxMark}>✓</Text> : null}
+            </TouchableOpacity>
+            <Text style={styles.consentText}>
+              I agree to the{' '}
+              <Text style={styles.policyLink} onPress={() => navigation.navigate('PrivacyPolicy')}>
+                Privacy Policy and Disclosure
+              </Text>
+              .
+            </Text>
+          </View>
+
           <AppButton title="Sign In" onPress={handleSignIn} loading={loading} fullWidth />
 
           <TouchableOpacity
@@ -110,7 +143,7 @@ export function LoginScreen({ navigation }: Props) {
           </TouchableOpacity>
 
           {/* Demo mode */}
-          <TouchableOpacity style={styles.demoButton} onPress={signInDemo} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.demoButton} onPress={handleDemo} activeOpacity={0.8}>
             <Text style={styles.demoText}>✈️  Try Demo — explore without sign-up</Text>
           </TouchableOpacity>
 
@@ -171,6 +204,27 @@ const styles = StyleSheet.create({
   },
   errorText: { color: Colors.danger, fontSize: FontSize.sm },
   forgotButton: { alignItems: 'flex-end', marginTop: Spacing.sm },
+  consentBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: Radius.sm,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  checkboxChecked: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  checkboxMark: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  consentText: { flex: 1, fontSize: FontSize.xs, color: Colors.textSecondary, lineHeight: 18 },
+  policyLink: { color: Colors.primary, fontWeight: FontWeight.semiBold },
 
   // Divider
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: Spacing.md },

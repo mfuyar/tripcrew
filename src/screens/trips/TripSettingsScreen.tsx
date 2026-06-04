@@ -18,7 +18,6 @@ import { AppButton } from '../../components/AppButton';
 import { displayName } from '../../utils/displayName';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
-import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'TripSettings'>;
@@ -194,31 +193,8 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {currentTrip?.destination ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Destination / Address</Text>
-          <View style={styles.destinationBox}>
-            <Text style={styles.destinationText}>{currentTrip.destination}</Text>
-            <View style={styles.directionRow}>
-              <TouchableOpacity
-                style={styles.directionBtn}
-                onPress={() => openAppleMapsDirections(currentTrip.destination)}
-              >
-                <Text style={styles.directionBtnText}>Maps</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.directionBtn, styles.googleDirectionBtn]}
-                onPress={() => openGoogleMapsDirections(currentTrip.destination)}
-              >
-                <Text style={[styles.directionBtnText, styles.googleDirectionBtnText]}>Google Maps</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      ) : null}
-
       {/* Edit Trip */}
-      {isTripOrganizer && (
+      {canManageTrip && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Trip Details</Text>
           <AppTextInput label="Trip Name" value={name} onChangeText={setName} />
@@ -288,7 +264,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, styles.sectionTitleInHeader]}>Families ({families.length})</Text>
-          {isTripOrganizer && (
+          {canManageTrip && (
             <TouchableOpacity onPress={() => navigation.navigate('AddEditFamily', { tripId })}>
               <Text style={styles.addFamilyText}>+ Add</Text>
             </TouchableOpacity>
@@ -306,7 +282,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
                   : ''}
               </Text>
             </View>
-            {isTripOrganizer && (
+            {canManageTrip && (
               <View style={styles.familyActions}>
                 <TouchableOpacity onPress={() => navigation.navigate('FamilyDetail', { tripId, familyId: family.id })}>
                   <Text style={styles.manageText}>Manage</Text>
@@ -339,7 +315,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         </View>
         {members.map((m) => {
           const isAdmin = m.role === 'trip_admin';
-          const canPromote = isTripOrganizer && m.user_id !== user?.id && m.role !== 'trip_organizer';
+          const canPromote = canManageTrip && m.user_id !== user?.id && m.role !== 'trip_organizer';
           return (
             <View key={m.id} style={styles.memberRow}>
               <FamilyAvatar name={m.profile?.full_name ?? '?'} size={36} />
@@ -400,7 +376,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Danger Zone</Text>
         <AppButton title="Leave Trip" onPress={handleLeave} variant="outline" fullWidth />
-        {isTripOrganizer && (
+        {canManageTrip && (
           <AppButton
             title="Delete Trip"
             onPress={handleDelete}
@@ -447,39 +423,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   codeHint: { fontSize: FontSize.sm, color: Colors.textSecondary },
-  destinationBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    ...Shadow.sm,
-  },
-  destinationText: {
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.medium,
-    color: Colors.text,
-    lineHeight: 22,
-    marginBottom: Spacing.md,
-  },
-  directionRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  directionBtn: {
-    flex: 1,
-    borderRadius: Radius.md,
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
-    paddingVertical: Spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  directionBtnText: {
-    color: Colors.primary,
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semiBold,
-  },
-  googleDirectionBtn: { backgroundColor: Colors.primary },
-  googleDirectionBtnText: { color: Colors.surface },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',

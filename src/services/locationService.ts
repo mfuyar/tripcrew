@@ -6,6 +6,7 @@ import { LiveLocation } from '../types';
 const CHANNEL = (tripId: string) => `live-location:${tripId}`;
 const BROADCAST_EVENT = 'location-update';
 const STOP_EVENT = 'location-stop';
+const LIVE_LOCATION_FRESH_MS = 5 * 60 * 1000;
 
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 type LocationListener = (location: LiveLocation) => void;
@@ -19,6 +20,11 @@ interface ActiveSharingSession {
 
 let activeSharingSession: ActiveSharingSession | null = null;
 
+export function isFreshLiveLocation(timestamp: string, now = Date.now()): boolean {
+  const updatedAt = new Date(timestamp).getTime();
+  return Number.isFinite(updatedAt) && now - updatedAt <= LIVE_LOCATION_FRESH_MS;
+}
+
 function mapLiveLocation(row: any): LiveLocation {
   return {
     userId: row.user_id,
@@ -30,7 +36,7 @@ function mapLiveLocation(row: any): LiveLocation {
     accuracy: row.accuracy ?? undefined,
     heading: row.heading ?? undefined,
     timestamp: row.updated_at,
-    isLive: true,
+    isLive: isFreshLiveLocation(row.updated_at),
   };
 }
 

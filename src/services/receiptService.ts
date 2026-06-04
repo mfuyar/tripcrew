@@ -1,9 +1,30 @@
 import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { ReceiptScan, ServiceResult } from '../types';
 
 const RECEIPT_BUCKET = 'trip-media';
+const MAX_RECEIPT_IMAGE_DIMENSION = 1600;
+const RECEIPT_IMAGE_COMPRESS_QUALITY = 0.78;
+
+async function prepareReceiptImageForUpload(uri: string): Promise<string> {
+  const context = ImageManipulator.manipulate(uri);
+  const image = await context.renderAsync();
+  const resize =
+    image.width > image.height
+      ? { width: Math.min(image.width, MAX_RECEIPT_IMAGE_DIMENSION) }
+      : { height: Math.min(image.height, MAX_RECEIPT_IMAGE_DIMENSION) };
+
+  context.reset();
+  context.resize(resize);
+  const renderedImage = await context.renderAsync();
+  const result = await renderedImage.saveAsync({
+    compress: RECEIPT_IMAGE_COMPRESS_QUALITY,
+    format: SaveFormat.JPEG,
+  });
+  return result.uri;
+}
 
 export const receiptService = {
   async uploadReceipt(
@@ -12,7 +33,8 @@ export const receiptService = {
     imageUri: string
   ): Promise<ServiceResult<ReceiptScan>> {
     // Upload image to storage
-    const file = new File(imageUri);
+    const uploadUri = await prepareReceiptImageForUpload(imageUri);
+    const file = new File(uploadUri);
     const fileName = `receipts/${tripId}/${userId}/${Date.now()}.jpg`;
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token ?? supabaseAnonKey;
@@ -24,7 +46,7 @@ export const receiptService = {
         headers: {
           Authorization: `Bearer ${token}`,
           apikey: supabaseAnonKey,
-          'Content-Type': file.type || 'image/jpeg',
+          'Content-Type': 'image/jpeg',
           'x-upsert': 'false',
         },
         body: file,

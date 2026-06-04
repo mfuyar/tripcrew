@@ -19,33 +19,80 @@ interface Props {
   maximumDate?: Date;
 }
 
+function isValidDate(date: Date | undefined): date is Date {
+  return date instanceof Date && !isNaN(date.getTime());
+}
+
+function parseDateOnly(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T12:00:00`);
+  return isValidDate(date) ? date : null;
+}
+
+function startOfDay(date: Date): Date {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+export function formatDateOnly(selected: Date): string {
+  const y = selected.getFullYear();
+  const m = String(selected.getMonth() + 1).padStart(2, '0');
+  const d = String(selected.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function getSafePickerDate(value: string, minimumDate?: Date, maximumDate?: Date): Date {
+  const parsed = parseDateOnly(value);
+  const fallback = isValidDate(minimumDate) ? new Date(minimumDate) : new Date();
+  const selected = parsed ?? fallback;
+  selected.setHours(12, 0, 0, 0);
+
+  if (isValidDate(minimumDate) && startOfDay(selected).getTime() < startOfDay(minimumDate).getTime()) {
+    const min = new Date(minimumDate);
+    min.setHours(12, 0, 0, 0);
+    return min;
+  }
+
+  if (isValidDate(maximumDate) && startOfDay(selected).getTime() > startOfDay(maximumDate).getTime()) {
+    const max = new Date(maximumDate);
+    max.setHours(12, 0, 0, 0);
+    return max;
+  }
+
+  return selected;
+}
+
 export function DatePickerField({ label, value, onChange, required, minimumDate, maximumDate }: Props) {
   const [show, setShow] = useState(false);
 
-  const date = value ? new Date(value + 'T12:00:00') : new Date();
+  const date = getSafePickerDate(value, minimumDate, maximumDate);
+  const parsedDisplayDate = parseDateOnly(value);
 
-  const display = value
-    ? new Date(value + 'T12:00:00').toLocaleDateString('en-US', {
+  const display = parsedDisplayDate
+    ? parsedDisplayDate.toLocaleDateString('en-US', {
         weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
       })
     : 'Select date';
 
   function handleChange(_: any, selected?: Date) {
     if (Platform.OS === 'android') setShow(false);
-    if (selected && !isNaN(selected.getTime())) formatAndSet(selected);
+    if (isValidDate(selected)) formatAndSet(selected);
   }
 
-  function handleValueChange(selected: Date | undefined) {
-    if (selected && !isNaN(selected.getTime())) formatAndSet(selected);
+  function handleValueChange(_: any, selected?: Date) {
+    if (isValidDate(selected)) formatAndSet(selected);
   }
 
   function formatAndSet(selected: Date) {
     try {
-      const y = selected.getFullYear();
-      const m = String(selected.getMonth() + 1).padStart(2, '0');
-      const d = String(selected.getDate()).padStart(2, '0');
-      onChange(`${y}-${m}-${d}`);
+      onChange(formatDateOnly(selected));
     } catch { /* ignore invalid date from picker boundary scroll */ }
+  }
+
+  function handleDone() {
+    formatAndSet(date);
+    setShow(false);
   }
 
   // Fallback: simple text input when native module isn't linked
@@ -87,7 +134,7 @@ export function DatePickerField({ label, value, onChange, required, minimumDate,
             <View style={styles.modalBox}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{label}{required ? <Text style={styles.requiredStar}> *</Text> : null}</Text>
-                <TouchableOpacity onPress={() => setShow(false)}>
+                <TouchableOpacity onPress={handleDone}>
                   <Text style={styles.doneBtn}>Done</Text>
                 </TouchableOpacity>
               </View>
@@ -149,8 +196,8 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
     if (Platform.OS === 'android') { setShow(false); if (selected) formatTime(selected); }
   }
 
-  function handleValueChange(selected: Date | undefined) {
-    if (selected && !isNaN(selected.getTime())) formatTime(selected);
+  function handleValueChange(_: any, selected?: Date) {
+    if (isValidDate(selected)) formatTime(selected);
   }
 
   function formatTime(selected: Date) {
@@ -159,6 +206,11 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
       const m = String(selected.getMinutes()).padStart(2, '0');
       onChange(`${h}:${m}`);
     } catch { /* ignore invalid date */ }
+  }
+
+  function handleDone() {
+    formatTime(timeDate);
+    setShow(false);
   }
 
   // Fallback
@@ -198,7 +250,7 @@ export function TimePickerField({ label, value, onChange }: TimeProps) {
             <View style={styles.modalBox}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{label}</Text>
-                <TouchableOpacity onPress={() => setShow(false)}>
+                <TouchableOpacity onPress={handleDone}>
                   <Text style={styles.doneBtn}>Done</Text>
                 </TouchableOpacity>
               </View>

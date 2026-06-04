@@ -1,6 +1,17 @@
 import { supabase } from '../lib/supabaseClient';
 import { Trip, TripJoinRequest, TripMember, ServiceResult } from '../types';
 
+function friendlyTripJoinError(message: string): string {
+  if (
+    message.includes('request_trip_join_by_code')
+    || message.includes('Could not find the function')
+    || message.includes('schema cache')
+  ) {
+    return 'Trip access requests need a database update. Please run the latest Supabase migration and try again.';
+  }
+  return message;
+}
+
 function generateInviteCode(): string {
   const randomUUID = globalThis.crypto?.randomUUID?.();
   if (randomUUID) return randomUUID.replace(/-/g, '').slice(0, 8).toUpperCase();
@@ -128,7 +139,7 @@ export const tripService = {
       p_invite_code: inviteCode.toUpperCase(),
       p_user_id: userId,
     });
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: friendlyTripJoinError(error.message) };
     return { data: data as TripJoinRequest, error: null };
   },
 
@@ -174,6 +185,13 @@ export const tripService = {
     tripId: string,
     userId: string
   ): Promise<ServiceResult<null>> {
+    const { error: familyError } = await supabase
+      .from('family_members')
+      .delete()
+      .eq('trip_id', tripId)
+      .eq('user_id', userId);
+    if (familyError) return { data: null, error: familyError.message };
+
     const { error } = await supabase
       .from('trip_members')
       .delete()

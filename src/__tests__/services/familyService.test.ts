@@ -12,6 +12,7 @@ const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
+const mockRpc = jest.fn();
 
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
@@ -24,12 +25,15 @@ const mockFrom = jest.fn(() => ({
 }));
 
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: mockFrom },
+  supabase: { from: mockFrom, rpc: mockRpc },
 }));
 
 import { familyService } from '../../services/familyService';
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'missing function' } });
+});
 
 const tripId = 'trip-1';
 const userId = 'user-1';
@@ -50,7 +54,12 @@ const mockFamily = {
 
 describe('SPEC §3.1 — Create Family', () => {
   it('inserts family with all required fields and returns it', async () => {
-    mockSingle.mockResolvedValueOnce({ data: mockFamily, error: null });
+    mockSingle
+      .mockResolvedValueOnce({ data: mockFamily, error: null })
+      .mockResolvedValueOnce({
+        data: { id: 'm1', family_id: familyId, trip_id: tripId, user_id: userId, is_admin: true },
+        error: null,
+      });
 
     const { data, error } = await familyService.createFamily(tripId, userId, {
       name: 'Uyar Family',
@@ -68,7 +77,12 @@ describe('SPEC §3.1 — Create Family', () => {
   });
 
   it('links creator to the family in trip_members after creation', async () => {
-    mockSingle.mockResolvedValueOnce({ data: mockFamily, error: null });
+    mockSingle
+      .mockResolvedValueOnce({ data: mockFamily, error: null })
+      .mockResolvedValueOnce({
+        data: { id: 'm1', family_id: familyId, trip_id: tripId, user_id: userId, is_admin: true },
+        error: null,
+      });
 
     await familyService.createFamily(tripId, userId, {
       name: 'Uyar Family', adults_count: 2, children_count: 0,
@@ -80,7 +94,12 @@ describe('SPEC §3.1 — Create Family', () => {
   });
 
   it('adds creator to family_members as admin after creation', async () => {
-    mockSingle.mockResolvedValueOnce({ data: mockFamily, error: null });
+    mockSingle
+      .mockResolvedValueOnce({ data: mockFamily, error: null })
+      .mockResolvedValueOnce({
+        data: { id: 'm1', family_id: familyId, trip_id: tripId, user_id: userId, is_admin: true },
+        error: null,
+      });
 
     await familyService.createFamily(tripId, userId, {
       name: 'Uyar Family', adults_count: 2, children_count: 0,
@@ -200,15 +219,37 @@ describe('SPEC §3.2 — Family Members', () => {
       id: 'm2', family_id: familyId, trip_id: tripId, user_id: 'user-2',
       is_admin: false, push_talk_enabled: false, created_at: '',
     };
+    mockRpc.mockResolvedValueOnce({ data: null, error: { code: 'PGRST202', message: 'missing function' } });
     mockSingle.mockResolvedValueOnce({ data: member, error: null });
 
     const { data, error } = await familyService.addFamilyMember(familyId, tripId, 'user-2');
 
     expect(error).toBeNull();
     expect(data?.user_id).toBe('user-2');
+    expect(mockDelete).toHaveBeenCalled();
     // Should also update trip_members
     const fromCalls = (mockFrom as jest.Mock).mock.calls.map(([t]) => t);
     expect(fromCalls).toContain('trip_members');
+  });
+
+  it('switches family membership through the RPC when available', async () => {
+    const member = {
+      id: 'm2', family_id: familyId, trip_id: tripId, user_id: userId,
+      is_admin: false, push_talk_enabled: false, created_at: '',
+    };
+    mockRpc.mockResolvedValueOnce({ data: member, error: null });
+
+    const { data, error } = await familyService.addFamilyMember(familyId, tripId, userId);
+
+    expect(error).toBeNull();
+    expect(data?.family_id).toBe(familyId);
+    expect(mockRpc).toHaveBeenCalledWith('switch_family_membership', {
+      family_uuid: familyId,
+      trip_uuid: tripId,
+      member_uuid: userId,
+      make_admin: false,
+    });
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it('updateFamilyMemberPushTalk toggles push_talk_enabled', async () => {

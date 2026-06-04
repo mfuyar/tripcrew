@@ -17,6 +17,12 @@ type PushPayload = {
   data?: Record<string, unknown>;
 };
 
+function broadcastNotification(notification: Notification): void {
+  const channel = supabase.channel(NOTIFY_CHANNEL(notification.user_id));
+  void sendBroadcast(channel, 'notification', notification)
+    .finally(() => supabase.removeChannel(channel));
+}
+
 function getExpoProjectId(): string | null {
   const extraProjectId = Constants.expoConfig?.extra?.eas?.projectId;
   const easProjectId = Constants.easConfig?.projectId;
@@ -153,7 +159,43 @@ export const notificationService = {
       .single();
     if (error) return { data: null, error: error.message };
     await notificationService.sendPushToUsers([input.user_id], input.title, input.body, input.data);
-    return { data: data as Notification, error: null };
+    const notification = data as Notification;
+    broadcastNotification(notification);
+    return { data: notification, error: null };
+  },
+
+  async notifyUsers(
+    userIds: string[],
+    tripId: string | undefined,
+    type: Notification['type'],
+    title: string,
+    body: string,
+    data?: Record<string, unknown>
+  ): Promise<ServiceResult<Notification[]>> {
+    const uniqueUserIds = Array.from(new Set(userIds));
+    if (uniqueUserIds.length === 0) return { data: [], error: null };
+
+    const rows = uniqueUserIds.map((userId) => ({
+      user_id: userId,
+      trip_id: tripId,
+      type,
+      title,
+      body,
+      data: data ?? null,
+      is_read: false,
+    }));
+
+    const { data: inserted, error } = await supabase
+      .from('notifications')
+      .insert(rows)
+      .select();
+
+    if (error) return { data: null, error: error.message };
+
+    await notificationService.sendPushToUsers(uniqueUserIds, title, body, data);
+    (inserted ?? []).forEach((n) => broadcastNotification(n as Notification));
+
+    return { data: (inserted ?? []) as Notification[], error: null };
   },
 
   async sendPushToUsers(
@@ -206,11 +248,7 @@ export const notificationService = {
     await notificationService.sendPushToUsers(userIds, title, body, data);
 
     // Broadcast to each user's personal channel for real-time delivery
-    (inserted ?? []).forEach((n: Notification) => {
-      const channel = supabase.channel(NOTIFY_CHANNEL(n.user_id));
-      void sendBroadcast(channel, 'notification', n)
-        .finally(() => supabase.removeChannel(channel));
-    });
+    (inserted ?? []).forEach((n: Notification) => broadcastNotification(n));
   },
 
   /** Subscribe to real-time notifications for a user. Returns unsubscribe fn. */

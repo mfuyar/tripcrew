@@ -122,7 +122,6 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       <View style={styles.heroCard}>
         <Text style={styles.heroEmoji}>✈️</Text>
         <Text style={styles.heroTitle}>{trip?.name ?? 'Trip'}</Text>
-        <Text style={styles.heroDestination}>📍 {trip?.destination}</Text>
         <View style={styles.heroDates}>
           <Text style={styles.heroDateText}>
             {trip?.start_date} → {trip?.end_date}
@@ -177,22 +176,6 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
           </View>
         </View>
       ) : null}
-
-      {/* Stats Row */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{families.length}</Text>
-          <Text style={styles.statLabel}>Families</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{members.length}</Text>
-          <Text style={styles.statLabel}>Members</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{trip?.currency} {totalExpenses.toFixed(0)}</Text>
-          <Text style={styles.statLabel}>Expenses</Text>
-        </View>
-      </View>
 
       {/* Announcements */}
       <View style={styles.section}>
@@ -263,6 +246,22 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
             </Text>
           </TouchableOpacity>
         )}
+      </View>
+
+      {/* Stats Row */}
+      <View style={styles.statsRow}>
+        <View style={styles.statCard}>
+          <Text style={styles.statValue}>{families.length}</Text>
+          <Text style={styles.statLabel}>Families</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statValue}>{members.length}</Text>
+          <Text style={styles.statLabel}>Members</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statValue}>{trip?.currency} {totalExpenses.toFixed(0)}</Text>
+          <Text style={styles.statLabel}>Expenses</Text>
+        </View>
       </View>
 
       {/* Active Polls */}
@@ -412,11 +411,6 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.surface,
     textAlign: 'center',
-  },
-  heroDestination: {
-    fontSize: FontSize.md,
-    color: Colors.surface + 'CC',
-    marginTop: Spacing.xs,
   },
   heroDates: {
     flexDirection: 'row',

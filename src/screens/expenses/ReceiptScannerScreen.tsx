@@ -96,7 +96,7 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
     if (receipt) {
       const { data: scanned, error: scanError } = await receiptService.scanReceipt(receipt.id, receipt.image_url);
       if (scanError) {
-        Alert.alert('Scan Error', scanError);
+        Alert.alert('Receipt not scanned', scanError);
       } else if (scanned) {
         setResult({
           amount: scanned.parsed_amount,

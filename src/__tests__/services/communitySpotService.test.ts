@@ -6,6 +6,16 @@ const mockOrder = jest.fn();
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockRpc = jest.fn();
+const mockGetSession = jest.fn();
+const mockGetPublicUrl = jest.fn();
+const mockStorageFrom = jest.fn(() => ({
+  getPublicUrl: mockGetPublicUrl,
+}));
+const mockExpoFetch = jest.fn();
+const mockRenderAsync = jest.fn();
+const mockReset = jest.fn().mockReturnThis();
+const mockResize = jest.fn().mockReturnThis();
+const mockSaveAsync = jest.fn();
 
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
@@ -21,10 +31,10 @@ jest.mock('../../lib/supabaseClient', () => ({
   supabaseUrl: 'https://project.supabase.co',
   supabaseAnonKey: 'anon-key',
   supabase: {
-    auth: { getSession: jest.fn() },
+    auth: { getSession: mockGetSession },
     from: mockFrom,
     rpc: mockRpc,
-    storage: { from: jest.fn() },
+    storage: { from: mockStorageFrom },
   },
 }));
 
@@ -37,10 +47,16 @@ jest.mock('expo-file-system', () => ({
   },
 }));
 
-jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
+jest.mock('expo/fetch', () => ({ fetch: mockExpoFetch }));
 
 jest.mock('expo-image-manipulator', () => ({
-  ImageManipulator: { manipulate: jest.fn() },
+  ImageManipulator: {
+    manipulate: jest.fn(() => ({
+      renderAsync: mockRenderAsync,
+      reset: mockReset,
+      resize: mockResize,
+    })),
+  },
   SaveFormat: { JPEG: 'jpeg' },
 }));
 
@@ -53,6 +69,13 @@ beforeEach(() => {
   jest.clearAllMocks();
   global.fetch = jest.fn();
   process.env.EXPO_PUBLIC_GEMINI_API_KEY = originalGeminiKey;
+  mockGetSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
+  mockGetPublicUrl.mockReturnValue({ data: { publicUrl: 'https://storage.example.com/community.jpg' } });
+  mockExpoFetch.mockResolvedValue({ ok: true });
+  mockRenderAsync
+    .mockResolvedValueOnce({ width: 1200, height: 800 })
+    .mockResolvedValueOnce({ saveAsync: mockSaveAsync });
+  mockSaveAsync.mockResolvedValue({ uri: 'file:///cache/community.jpg' });
 });
 
 afterAll(() => {
@@ -110,6 +133,55 @@ describe('communitySpotService moderation helpers', () => {
   it('detects bad language in community spot text', () => {
     expect(communitySpotService.containsBadLanguage('quiet beach')).toBe(false);
     expect(communitySpotService.containsBadLanguage('this place is shit')).toBe(true);
+  });
+
+  it('directly rejects bad-language spot text without inserting', async () => {
+    const { data, error } = await communitySpotService.create('user-1', {
+      name: 'Bad spot',
+      category: 'other',
+      description: 'this place is shit',
+      latitude: 40,
+      longitude: -73,
+    });
+
+    expect(data).toBeNull();
+    expect(error).toBe('This spot cannot be posted.');
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it('directly rejects clearly adult or unsafe photos before upload', async () => {
+    process.env.EXPO_PUBLIC_GEMINI_API_KEY = 'gemini-key';
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [{
+              text: JSON.stringify({
+                adult: true,
+                unsafe: false,
+                uncertain: false,
+                reason: 'Photo contains content that cannot be posted.',
+              }),
+            }],
+          },
+        }],
+      }),
+    });
+
+    const { data, error } = await communitySpotService.create('user-1', {
+      name: 'Beach',
+      category: 'outdoor',
+      description: 'Nice place',
+      latitude: 40,
+      longitude: -73,
+      photoUri: 'file:///local/photo.jpg',
+    });
+
+    expect(data).toBeNull();
+    expect(error).toBe('Photo contains content that cannot be posted.');
+    expect(mockExpoFetch).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 });
 

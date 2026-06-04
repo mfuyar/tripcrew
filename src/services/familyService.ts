@@ -10,6 +10,15 @@ function isMissingInviteFunction(error: { message?: string; code?: string } | nu
   );
 }
 
+function isMissingSwitchFunction(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === 'PGRST202' ||
+    error.message?.includes('switch_family_membership') === true ||
+    error.message?.includes('schema cache') === true
+  );
+}
+
 export const familyService = {
   async createFamily(
     tripId: string,
@@ -22,19 +31,8 @@ export const familyService = {
       .select()
       .single();
     if (error) return { data: null, error: error.message };
-    // Link creator as family admin in trip_members
-    await supabase
-      .from('trip_members')
-      .update({ family_id: data.id })
-      .eq('trip_id', tripId)
-      .eq('user_id', userId);
-    // Add creator as family member
-    await supabase.from('family_members').insert({
-      family_id: data.id,
-      trip_id: tripId,
-      user_id: userId,
-      is_admin: true,
-    });
+
+    await familyService.addFamilyMember(data.id, tripId, userId, true);
     return { data: data as Family, error: null };
   },
 
@@ -78,6 +76,24 @@ export const familyService = {
     userId: string,
     isAdmin = false
   ): Promise<ServiceResult<FamilyMember>> {
+    const { data: switched, error: switchError } = await supabase.rpc('switch_family_membership', {
+      family_uuid: familyId,
+      trip_uuid: tripId,
+      member_uuid: userId,
+      make_admin: isAdmin,
+    });
+
+    if (!switchError) return { data: switched as FamilyMember, error: null };
+    if (!isMissingSwitchFunction(switchError)) {
+      return { data: null, error: switchError.message };
+    }
+
+    await supabase
+      .from('family_members')
+      .delete()
+      .eq('trip_id', tripId)
+      .eq('user_id', userId);
+
     const { data, error } = await supabase
       .from('family_members')
       .insert({ family_id: familyId, trip_id: tripId, user_id: userId, is_admin: isAdmin, push_talk_enabled: false })
