@@ -13,6 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, Trip, TripJoinRequest } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
@@ -69,6 +70,7 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
 
 export function TripsListScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { user, isDemoMode, isGlobalAdmin } = useAuth();
   const { unreadCount } = useNotifications();
   const { setCurrentTrip, setFamilies, setMembers } = useTripContext();
@@ -146,7 +148,7 @@ export function TripsListScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
         <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>My Trips</Text>
           <View style={styles.headerIcons}>
@@ -295,8 +297,8 @@ export function TripsListScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
-    padding: Spacing.lg,
-    paddingTop: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
