@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 import { Trip, TripJoinRequest, TripMember, ServiceResult } from '../types';
+import { notificationService } from './notificationService';
 
 function friendlyTripJoinError(message: string): string {
   if (
@@ -140,7 +141,34 @@ export const tripService = {
       p_user_id: userId,
     });
     if (error) return { data: null, error: friendlyTripJoinError(error.message) };
-    return { data: data as TripJoinRequest, error: null };
+    const request = data as TripJoinRequest;
+
+    // Notify all organizers and admins of the trip so they know to review the request
+    try {
+      const [tripResult, profileResult, managersResult] = await Promise.all([
+        supabase.from('trips').select('id, name').eq('id', request.trip_id).single(),
+        supabase.from('profiles').select('full_name').eq('id', userId).single(),
+        supabase.from('trip_members').select('user_id').eq('trip_id', request.trip_id)
+          .in('role', ['trip_organizer', 'trip_admin']),
+      ]);
+      const tripName = (tripResult.data as any)?.name ?? 'your trip';
+      const requesterName = (profileResult.data as any)?.full_name ?? 'Someone';
+      const managerIds: string[] = (managersResult.data ?? []).map((m: any) => m.user_id);
+      if (managerIds.length > 0) {
+        const rows = managerIds.map((managerId) => ({
+          user_id: managerId,
+          trip_id: request.trip_id,
+          type: 'other',
+          title: '🙋 New Join Request',
+          body: `${requesterName} wants to join "${tripName}". Open Trip Settings to review.`,
+          data: { trip_id: request.trip_id, request_id: request.id },
+          is_read: false,
+        }));
+        await supabase.from('notifications').insert(rows);
+      }
+    } catch { /* notification failure should not block the join request */ }
+
+    return { data: request, error: null };
   },
 
   async joinTrip(userId: string, inviteCode: string): Promise<ServiceResult<TripJoinRequest>> {
