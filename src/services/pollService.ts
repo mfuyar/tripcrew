@@ -51,6 +51,20 @@ export const pollService = {
     return result;
   },
 
+  async getActivePolls(tripId: string, limit = 3): Promise<ServiceResult<Poll[]>> {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('polls')
+      .select('*, options:poll_options(*, votes:poll_votes(*)), creator:profiles(*)')
+      .eq('trip_id', tripId)
+      .eq('status', 'active')
+      .or(`deadline.is.null,deadline.gt.${now}`)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) return { data: null, error: error.message };
+    return { data: data as Poll[], error: null };
+  },
+
   async getPolls(tripId: string): Promise<ServiceResult<Poll[]>> {
     const { data, error } = await supabase
       .from('polls')

@@ -16,6 +16,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
 import { announcementService } from '../../services/announcementService';
 import { tripService } from '../../services/tripService';
+import { pollService } from '../../services/pollService';
+import { Poll } from '../../types';
 import { demoExpenses, demoAnnouncements } from '../../lib/mockData';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 import { LoadingView } from '../../components/LoadingView';
@@ -44,6 +46,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [activePolls, setActivePolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -55,9 +58,10 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       setRefreshing(false);
       return;
     }
-    const [expResult, annResult] = await Promise.all([
+    const [expResult, annResult, pollResult] = await Promise.all([
       expenseService.getExpenses(tripId),
       announcementService.getLatest(tripId, 3),
+      pollService.getActivePolls(tripId, 3),
     ]);
     const total = (expResult.data ?? []).reduce((s, e) => s + e.amount, 0);
     setTotalExpenses(total);
@@ -65,6 +69,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       Alert.alert('Unable to load announcements', annResult.error);
     }
     setAnnouncements(annResult.data ?? []);
+    setActivePolls(pollResult.data ?? []);
     setLoading(false);
     setRefreshing(false);
   }, [tripId]);
@@ -83,6 +88,17 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
   );
 
   if (loading) return <LoadingView />;
+
+  function timeLeft(deadline?: string): string | null {
+    if (!deadline) return null;
+    const ms = new Date(deadline).getTime() - Date.now();
+    if (ms <= 0) return 'Ended';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    if (h >= 24) return `${Math.floor(h / 24)}d left`;
+    if (h > 0) return `${h}h ${m}m left`;
+    return `${m}m left`;
+  }
 
   const trip = currentTrip;
   const daysLeft = trip
@@ -248,6 +264,42 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Active Polls */}
+      {activePolls.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>🗳️ Active Polls</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Polls', { tripId })}>
+              <Text style={styles.seeAll}>See all</Text>
+            </TouchableOpacity>
+          </View>
+          {activePolls.map((poll) => {
+            const total = poll.options?.reduce((s, o) => s + o.votes_count, 0) ?? 0;
+            const remaining = timeLeft(poll.deadline);
+            return (
+              <TouchableOpacity
+                key={poll.id}
+                style={styles.pollCard}
+                onPress={() => navigation.navigate('PollDetail', { tripId, pollId: poll.id })}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.pollQuestion} numberOfLines={2}>{poll.question}</Text>
+                <View style={styles.pollMeta}>
+                  <Text style={styles.pollVotes}>{total} vote{total !== 1 ? 's' : ''}</Text>
+                  {remaining && (
+                    <View style={[styles.timerPill, remaining === 'Ended' && styles.timerPillEnded]}>
+                      <Text style={[styles.timerText, remaining === 'Ended' && styles.timerTextEnded]}>
+                        ⏱ {remaining}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       {/* Join-family prompt for users without a family */}
       {families.length > 0 && !userFamily && !isTripOrganizer && (
@@ -513,6 +565,26 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: 20,
   },
+  pollCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  pollQuestion: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.xs },
+  pollMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pollVotes: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  timerPill: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.warning + '20',
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.sm, paddingVertical: 2,
+  },
+  timerPillEnded: { backgroundColor: Colors.border },
+  timerText: { fontSize: FontSize.xs, color: Colors.warning, fontWeight: FontWeight.semiBold },
+  timerTextEnded: { color: Colors.textSecondary },
   setupBanner: {
     flexDirection: 'row',
     alignItems: 'center',

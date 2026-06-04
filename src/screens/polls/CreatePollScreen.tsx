@@ -14,13 +14,24 @@ import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/t
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreatePoll'>;
 
+const DURATIONS: { label: string; hours: number | null }[] = [
+  { label: 'No limit', hours: null },
+  { label: '1h', hours: 1 },
+  { label: '2h', hours: 2 },
+  { label: '6h', hours: 6 },
+  { label: '12h', hours: 12 },
+  { label: '24h', hours: 24 },
+  { label: '3 days', hours: 72 },
+  { label: '7 days', hours: 168 },
+];
+
 export function CreatePollScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
   const { user } = useAuth();
   const [question, setQuestion] = useState('');
   const [description, setDescription] = useState('');
   const [options, setOptions] = useState(['', '']);
-  const [deadline, setDeadline] = useState('');
+  const [durationHours, setDurationHours] = useState<number | null>(24);
   const [loading, setLoading] = useState(false);
 
   function updateOption(idx: number, value: string) {
@@ -38,10 +49,15 @@ export function CreatePollScreen({ navigation, route }: Props) {
     const validOptions = options.filter((o) => o.trim());
     if (validOptions.length < 2) { Alert.alert('Error', 'At least 2 options required'); return; }
     if (!user) return;
+
+    const deadline = durationHours
+      ? new Date(Date.now() + durationHours * 3600 * 1000).toISOString()
+      : undefined;
+
     setLoading(true);
     const { error } = await pollService.createPoll(
       tripId, user.id, question.trim(), validOptions, description.trim() || undefined,
-      deadline || undefined,
+      deadline,
     );
     setLoading(false);
     if (error) Alert.alert('Error', error);
@@ -73,13 +89,20 @@ export function CreatePollScreen({ navigation, route }: Props) {
           <Text style={styles.addOptionText}>+ Add option</Text>
         </TouchableOpacity>
 
-        <AppTextInput
-          label="Deadline"
-          value={deadline}
-          onChangeText={setDeadline}
-          placeholder="YYYY-MM-DD (optional)"
-          keyboardType="numbers-and-punctuation"
-        />
+        <Text style={styles.label}>Closes in <Text style={styles.labelNote}>(optional)</Text></Text>
+        <View style={styles.durationRow}>
+          {DURATIONS.map((d) => (
+            <TouchableOpacity
+              key={d.label}
+              style={[styles.durationChip, durationHours === d.hours && styles.durationChipActive]}
+              onPress={() => setDurationHours(d.hours)}
+            >
+              <Text style={[styles.durationText, durationHours === d.hours && styles.durationTextActive]}>
+                {d.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <AppButton title="Create Poll" onPress={handleCreate} loading={loading} fullWidth style={styles.createBtn} />
     </FormKeyboardView>
@@ -89,11 +112,21 @@ export function CreatePollScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { padding: Spacing.md },
   label: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.sm },
+  labelNote: { fontWeight: FontWeight.regular, color: Colors.textSecondary },
   optionRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   optionInput: { flex: 1, marginBottom: 0 },
   removeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.danger + '20', alignItems: 'center', justifyContent: 'center' },
   removeBtnText: { color: Colors.danger, fontSize: 14 },
   addOptionBtn: { padding: Spacing.md, alignItems: 'center', marginBottom: Spacing.md },
   addOptionText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: FontWeight.semiBold },
+  durationRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.lg },
+  durationChip: {
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    borderRadius: Radius.full, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  durationChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  durationText: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  durationTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
   createBtn: { marginTop: Spacing.sm },
 });
