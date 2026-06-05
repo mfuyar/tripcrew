@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { ReceiptScan, ServiceResult } from '../types';
@@ -13,15 +13,13 @@ async function prepareBase64(uri: string): Promise<{ base64: string; mimeType: s
       [{ resize: { width: MAX_RECEIPT_DIM } }],
       { compress: RECEIPT_QUALITY, format: SaveFormat.JPEG }
     );
-    const base64 = await FileSystem.readAsStringAsync(resized.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    const file = new File(resized.uri);
+    const base64 = await file.base64();
     return { base64, mimeType: 'image/jpeg' };
   } catch {
     // Fall back to original
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    const file = new File(uri);
+    const base64 = await file.base64();
     const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpeg';
     return { base64, mimeType: ext === 'png' ? 'image/png' : 'image/jpeg' };
   }

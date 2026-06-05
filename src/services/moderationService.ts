@@ -3,7 +3,7 @@
  * Called before every photo is stored so +18 / unsafe content never reaches storage.
  */
 
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 
 export type ModerationResult =
@@ -26,10 +26,9 @@ export async function moderatePhoto(localUri: string): Promise<ModerationResult>
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token ?? supabaseAnonKey;
 
-    // Read image as base64
-    const base64 = await FileSystem.readAsStringAsync(localUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    // Read image as base64 using Expo SDK 56 File class
+    const file = new File(localUri);
+    const base64 = await file.base64();
 
     // Detect MIME from extension
     const ext = localUri.split('?')[0].split('.').pop()?.toLowerCase() ?? 'jpeg';
