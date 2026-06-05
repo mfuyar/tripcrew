@@ -182,15 +182,16 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
         </View>
       ) : null}
 
-      {/* Announcements */}
+      {/* Announcements — only shown when there are active announcements */}
+      {announcements.length > 0 && (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>📢 Announcements</Text>
           <TouchableOpacity onPress={() => navigation.navigate('Announcements', { tripId })}>
-            <Text style={styles.seeAll}>{announcements.length > 0 ? 'See all' : canManageAnnouncements ? 'Post' : 'Open'}</Text>
+            <Text style={styles.seeAll}>See all</Text>
           </TouchableOpacity>
         </View>
-        {announcements.length > 0 ? (
+        {(
           announcements.map((ann) => (
             <View key={ann.id} style={styles.announcementRow}>
               <Text style={styles.annPriority}>
@@ -238,20 +239,23 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
               )}
             </View>
           ))
-        ) : (
-          <TouchableOpacity
-            style={styles.announcementEmpty}
-            onPress={() => navigation.navigate('Announcements', { tripId })}
-          >
-            <Text style={styles.announcementEmptyTitle}>No announcements yet</Text>
-            <Text style={styles.announcementEmptyText}>
-              {canManageAnnouncements
-                ? 'Post a trip update for everyone from here.'
-                : 'Trip updates from organizers and admins will appear here.'}
-            </Text>
-          </TouchableOpacity>
         )}
       </View>
+      )}
+
+      {/* Explore community spots — moved above stats for visibility */}
+      <TouchableOpacity
+        style={styles.exploreCard}
+        onPress={() => (navigation as any).navigate('CommunitySpots', { tripId })}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.exploreEmoji}>🧭</Text>
+        <View style={styles.exploreCopy}>
+          <Text style={styles.exploreTitle}>Explore Community Spots</Text>
+          <Text style={styles.exploreSubtitle}>Discover local gems near your destination</Text>
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </TouchableOpacity>
 
       {/* Stats Row */}
       <View style={styles.statsRow}>
@@ -365,20 +369,6 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
           </ScrollView>
         </View>
       )}
-
-      {/* Explore community spots banner */}
-      <TouchableOpacity
-        style={styles.exploreCard}
-        onPress={() => (navigation as any).navigate('CommunitySpots', { tripId })}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.exploreEmoji}>🧭</Text>
-        <View style={styles.exploreCopy}>
-          <Text style={styles.exploreTitle}>Explore Community Spots</Text>
-          <Text style={styles.exploreSubtitle}>Discover local gems near your destination</Text>
-        </View>
-        <Text style={styles.chevron}>›</Text>
-      </TouchableOpacity>
 
       {/* Quick Links Grid */}
       <View style={styles.section}>
