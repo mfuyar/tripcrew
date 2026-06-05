@@ -22,14 +22,22 @@ const BAD_LANGUAGE_PATTERNS = [
   /\bretard(?:ed)?\b/i,
 ];
 
-function getGeminiApiKey(): string | undefined {
-  const key = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-  if (!key || key.startsWith('your_') || key === 'your_gemini_api_key_here') return undefined;
-  return key;
-}
-
-function getGeminiModel(): string {
-  return process.env.EXPO_PUBLIC_GEMINI_MODEL ?? 'gemini-2.0-flash';
+// Call Gemini via the server-side Edge Function so the API key is never in the client bundle
+async function callGeminiProxy(
+  contents: unknown[],
+  generationConfig: Record<string, unknown>
+): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token ?? supabaseAnonKey;
+  return fetch(`${supabaseUrl}/functions/v1/gemini-proxy`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: supabaseAnonKey,
+    },
+    body: JSON.stringify({ contents, generationConfig }),
+  });
 }
 
 export interface CommunitySpotInput {
@@ -115,43 +123,25 @@ function parseGeminiJsonObject(text: string): any {
 }
 
 async function moderatePhoto(file: File): Promise<ModerationDecision> {
-  const geminiApiKey = getGeminiApiKey();
-  if (!geminiApiKey) {
-    return {
-      status: 'pending_review',
-      reason: 'Photo needs manual review because Gemini moderation is not configured.',
-    };
-  }
-
   try {
     const base64 = await file.base64();
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [
-              {
-                text: [
-                  'Moderate this user-submitted travel spot photo.',
-                  'Return only JSON: {"adult": boolean, "unsafe": boolean, "uncertain": boolean, "reason": string}.',
-                  'adult should be true for nudity, sexual content, explicit poses, pornography, or clearly +18 imagery.',
-                  'unsafe should be true for graphic violence or hateful symbols.',
-                  'uncertain should be true only when the image might be unsafe but is not clear enough to reject directly.',
-                ].join('\n'),
-              },
-              { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
-            ],
-          }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: 'application/json',
+    const response = await callGeminiProxy(
+      [{
+        role: 'user',
+        parts: [
+          {
+            text: [
+              'Moderate this user-submitted travel spot photo.',
+              'Return only JSON: {"adult": boolean, "unsafe": boolean, "uncertain": boolean, "reason": string}.',
+              'adult should be true for nudity, sexual content, explicit poses, pornography, or clearly +18 imagery.',
+              'unsafe should be true for graphic violence or hateful symbols.',
+              'uncertain should be true only when the image might be unsafe but is not clear enough to reject directly.',
+            ].join('\n'),
           },
-        }),
-      }
+          { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
+        ],
+      }],
+      { temperature: 0, responseMimeType: 'application/json' }
     );
 
     if (!response.ok) {
@@ -495,11 +485,6 @@ export const communitySpotService = {
     radiusMiles = 10,
     locationLabel?: string
   ): Promise<ServiceResult<CommunitySpot[]>> {
-    const geminiApiKey = getGeminiApiKey();
-    if (!geminiApiKey) {
-      return { data: null, error: 'Gemini API key is missing. Add EXPO_PUBLIC_GEMINI_API_KEY to .env.' };
-    }
-
     const prompt = [
       'You are a friendly local travel guide.',
       locationLabel
@@ -515,25 +500,12 @@ export const communitySpotService = {
     ].join('\n');
 
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.55,
-              responseMimeType: 'application/json',
-            },
-          }),
-        }
+      const response = await callGeminiProxy(
+        [{ role: 'user', parts: [{ text: prompt }] }],
+        { temperature: 0.55, responseMimeType: 'application/json' }
       );
 
       if (!response.ok) {
-        if (response.status === 400 || response.status === 403) {
-          return { data: null, error: 'Gemini API key is invalid. Update EXPO_PUBLIC_GEMINI_API_KEY in .env.' };
-        }
         return { data: null, error: 'Could not load suggested places right now.' };
       }
 
