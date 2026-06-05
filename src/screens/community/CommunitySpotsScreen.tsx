@@ -97,22 +97,12 @@ function SpotCard({
     spot.trip_id !== currentTripId;
 
   // API spots (OpenStreetMap, OpenTripMap) are public data — always show full details
-  const showFullDetails = !isOtherTripMemberSpot;
 
-  if (isOtherTripMemberSpot) {
-    return (
-      <View style={styles.cardMinimal}>
-        <Text style={styles.cardMinimalIcon}>{cat.icon}</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardMinimalName}>{spot.name}</Text>
-          <Text style={styles.cardMinimalMeta}>{cat.label} · {distVal} {distanceUnit}</Text>
-        </View>
-        <View style={styles.sourceBadge}>
-          <Text style={[styles.sourceBadgeText, { color: Colors.textSecondary }]}>Member spot</Text>
-        </View>
-      </View>
-    );
-  }
+
+  // For other-trip member spots: show full details but anonymise the submitter name to initials
+  const displaySubmitter = isOtherTripMemberSpot && spot.submitted_by_name
+    ? spot.submitted_by_name.trim().split(/\s+/).map(w => w[0]?.toUpperCase()).join('')
+    : spot.submitted_by_name;
 
   return (
     <View style={styles.card}>
@@ -172,9 +162,17 @@ function SpotCard({
               <Text style={styles.detailRow}>🕐 {spot.opening_hours}</Text>
             ) : null}
             {spot.source_type === 'member' && (
-              <Text style={styles.memberClaim}>
-                ⚠️ Member-submitted. Claims are not independently verified.
-              </Text>
+              <>
+                {displaySubmitter && (
+                  <Text style={styles.detailRow}>
+                    👤 Added by {displaySubmitter}
+                    {spot.created_at ? ` · ${new Date(spot.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                  </Text>
+                )}
+                <Text style={styles.memberClaim}>
+                  ⚠️ Member-submitted. Claims are not independently verified.
+                </Text>
+              </>
             )}
             {/* Matched preferences */}
             {(spot.matched_preferences?.length ?? 0) > 0 && (
@@ -781,15 +779,6 @@ const styles = StyleSheet.create({
   list: { padding: Spacing.md, flexGrow: 1 },
   map: { flex: 1 },
   // Card
-  cardMinimal: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.surface, borderRadius: Radius.md,
-    padding: Spacing.md, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  cardMinimalIcon: { fontSize: 22 },
-  cardMinimalName: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text },
-  cardMinimalMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   card: { backgroundColor: Colors.surface, borderRadius: Radius.lg, marginBottom: Spacing.md, overflow: 'hidden', ...Shadow.sm },
   cardImage: { width: '100%', height: 160 },
   cardImagePlaceholder: { width: '100%', height: 80, alignItems: 'center', justifyContent: 'center' },
