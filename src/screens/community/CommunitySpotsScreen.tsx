@@ -163,52 +163,54 @@ function SpotCard({
           </View>
         )}
 
-        {/* Engagement row */}
+        {/* Engagement row — vote / like / comment / save */}
         <View style={styles.engagementRow}>
           <TouchableOpacity style={styles.engBtn} onPress={() => onVote(spot)}>
-            <Text style={[styles.engBtnText, spot.viewer_has_upvoted && styles.engBtnActive]}>
-              ▲ {spot.upvotes_count}
-            </Text>
+            <Text style={[styles.engBtnText, spot.viewer_has_upvoted && styles.engBtnActive]}>▲ {spot.upvotes_count}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.engBtn} onPress={() => onLike(spot)}>
-            <Text style={[styles.engBtnText, spot.viewer_has_liked && styles.engBtnActive]}>
-              ♥ {spot.likes_count ?? 0}
-            </Text>
+            <Text style={[styles.engBtnText, spot.viewer_has_liked && styles.engBtnActive]}>♥ {spot.likes_count ?? 0}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.engBtn} onPress={() => onComment(spot)}>
             <Text style={styles.engBtnText}>💬 {spot.comments_count}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.engBtn} onPress={() => onSave(spot)}>
+          <TouchableOpacity style={[styles.engBtn, styles.engBtnSave]} onPress={() => onSave(spot)}>
             <Text style={[styles.engBtnText, spot.viewer_has_saved && styles.engBtnActive]}>
-              🔖 {spot.viewer_has_saved ? 'Saved' : 'Save'}
+              {spot.viewer_has_saved ? '🔖 Saved' : '🔖 Save'}
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Action buttons */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => openAppleMapsDirections(spot.address || `${spot.latitude},${spot.longitude}`)}>
-            <Text style={styles.actionBtnText}>Maps</Text>
+        {/* Navigate row */}
+        <View style={styles.navRow}>
+          <TouchableOpacity style={styles.navBtn} onPress={() => openAppleMapsDirections(spot.address || `${spot.latitude},${spot.longitude}`)}>
+            <Text style={styles.navBtnText}>🗺 Maps</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => openGoogleMapsDirections(spot.address || `${spot.latitude},${spot.longitude}`)}>
-            <Text style={styles.actionBtnText}>Google</Text>
+          <TouchableOpacity style={styles.navBtn} onPress={() => openGoogleMapsDirections(spot.address || `${spot.latitude},${spot.longitude}`)}>
+            <Text style={styles.navBtnText}>📍 Google</Text>
           </TouchableOpacity>
           {tripId ? (
-            <TouchableOpacity style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={() => onAddToItinerary(spot)}>
-              <Text style={styles.actionBtnPrimaryText}>+ Itinerary</Text>
-            </TouchableOpacity>
-          ) : null}
-          {canEdit && onEdit ? (
-            <TouchableOpacity style={styles.actionBtn} onPress={() => onEdit(spot)}>
-              <Text style={styles.actionBtnText}>Edit</Text>
-            </TouchableOpacity>
-          ) : null}
-          {(canManageTrip || spot.user_id === user?.id) && onDelete ? (
-            <TouchableOpacity style={[styles.actionBtn, styles.actionBtnDanger]} onPress={() => onDelete(spot)}>
-              <Text style={styles.actionBtnDangerText}>Delete</Text>
+            <TouchableOpacity style={[styles.navBtn, styles.navBtnPrimary]} onPress={() => onAddToItinerary(spot)}>
+              <Text style={styles.navBtnPrimaryText}>＋ Itinerary</Text>
             </TouchableOpacity>
           ) : null}
         </View>
+
+        {/* Owner actions row */}
+        {(canEdit || (canManageTrip || spot.user_id === user?.id)) ? (
+          <View style={styles.ownerRow}>
+            {canEdit && onEdit ? (
+              <TouchableOpacity style={styles.ownerBtn} onPress={() => onEdit(spot)}>
+                <Text style={styles.ownerBtnText}>✏️ Edit</Text>
+              </TouchableOpacity>
+            ) : null}
+            {(canManageTrip || spot.user_id === user?.id) && onDelete ? (
+              <TouchableOpacity style={[styles.ownerBtn, styles.ownerBtnDanger]} onPress={() => onDelete(spot)}>
+                <Text style={styles.ownerBtnDangerText}>🗑 Delete</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -713,17 +715,24 @@ const styles = StyleSheet.create({
   prefChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
   prefChip: { backgroundColor: Colors.primaryLight, borderRadius: Radius.full, paddingHorizontal: 6, paddingVertical: 2 },
   prefChipText: { fontSize: 10, color: Colors.primary, fontWeight: FontWeight.medium },
-  engagementRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.border, marginTop: Spacing.sm },
-  engBtn: { paddingHorizontal: Spacing.sm, paddingVertical: 4 },
+  // Engagement
+  engagementRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: Colors.border, marginTop: Spacing.sm },
+  engBtn: { flex: 1, alignItems: 'center', paddingVertical: Spacing.sm },
+  engBtnSave: { flex: 1.4 },
   engBtnText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
   engBtnActive: { color: Colors.primary },
-  actionRow: { flexDirection: 'row', gap: Spacing.xs, flexWrap: 'wrap', marginTop: Spacing.xs },
-  actionBtn: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 4 },
-  actionBtnText: { fontSize: FontSize.xs, color: Colors.text, fontWeight: FontWeight.medium },
-  actionBtnPrimary: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  actionBtnPrimaryText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
-  actionBtnDanger: { borderColor: Colors.danger + '60' },
-  actionBtnDangerText: { fontSize: FontSize.xs, color: Colors.danger },
+  // Navigate
+  navRow: { flexDirection: 'row', gap: Spacing.xs, marginTop: Spacing.sm },
+  navBtn: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingVertical: 7 },
+  navBtnText: { fontSize: FontSize.xs, color: Colors.text, fontWeight: FontWeight.medium },
+  navBtnPrimary: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  navBtnPrimaryText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  // Owner actions
+  ownerRow: { flexDirection: 'row', gap: Spacing.xs, marginTop: Spacing.xs },
+  ownerBtn: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: Spacing.md, paddingVertical: 5 },
+  ownerBtnText: { fontSize: FontSize.xs, color: Colors.text, fontWeight: FontWeight.medium },
+  ownerBtnDanger: { borderColor: Colors.danger + '60' },
+  ownerBtnDangerText: { fontSize: FontSize.xs, color: Colors.danger },
   commentRow: { flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm, backgroundColor: Colors.surface },
   commentInput: { flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, padding: Spacing.sm, fontSize: FontSize.sm, color: Colors.text, backgroundColor: Colors.background },
   commentBtn: { borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, backgroundColor: Colors.primary },
