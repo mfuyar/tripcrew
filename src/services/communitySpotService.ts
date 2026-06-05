@@ -122,55 +122,13 @@ function parseGeminiJsonObject(text: string): any {
   return JSON.parse(jsonText);
 }
 
-async function moderatePhoto(file: File): Promise<ModerationDecision> {
-  try {
-    const base64 = await file.base64();
-    const response = await callGeminiProxy(
-      [{
-        role: 'user',
-        parts: [
-          {
-            text: [
-              'Moderate this user-submitted travel spot photo.',
-              'Return only JSON: {"adult": boolean, "unsafe": boolean, "uncertain": boolean, "reason": string}.',
-              'adult should be true for nudity, sexual content, explicit poses, pornography, or clearly +18 imagery.',
-              'unsafe should be true for graphic violence or hateful symbols.',
-              'uncertain should be true only when the image might be unsafe but is not clear enough to reject directly.',
-            ].join('\n'),
-          },
-          { inlineData: { mimeType: file.type || 'image/jpeg', data: base64 } },
-        ],
-      }],
-      { temperature: 0, responseMimeType: 'application/json' }
-    );
-
-    if (!response.ok) {
-      return {
-        status: 'pending_review',
-        reason: 'Photo needs manual review because automatic moderation failed.',
-      };
-    }
-
-    const result = parseGeminiJsonObject(extractGeminiText(await response.json()));
-    if (result.adult || result.unsafe) {
-      return {
-        status: 'rejected',
-        reason: String(result.reason || 'Photo contains content that cannot be posted.'),
-      };
-    }
-    if (result.uncertain) {
-      return {
-        status: 'pending_review',
-        reason: String(result.reason || 'Photo needs manual review.'),
-      };
-    }
-    return { status: 'approved' };
-  } catch {
-    return {
-      status: 'pending_review',
-      reason: 'Photo needs manual review because automatic moderation failed.',
-    };
-  }
+// Photos go to admin review queue — no AI required.
+// Admins approve/reject via CommunitySpotReviewScreen.
+async function moderatePhoto(_file: File): Promise<ModerationDecision> {
+  return {
+    status: 'pending_review',
+    reason: 'Photo is awaiting review by a trip admin.',
+  };
 }
 
 async function moderateSpotInput(input: CommunitySpotInput, photoFile?: File): Promise<ModerationDecision> {
@@ -480,66 +438,93 @@ export const communitySpotService = {
     return { data: data as CommunitySpot, error: null };
   },
 
+  // Replaced Gemini with OpenTripMap — free tier, real data, no AI.
+  // Get a free API key at https://opentripmap.com/product
+  // Add EXPO_PUBLIC_OPENTRIPMAP_KEY to .env (free, usage-limited, not sensitive)
   async getGeminiFavorites(
     latitude: number,
     longitude: number,
     radiusMiles = 10,
-    locationLabel?: string
+    _locationLabel?: string
   ): Promise<ServiceResult<CommunitySpot[]>> {
-    const prompt = [
-      'You are a friendly local travel guide.',
-      locationLabel
-        ? `A traveler is exploring around ${locationLabel} at latitude ${latitude}, longitude ${longitude}.`
-        : `A traveler is at latitude ${latitude}, longitude ${longitude}.`,
-      `Suggest 6 favorite places within about ${radiusMiles} miles.`,
-      'Prefer real, visit-worthy places locals or travelers often like: outdoor spots, food areas, culture, and hidden gems.',
-      'Think like a TripAdvisor-style travel guide, but do not invent ratings or claim live TripAdvisor data.',
-      'Return only valid JSON, as an array. No markdown.',
-      'Each item must have: name, category, description, address, latitude, longitude.',
-      'category must be one of: outdoor, food, culture, hidden_gem, other.',
-      'description should be one friendly sentence explaining why it is worth checking out.',
-    ].join('\n');
+    return communitySpotService.getNearbyFromOpenTripMap(latitude, longitude, radiusMiles);
+  },
+
+  async getNearbyFromOpenTripMap(
+    latitude: number,
+    longitude: number,
+    radiusMiles = 10
+  ): Promise<ServiceResult<CommunitySpot[]>> {
+    const apiKey = process.env.EXPO_PUBLIC_OPENTRIPMAP_KEY;
+    if (!apiKey) {
+      return { data: null, error: 'Add EXPO_PUBLIC_OPENTRIPMAP_KEY to .env (free at opentripmap.com)' };
+    }
+
+    const radiusMeters = Math.round(radiusMiles * 1609.34);
+    // Fetch up to 50 interesting places
+    const kinds = 'interesting_places,cultural,architecture,natural,foods,religion,shops';
+    const url = `https://api.opentripmap.com/0.1/en/places/radius?radius=${radiusMeters}&lon=${longitude}&lat=${latitude}&kinds=${kinds}&format=json&limit=50&apikey=${apiKey}`;
 
     try {
-      const response = await callGeminiProxy(
-        [{ role: 'user', parts: [{ text: prompt }] }],
-        { temperature: 0.55, responseMimeType: 'application/json' }
-      );
-
+      const response = await fetch(url);
       if (!response.ok) {
-        return { data: null, error: 'Could not load suggested places right now.' };
+        return { data: null, error: 'Could not load places from OpenTripMap right now.' };
       }
 
-      const text = extractGeminiText(await response.json());
-      const places = parseGeminiJsonArray(text);
+      const places: any[] = await response.json();
+      if (!Array.isArray(places)) return { data: null, error: 'Unexpected response from OpenTripMap.' };
+
       const now = new Date().toISOString();
-      const spots = places
-        .map((place, index) => ({
-          id: `gemini-${latitude}-${longitude}-${index}`,
-          source: 'gemini' as const,
-          user_id: 'gemini',
-          name: String(place.name ?? 'Suggested place'),
-          category: normalizeCategory(place.category),
-          description: String(place.description ?? 'A nearby place worth checking out.'),
-          address: place.address ? String(place.address) : undefined,
-          latitude: Number(place.latitude),
-          longitude: Number(place.longitude),
-          upvotes_count: 0,
-          comments_count: 0,
-          created_at: now,
-          updated_at: now,
-          viewer_has_upvoted: false,
-        }))
-        .filter((spot) => Number.isFinite(spot.latitude) && Number.isFinite(spot.longitude))
-        .map((spot) => ({
-          ...spot,
-          distance_miles: distanceMiles(latitude, longitude, spot.latitude, spot.longitude),
-        }))
-        .filter((spot) => spot.distance_miles <= radiusMiles + 1);
+
+      const OTM_KIND_TO_CATEGORY: Record<string, CommunitySpotCategory> = {
+        museums: 'museum', historic: 'museum', archaeology: 'museum',
+        architecture: 'attraction', cultural: 'attraction', monuments: 'attraction',
+        natural: 'park', parks: 'park', nature_reserves: 'park', beaches: 'outdoor',
+        foods: 'food', restaurants: 'food', cafes: 'food',
+        shops: 'shopping', malls: 'shopping',
+        religion: 'religious', churches: 'religious', mosques: 'religious',
+        interesting_places: 'attraction',
+      };
+
+      const spots: CommunitySpot[] = places
+        .filter(p => p.name && p.name.length > 1)
+        .map((place, index) => {
+          const kinds: string = place.kinds ?? '';
+          const primaryKind = kinds.split(',')[0] ?? '';
+          const category: CommunitySpotCategory = OTM_KIND_TO_CATEGORY[primaryKind] ?? 'attraction';
+          const distMi = distanceMiles(latitude, longitude, place.point?.lat ?? latitude, place.point?.lon ?? longitude);
+          return {
+            id: `otm-${place.xid ?? index}`,
+            source: 'api' as const,
+            source_type: 'api' as const,
+            source_name: 'OpenTripMap',
+            source_url: `https://opentripmap.com/topic/${place.xid}`,
+            osm_id: place.osm ?? undefined,
+            is_verified: true,
+            user_id: 'opentripmap',
+            name: String(place.name),
+            category,
+            description: '',
+            address: undefined,
+            latitude: place.point?.lat ?? latitude,
+            longitude: place.point?.lon ?? longitude,
+            distance_miles: distMi,
+            distance_km: distMi * 1.60934,
+            upvotes_count: 0,
+            comments_count: 0,
+            likes_count: 0,
+            saves_count: 0,
+            moderation_status: 'approved' as const,
+            created_at: now,
+            updated_at: now,
+            viewer_has_upvoted: false,
+          };
+        })
+        .filter(s => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
 
       return { data: spots, error: null };
-    } catch (error: any) {
-      return { data: null, error: error?.message ?? 'Gemini places lookup failed' };
+    } catch (err: any) {
+      return { data: null, error: err?.message ?? 'OpenTripMap lookup failed.' };
     }
   },
 
