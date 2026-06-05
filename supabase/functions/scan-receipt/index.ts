@@ -165,14 +165,18 @@ function receiptEvidenceCount(parsed: ParsedReceipt) {
 }
 
 function validationError(parsed: ParsedReceipt) {
-  if (parsed.is_receipt === false || (parsed.confidence !== null && parsed.confidence < 0.45)) {
-    return parsed.rejection_reason || 'This image does not look like a valid receipt.';
+  if (parsed.is_receipt === false) {
+    return parsed.rejection_reason || 'This image does not appear to be a receipt.';
   }
-  if (!parsed.total || !parsed.merchant) {
-    return 'I could not find a clear merchant and final total on this receipt.';
+  // Only reject on very low confidence if Gemini explicitly says it's not a receipt
+  if (parsed.confidence !== null && parsed.confidence < 0.25) {
+    return parsed.rejection_reason || 'Could not read this receipt clearly — try better lighting or a closer photo.';
   }
-  if (receiptEvidenceCount(parsed) < 3) {
-    return 'This does not have enough readable receipt details to scan safely.';
+  if (!parsed.total) {
+    return 'Could not find a total amount on this receipt. Make sure the full receipt is visible.';
+  }
+  if (receiptEvidenceCount(parsed) < 2) {
+    return 'Not enough readable details on this receipt. Try a clearer photo.';
   }
   if (isDateReallyOff(parsed.date)) {
     return 'The receipt date looks too far from today, so I did not process it.';
@@ -228,7 +232,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = getRequiredEnv('SUPABASE_URL');
     const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
     const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
-    const geminiModel = Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.5-flash';
+    const geminiModel = Deno.env.get('GEMINI_MODEL') ?? 'gemini-2.5-flash';
     const authHeader = req.headers.get('Authorization');
 
     if (!authHeader) return jsonResponse({ error: 'Missing authorization header' }, 401);
