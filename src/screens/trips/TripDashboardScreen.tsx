@@ -21,6 +21,7 @@ import { Poll } from '../../types';
 import { demoExpenses, demoAnnouncements } from '../../lib/mockData';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 import { LoadingView } from '../../components/LoadingView';
+import { TripClosedBanner } from '../../components/TripClosedBanner';
 import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -42,7 +43,7 @@ const ALL_QUICK_LINKS: (QuickLink & { adminOnly?: boolean })[] = [
 export function TripDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip, families, members, setMembers, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip } = useTripContext();
+  const { currentTrip, families, members, setMembers, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip, isTripClosed } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -108,6 +109,10 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
     : 0;
 
   return (
+    <>
+    {isTripClosed && currentTrip && (
+      <TripClosedBanner status={currentTrip.status as 'closed' | 'archived'} closedAt={currentTrip.closed_at} />
+    )}
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -392,6 +397,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
         </View>
       </View>
     </ScrollView>
+    </>
   );
 }
 

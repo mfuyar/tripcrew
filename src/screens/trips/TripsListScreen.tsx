@@ -82,6 +82,7 @@ export function TripsListScreen() {
   const [inviteCode, setInviteCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [myRequests, setMyRequests] = useState<TripJoinRequest[]>([]);
+  const [showPast, setShowPast] = useState(false);
 
   const loadTrips = useCallback(async () => {
     if (!user) return;
@@ -97,7 +98,6 @@ export function TripsListScreen() {
     ]);
     if (tripsResult.error) setError(tripsResult.error);
     else setTrips(tripsResult.data ?? []);
-    // Only show pending requests (approved ones will appear as trips)
     setMyRequests((requestsResult.data ?? []).filter((r) => r.status === 'pending'));
     setLoading(false);
     setRefreshing(false);
@@ -193,8 +193,29 @@ export function TripsListScreen() {
         </View>
       </View>
 
+      {/* Active / Past toggle */}
+      {trips.some((t) => (t.status ?? 'active') !== 'active') && (
+        <View style={styles.tabBar}>
+          <TouchableOpacity
+            style={[styles.tabBtn, !showPast && styles.tabBtnActive]}
+            onPress={() => setShowPast(false)}
+          >
+            <Text style={[styles.tabBtnText, !showPast && styles.tabBtnTextActive]}>Active</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, showPast && styles.tabBtnActive]}
+            onPress={() => setShowPast(true)}
+          >
+            <Text style={[styles.tabBtnText, showPast && styles.tabBtnTextActive]}>Past Trips</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
-        data={trips}
+        data={trips.filter((t) => showPast
+          ? (t.status === 'closed' || t.status === 'archived')
+          : (t.status ?? 'active') === 'active'
+        )}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <TripCard trip={item} onPress={() => openTrip(item)} />
@@ -373,6 +394,16 @@ const styles = StyleSheet.create({
   },
   headerBtnTextWhite: { color: Colors.surface },
   list: { padding: Spacing.md, flexGrow: 1 },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  tabBtn: { flex: 1, paddingVertical: Spacing.sm + 2, alignItems: 'center' },
+  tabBtnActive: { borderBottomWidth: 2, borderBottomColor: Colors.primary },
+  tabBtnText: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  tabBtnTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
   requestsSection: { marginBottom: Spacing.md },
   requestsTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.textSecondary, marginBottom: Spacing.sm },
   requestCard: {

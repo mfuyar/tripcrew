@@ -21,6 +21,7 @@ interface TripContextValue {
   isTripAdmin: boolean;
   canManageAnnouncements: boolean;
   canManageTrip: boolean;
+  isTripClosed: boolean;
   getFamilyById: (id: string) => Family | undefined;
   refreshTripData: (() => void) | null;
   setRefreshTripData: (fn: (() => void) | null) => void;
@@ -45,6 +46,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
   const isTripAdmin = userRole === 'trip_admin';
   const canManageAnnouncements = isTripOrganizer || isTripAdmin || isGlobalAdmin;
   const canManageTrip = isTripOrganizer || isTripAdmin || isGlobalAdmin;
+  const isTripClosed = currentTrip?.status === 'closed' || currentTrip?.status === 'archived';
 
   const getFamilyById = useCallback(
     (id: string) => families.find((f) => f.id === id),
@@ -66,6 +68,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
         isTripAdmin,
         canManageAnnouncements,
         canManageTrip,
+        isTripClosed,
         getFamilyById,
         refreshTripData,
         setRefreshTripData,

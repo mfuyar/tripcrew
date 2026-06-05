@@ -175,6 +175,58 @@ export const tripService = {
     return this.requestJoinTrip(userId, inviteCode);
   },
 
+  // ── Trip lifecycle ────────────────────────────────────────────────────────
+
+  async hasUnsettledBalances(tripId: string): Promise<boolean> {
+    // Check if any family has a non-zero balance (expenses not fully settled)
+    const { data } = await supabase
+      .from('expenses')
+      .select('id')
+      .eq('trip_id', tripId)
+      .limit(1);
+    if (!data?.length) return false;
+    // Check for unsettled payment records
+    const { data: settled } = await supabase
+      .from('settlements')
+      .select('id, status')
+      .eq('trip_id', tripId)
+      .neq('status', 'confirmed');
+    return (settled?.length ?? 0) > 0;
+  },
+
+  async closeTrip(tripId: string): Promise<ServiceResult<Trip>> {
+    const { data, error } = await supabase
+      .from('trips')
+      .update({ status: 'closed', closed_at: new Date().toISOString() })
+      .eq('id', tripId)
+      .select()
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as Trip, error: null };
+  },
+
+  async archiveTrip(tripId: string): Promise<ServiceResult<Trip>> {
+    const { data, error } = await supabase
+      .from('trips')
+      .update({ status: 'archived' })
+      .eq('id', tripId)
+      .select()
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as Trip, error: null };
+  },
+
+  async reopenTrip(tripId: string): Promise<ServiceResult<Trip>> {
+    const { data, error } = await supabase
+      .from('trips')
+      .update({ status: 'active', closed_at: null })
+      .eq('id', tripId)
+      .select()
+      .single();
+    if (error) return { data: null, error: error.message };
+    return { data: data as Trip, error: null };
+  },
+
   async getMyJoinRequests(userId: string): Promise<ServiceResult<TripJoinRequest[]>> {
     const { data, error } = await supabase
       .from('trip_join_requests')

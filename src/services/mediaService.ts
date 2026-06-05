@@ -7,7 +7,7 @@ import { Message, TripMedia, MediaType, ServiceResult } from '../types';
 const MEDIA_BUCKET = 'trip-media';
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_COMPRESS_QUALITY = 0.78;
-const CHAT_MEDIA_TTL_SECONDS = 60 * 60 * 24;
+const CHAT_MEDIA_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 function getExtension(uri: string, mediaType: MediaType): string {
   const cleanUri = uri.split('?')[0];

@@ -394,6 +394,104 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         })}
       </View>
 
+      {/* Trip Lifecycle — organizer only */}
+      {isTripOrganizer && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Trip Status</Text>
+          {currentTrip?.status === 'active' && (
+            <AppButton
+              title="🔒 Close Trip"
+              onPress={async () => {
+                const hasUnsettled = await tripService.hasUnsettledBalances(tripId);
+                const doClose = async () => {
+                  const { data, error } = await tripService.closeTrip(tripId);
+                  if (error) Alert.alert('Error', error);
+                  else if (data) { setCurrentTrip(data); Alert.alert('Trip closed', 'The trip is now read-only.'); }
+                };
+                if (hasUnsettled) {
+                  Alert.alert(
+                    'Unsettled balances',
+                    'Some families still have outstanding balances. Close anyway?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Close anyway', style: 'destructive', onPress: doClose },
+                    ]
+                  );
+                } else {
+                  Alert.alert('Close trip?', 'The trip will become read-only. You can reopen it later.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Close', onPress: doClose },
+                  ]);
+                }
+              }}
+              variant="outline"
+              fullWidth
+            />
+          )}
+          {currentTrip?.status === 'closed' && (
+            <>
+              <AppButton
+                title="📦 Archive Trip"
+                onPress={() =>
+                  Alert.alert('Archive trip?', 'The trip will be hidden from your active list but all data is preserved.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Archive',
+                      onPress: async () => {
+                        const { data, error } = await tripService.archiveTrip(tripId);
+                        if (error) Alert.alert('Error', error);
+                        else if (data) { setCurrentTrip(data); navigation.navigate('Tabs'); }
+                      },
+                    },
+                  ])
+                }
+                variant="outline"
+                fullWidth
+                style={{ marginBottom: Spacing.sm }}
+              />
+              <AppButton
+                title="🔓 Reopen Trip"
+                onPress={() =>
+                  Alert.alert('Reopen trip?', 'The trip will become active again.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Reopen',
+                      onPress: async () => {
+                        const { data, error } = await tripService.reopenTrip(tripId);
+                        if (error) Alert.alert('Error', error);
+                        else if (data) setCurrentTrip(data);
+                      },
+                    },
+                  ])
+                }
+                variant="outline"
+                fullWidth
+              />
+            </>
+          )}
+          {currentTrip?.status === 'archived' && (
+            <AppButton
+              title="🔓 Reopen Trip"
+              onPress={() =>
+                Alert.alert('Reopen archived trip?', 'The trip will move back to your active list.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Reopen',
+                    onPress: async () => {
+                      const { data, error } = await tripService.reopenTrip(tripId);
+                      if (error) Alert.alert('Error', error);
+                      else if (data) setCurrentTrip(data);
+                    },
+                  },
+                ])
+              }
+              variant="outline"
+              fullWidth
+            />
+          )}
+        </View>
+      )}
+
       {/* Danger Zone */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Danger Zone</Text>

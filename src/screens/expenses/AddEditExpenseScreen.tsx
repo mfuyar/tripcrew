@@ -6,7 +6,9 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Image,
 } from 'react-native';
+import { mediaService } from '../../services/mediaService';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, ExpenseCategory, SplitMethod, FamilySplitShare } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
@@ -58,7 +60,9 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(isEdit);
   // For edit mode: whether the current user can modify this expense
-  const [canEdit, setCanEdit] = useState(!isEdit); // new expenses: always editable by creator
+  const [canEdit, setCanEdit] = useState(!isEdit);
+  const [receiptLocalUri, setReceiptLocalUri] = useState<string | undefined>(scannedExpense?.receiptImageUri);
+  const [receiptUrl, setReceiptUrl] = useState<string | undefined>();
 
   useEffect(() => {
     if (families.length > 0 && !paidByFamilyId) {
@@ -104,6 +108,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setDate(data.date);
       setNotes(data.notes ?? '');
       setCanEdit(canManageTrip || data.paid_by_user_id === user?.id);
+      if (data.receipt_url) setReceiptUrl(data.receipt_url);
       if (data.split_method === 'selected_families_only' && data.expense_splits?.length) {
         const included = data.expense_splits.filter((s) => s.share_amount > 0).map((s) => s.family_id);
         setSelectedFamilies(included);
@@ -141,6 +146,12 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Adding expenses is disabled in demo.'); return; }
 
     setLoading(true);
+    // Upload receipt image if we have a local URI that hasn't been uploaded yet
+    let finalReceiptUrl = receiptUrl;
+    if (receiptLocalUri && !receiptUrl && user) {
+      const upload = await mediaService.uploadChatMedia(tripId, user.id, receiptLocalUri, 'photo');
+      if (upload.data) finalReceiptUrl = upload.data.url;
+    }
     const payload = {
       title: title.trim(),
       amount: amt,
@@ -150,6 +161,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       split_method: splitMethod,
       date,
       notes: notes.trim() || undefined,
+      receipt_url: finalReceiptUrl || undefined,
     };
 
     if (isEdit) {
@@ -209,6 +221,21 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
               activeOpacity={0.8}
             >
               <Text style={styles.scanButtonText}>Scan receipt</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {/* Receipt thumbnail — admin/creator only */}
+        {canManageTrip && (receiptLocalUri || receiptUrl) && (
+          <View style={styles.receiptRow}>
+            <Text style={styles.receiptLabel}>📎 Receipt attached</Text>
+            <TouchableOpacity onPress={() => {
+              Alert.alert('Receipt', 'Remove attached receipt?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Remove', style: 'destructive', onPress: () => { setReceiptLocalUri(undefined); setReceiptUrl(undefined); } },
+              ]);
+            }}>
+              <Image source={{ uri: receiptLocalUri ?? receiptUrl }} style={styles.receiptThumb} resizeMode="cover" />
+              <Text style={styles.receiptRemove}>✕ Remove</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -562,6 +589,10 @@ const styles = StyleSheet.create({
   previewOwesIcon: { fontSize: 22 },
   previewOwesTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.warning },
   previewOwesSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  receiptRow: { marginBottom: Spacing.md },
+  receiptLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.xs },
+  receiptThumb: { width: '100%', height: 140, borderRadius: Radius.md, backgroundColor: Colors.border },
+  receiptRemove: { fontSize: FontSize.xs, color: Colors.danger, marginTop: 4, textAlign: 'center' },
   readOnlyBanner: {
     backgroundColor: Colors.border,
     borderRadius: Radius.md,

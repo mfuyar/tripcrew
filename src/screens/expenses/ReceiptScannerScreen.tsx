@@ -144,6 +144,7 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
         amount: splitScope === 'personal' ? groupAmount : result?.amount,
         date: result?.date,
         notes: noteLines.join('\n'),
+        receiptImageUri: imageUri ?? undefined,
       },
     });
   }

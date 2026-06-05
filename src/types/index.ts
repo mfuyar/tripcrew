@@ -61,6 +61,8 @@ export interface Trip {
   cover_image_url?: string;
   created_by: string;
   is_active: boolean;
+  status?: 'active' | 'closed' | 'archived';
+  closed_at?: string;
   is_held?: boolean;
   held_reason?: string;
   invite_code: string;
@@ -564,6 +566,7 @@ export type MainStackParamList = {
       amount?: number;
       date?: string;
       notes?: string;
+      receiptImageUri?: string;
     };
   };
   Balances: { tripId: string };

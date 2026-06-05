@@ -37,7 +37,7 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 export function TripChatScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const { user, profile, isDemoMode } = useAuth();
-  const { userFamily } = useTripContext();
+  const { userFamily, isTripClosed } = useTripContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
@@ -571,6 +571,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
           </Text>
         </View>
       )}
+      {isTripClosed ? (
+        <View style={styles.closedBar}>
+          <Text style={styles.closedBarText}>🔒 This trip is closed — chat is read only</Text>
+        </View>
+      ) : (
       <View style={styles.inputBar}>
         {editingMessage ? (
           <TouchableOpacity
@@ -614,6 +619,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
           )}
         </TouchableOpacity>
       </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -634,6 +640,14 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontStyle: 'italic',
   },
+  closedBar: {
+    padding: Spacing.md,
+    backgroundColor: Colors.warning + '18',
+    borderTopWidth: 1,
+    borderTopColor: Colors.warning + '40',
+    alignItems: 'center',
+  },
+  closedBarText: { fontSize: FontSize.sm, color: Colors.warning, fontWeight: FontWeight.medium },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
