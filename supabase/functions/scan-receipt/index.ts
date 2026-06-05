@@ -252,26 +252,28 @@ Deno.serve(async (req) => {
       base64Image = imageBase64;
       contentType = mimeType ?? 'image/jpeg';
 
-      // Create the receipt_scans record now
+      // Create the receipt_scans record — use service role so RLS is bypassed
       const insertResp = await fetch(
         `${supabaseUrl}/rest/v1/receipt_scans`,
         {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${supabaseServiceRoleKey}`,
-            apikey: supabaseAnonKey,
+            apikey: supabaseServiceRoleKey,   // must match auth key to bypass RLS
             'Content-Type': 'application/json',
             Prefer: 'return=representation',
           },
-          body: JSON.stringify({ trip_id: tripId, scanned_by: userId, image_url: '' }),
+          // Use a placeholder URL — will be updated after OCR or left as marker
+          body: JSON.stringify({ trip_id: tripId, scanned_by: userId, image_url: 'pending' }),
         }
       );
       if (!insertResp.ok) {
-        return jsonResponse({ error: 'Could not create receipt record' }, 500);
+        const errText = await insertResp.text().catch(() => '');
+        return jsonResponse({ error: `Could not create receipt record: ${errText}` }, 500);
       }
       const inserted = await insertResp.json();
-      receiptId = inserted[0]?.id;
-      if (!receiptId) return jsonResponse({ error: 'Failed to get receipt ID' }, 500);
+      receiptId = Array.isArray(inserted) ? inserted[0]?.id : inserted?.id;
+      if (!receiptId) return jsonResponse({ error: 'Failed to get receipt ID from insert' }, 500);
 
     } else {
       // Legacy flow: receiptId provided, fetch from DB and download image
