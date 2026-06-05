@@ -539,13 +539,6 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         </Pressable>
       </View>
       <View style={styles.attachmentBar}>
-        <TouchableOpacity
-          style={[styles.attachmentButton, (uploadingMedia || recordingInProgress) && styles.attachmentButtonDisabled]}
-          onPress={handlePickPhoto}
-          disabled={uploadingMedia || recordingInProgress}
-        >
-          <Text style={styles.attachmentText}>📷 Photo</Text>
-        </TouchableOpacity>
         <Pressable
           style={({ pressed }) => [
             styles.attachmentButton,

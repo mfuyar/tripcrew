@@ -20,6 +20,7 @@ import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { Colors, FontSize, FontWeight, Spacing, Radius, CATEGORY_ICONS, Shadow } from '../../constants/theme';
+import { currencySymbol } from '../../utils/currency';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -112,7 +113,7 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
         <View style={styles.totalBlock}>
           <Text style={styles.totalLabel}>Total Expenses</Text>
           <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>
-            {currentTrip?.currency} {total.toFixed(2)}
+            {currencySymbol(currentTrip?.currency)}{total.toFixed(2)}
           </Text>
         </View>
         <View style={styles.headerActions}>
@@ -171,7 +172,7 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
                   <View style={[styles.familyDot, { backgroundColor: f.color ?? Colors.primary }]} />
                   <Text style={styles.familyTotalName} numberOfLines={1}>{f.name}</Text>
                   <Text style={styles.familyTotalAmount}>
-                    {currentTrip?.currency} {f.total.toFixed(2)}
+                    {currencySymbol(currentTrip?.currency)}{f.total.toFixed(2)}
                   </Text>
                   <Text style={styles.familyTotalCount}>{f.count} expense{f.count !== 1 ? 's' : ''}</Text>
                 </TouchableOpacity>
@@ -221,7 +222,7 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
               <View style={{ flex: 1 }}>
                 <Text style={styles.deletedName}>{e.title}</Text>
                 <Text style={styles.deletedMeta}>
-                  {currentTrip?.currency}{e.amount.toFixed(2)} · {e.date}
+                  {currencySymbol(currentTrip?.currency)}{e.amount.toFixed(2)} · {e.date}
                   {e.deleted_at ? ` · Deleted ${new Date(e.deleted_at).toLocaleDateString()}` : ''}
                 </Text>
               </View>

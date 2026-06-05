@@ -15,6 +15,7 @@ import { expenseService } from '../../services/expenseService';
 import { demoExpenses } from '../../lib/mockData';
 import { calculateFamilyBalances, calculateSettlements } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
+import { currencySymbol } from '../../utils/currency';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { CurrencyAmount } from '../../components/CurrencyAmount';
 import { AppButton } from '../../components/AppButton';
@@ -48,7 +49,7 @@ export function BalancesScreen({ navigation, route }: Props) {
   if (loading) return <LoadingView />;
 
   const totalExpenses = balances.reduce((s, b) => s + b.totalPaid, 0);
-  const currency = currentTrip?.currency ?? '$';
+  const currency = currencySymbol(currentTrip?.currency);
 
   return (
     <ScrollView
