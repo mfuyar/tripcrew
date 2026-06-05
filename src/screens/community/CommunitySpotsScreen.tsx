@@ -241,6 +241,8 @@ export function CommunitySpotsScreen({ route }: Props) {
   const [radius, setRadius] = useState(10);
   const [preferences, setPreferences] = useState<SpotPreference[]>([]);
   const [searchLocation, setSearchLocation] = useState<{ lat: number; lon: number; label: string } | null>(null);
+  const [destinationInput, setDestinationInput] = useState('');
+  const [geocoding, setGeocoding] = useState(false);
   const [showPrefs, setShowPrefs] = useState(false);
   const [showRadiusPicker, setShowRadiusPicker] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -296,16 +298,29 @@ export function CommunitySpotsScreen({ route }: Props) {
     return null;
   }
 
+  async function handleSearchByDestination() {
+    const text = destinationInput.trim();
+    if (!text) return;
+    setGeocoding(true);
+    const { data } = await addressSearchService.search(text, 1);
+    setGeocoding(false);
+    const match = data?.[0];
+    if (!match) { Alert.alert('Not found', `Could not find "${text}". Try a city name or address.`); return; }
+    const loc = { lat: match.latitude, lon: match.longitude, label: text };
+    setSearchLocation(loc);
+    handleSearch(true, loc);
+  }
+
   // ─── Search nearby ──────────────────────────────────────────────────────────
 
-  async function handleSearch(forceRefresh = false) {
+  async function handleSearch(forceRefresh = false, overrideLoc?: { lat: number; lon: number; label: string }) {
     setSearching(true);
     setLastError(null);
 
-    const loc = searchLocation ?? await resolveLocation();
+    const loc = overrideLoc ?? searchLocation ?? await resolveLocation();
     if (!loc) {
       setSearching(false);
-      Alert.alert('Location unavailable', 'Enable location services or set a trip destination.');
+      Alert.alert('Location unavailable', 'Enter a destination above or enable location services.');
       return;
     }
     setSearchLocation(loc);
@@ -468,11 +483,39 @@ export function CommunitySpotsScreen({ route }: Props) {
     <View style={styles.container}>
       {/* ── Top controls ── */}
       <View style={styles.controls}>
-        {/* Row 1: search + radius + unit */}
+        {/* Destination input */}
+        <View style={styles.destinationRow}>
+          <TextInput
+            style={styles.destinationInput}
+            value={destinationInput}
+            onChangeText={setDestinationInput}
+            placeholder="Search a destination (city, address…)"
+            placeholderTextColor={Colors.textSecondary}
+            returnKeyType="search"
+            onSubmitEditing={handleSearchByDestination}
+            clearButtonMode="while-editing"
+          />
+          <TouchableOpacity
+            style={[styles.destinationBtn, geocoding && { opacity: 0.5 }]}
+            onPress={handleSearchByDestination}
+            disabled={geocoding || !destinationInput.trim()}
+          >
+            <Text style={styles.destinationBtnText}>{geocoding ? '⏳' : '→'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Divider */}
+        <View style={styles.orRow}>
+          <View style={styles.orLine} />
+          <Text style={styles.orText}>or</Text>
+          <View style={styles.orLine} />
+        </View>
+
+        {/* Row 1: current location + radius + unit */}
         <View style={styles.controlRow}>
           <TouchableOpacity style={styles.searchBtn} onPress={() => handleSearch()}>
             <Text style={styles.searchBtnText}>
-              {searching ? '⏳ Searching...' : '🔍 Look Around Me'}
+              {searching ? '⏳ Searching...' : '📍 Use My Location'}
             </Text>
             {searchLocation && <Text style={styles.searchBtnSub} numberOfLines={1}>{searchLocation.label}</Text>}
           </TouchableOpacity>
@@ -651,7 +694,21 @@ export function CommunitySpotsScreen({ route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   controls: { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: Spacing.sm },
-  controlRow: { flexDirection: 'row', alignItems: 'center', padding: Spacing.sm, gap: Spacing.xs },
+  destinationRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingTop: Spacing.sm, gap: Spacing.xs },
+  destinationInput: {
+    flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    fontSize: FontSize.sm, color: Colors.text, backgroundColor: Colors.background,
+  },
+  destinationBtn: {
+    width: 38, height: 38, borderRadius: Radius.md, backgroundColor: Colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  destinationBtnText: { color: '#fff', fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  orRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: 4 },
+  orLine: { flex: 1, height: 1, backgroundColor: Colors.border },
+  orText: { marginHorizontal: Spacing.sm, fontSize: FontSize.xs, color: Colors.textSecondary },
+  controlRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, gap: Spacing.xs },
   searchBtn: { flex: 1, backgroundColor: Colors.primary, borderRadius: Radius.md, padding: Spacing.sm },
   searchBtnText: { color: '#fff', fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
   searchBtnSub: { color: '#ffffff99', fontSize: FontSize.xs },
