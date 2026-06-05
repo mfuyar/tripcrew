@@ -147,11 +147,33 @@ export interface Expense {
   date: string;
   notes?: string;
   receipt_url?: string;
+  // Versioning + soft-delete
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+  current_version?: number;
+  last_edited_by?: string;
+  last_edited_at?: string;
   created_at: string;
   updated_at: string;
   // Joined data
   paid_by_family?: Family;
   expense_splits?: ExpenseSplit[];
+}
+
+export type ExpenseVersionChangeType = 'create' | 'update' | 'delete' | 'restore';
+
+export interface ExpenseVersion {
+  id: string;
+  expense_id: string;
+  trip_id: string;
+  version_number: number;
+  snapshot: Omit<Expense, 'paid_by_family' | 'expense_splits'>;
+  change_type: ExpenseVersionChangeType;
+  change_summary?: string;
+  changed_by?: string;
+  changed_by_name?: string;
+  created_at: string;
 }
 
 export interface ExpenseSplit {
@@ -611,6 +633,7 @@ export type MainStackParamList = {
   Balances: { tripId: string };
   Settlements: { tripId: string };
   PaymentTracking: { tripId: string };
+  ExpenseHistory: { expenseId: string; tripId: string };
   ReceiptScanner: { tripId: string; returnToExpense?: boolean };
   MediaDetail: { tripId: string; mediaId: string };
   Itinerary: { tripId: string };

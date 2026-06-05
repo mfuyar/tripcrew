@@ -43,10 +43,20 @@ const SPLIT_METHODS: { value: SplitMethod; label: string; desc: string }[] = [
   { value: 'children_count_half', label: 'Children ½', desc: 'Children count as half a person' },
 ];
 
+function buildChangeSummary(prev: any, next: any, currency: string): string {
+  const parts: string[] = [];
+  if (prev.title !== next.title) parts.push(`Title: "${prev.title}" → "${next.title}"`);
+  if (prev.amount !== next.amount) parts.push(`Amount: ${currency}${prev.amount} → ${currency}${next.amount}`);
+  if (prev.category !== next.category) parts.push(`Category: ${prev.category} → ${next.category}`);
+  if (prev.date !== next.date) parts.push(`Date: ${prev.date} → ${next.date}`);
+  if (prev.notes !== next.notes) parts.push('Notes updated');
+  return parts.length > 0 ? parts.join(', ') : 'Expense updated';
+}
+
 export function AddEditExpenseScreen({ navigation, route }: Props) {
   const { tripId, expenseId, scannedExpense } = route.params;
   const { families, currentTrip, userFamily, canManageTrip } = useTripContext();
-  const { user, isDemoMode } = useAuth();
+  const { user, profile, isDemoMode } = useAuth();
   const isEdit = !!expenseId;
 
   const [title, setTitle] = useState('');
@@ -167,8 +177,21 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       receipt_url: finalReceiptUrl || undefined,
     };
 
+    const editorName = profile?.full_name ?? user.email ?? 'Unknown';
+
     if (isEdit) {
-      const { error } = await expenseService.updateExpense(expenseId!, payload);
+      // Save current state as a version before overwriting
+      const { data: existing } = await expenseService.getExpenseById(expenseId!);
+      if (existing) {
+        const summary = buildChangeSummary(existing, payload, currentTrip?.currency ?? '');
+        await expenseService.saveVersion(existing, 'update', editorName, summary);
+      }
+      const { error } = await expenseService.updateExpense(expenseId!, {
+        ...payload,
+        last_edited_by: user.id,
+        last_edited_at: new Date().toISOString(),
+        current_version: (existing?.current_version ?? 1) + 1,
+      } as any);
       if (!error) {
         const splitResult = await expenseService.saveExpenseSplits(expenseId!, tripId, splits);
         if (splitResult.error) Alert.alert('Error', splitResult.error);
@@ -179,6 +202,8 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     } else {
       const { data, error } = await expenseService.createExpense(tripId, user.id, payload);
       if (!error && data) {
+        // Save v1 snapshot
+        await expenseService.saveVersion(data, 'create', editorName, 'Expense created');
         const splitResult = await expenseService.saveExpenseSplits(data.id, tripId, splits);
         if (splitResult.error) {
           await expenseService.deleteExpense(data.id);
@@ -194,18 +219,28 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   }
 
   async function handleDelete() {
-    if (!expenseId) return;
-    Alert.alert('Delete Expense', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await expenseService.deleteExpense(expenseId);
-          navigation.goBack();
+    if (!expenseId || !user) return;
+    const { data: existing } = await expenseService.getExpenseById(expenseId);
+    const editorName = profile?.full_name ?? user.email ?? 'Unknown';
+    Alert.alert(
+      'Delete Expense',
+      'This expense will be soft-deleted. Organizers can restore it from the expense history.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (existing) {
+              await expenseService.softDeleteExpense(existing, user.id, editorName);
+            } else {
+              await expenseService.deleteExpense(expenseId);
+            }
+            navigation.goBack();
+          },
         },
-      },
-    ]);
+      ]
+    );
   }
 
   if (fetching) return null;

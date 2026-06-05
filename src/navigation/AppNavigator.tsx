@@ -35,6 +35,7 @@ import { AddEditExpenseScreen } from '../screens/expenses/AddEditExpenseScreen';
 import { BalancesScreen } from '../screens/expenses/BalancesScreen';
 import { SettlementScreen } from '../screens/expenses/SettlementScreen';
 import { PaymentTrackingScreen } from '../screens/expenses/PaymentTrackingScreen';
+import { ExpenseHistoryScreen } from '../screens/expenses/ExpenseHistoryScreen';
 import { ReceiptScannerScreen } from '../screens/expenses/ReceiptScannerScreen';
 
 // Chat
@@ -275,6 +276,7 @@ function MainNavigator() {
       <MainStack.Screen name="Balances" component={BalancesScreen} options={{ title: 'Balances' }} />
       <MainStack.Screen name="Settlements" component={SettlementScreen} options={{ title: 'Settlements' }} />
       <MainStack.Screen name="PaymentTracking" component={PaymentTrackingScreen} options={{ title: 'Payment Tracking' }} />
+      <MainStack.Screen name="ExpenseHistory" component={ExpenseHistoryScreen} options={{ title: 'Expense History' }} />
       <MainStack.Screen name="ReceiptScanner" component={ReceiptScannerScreen} options={{ title: 'Scan Receipt' }} />
       <MainStack.Screen name="MediaDetail" component={MediaDetailScreen} options={{ title: 'Media' }} />
       <MainStack.Screen name="Itinerary" component={ItineraryScreen} options={{ title: 'Itinerary' }} />

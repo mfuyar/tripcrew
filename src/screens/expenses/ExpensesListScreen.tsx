@@ -19,7 +19,7 @@ import { ExpenseCard } from '../../components/ExpenseCard';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
-import { Colors, FontSize, FontWeight, Spacing, Radius, CATEGORY_ICONS } from '../../constants/theme';
+import { Colors, FontSize, FontWeight, Spacing, Radius, CATEGORY_ICONS, Shadow } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -46,6 +46,9 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
   const [sortBy, setSortBy] = useState<'date' | 'family' | 'amount'>('date');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [showFamilyTotals, setShowFamilyTotals] = useState(false);
+  const [deletedExpenses, setDeletedExpenses] = useState<Expense[]>([]);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [loadingDeleted, setLoadingDeleted] = useState(false);
 
   const loadExpenses = useCallback(async () => {
     if (isDemoMode) {
@@ -195,15 +198,77 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
         <Text style={styles.sortCount}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}</Text>
       </View>
 
+      {/* Deleted expenses — admin only */}
+      {canManageTrip && (
+        <View style={styles.deletedSection}>
+          <TouchableOpacity
+            style={styles.deletedHeader}
+            onPress={async () => {
+              if (!showDeleted && deletedExpenses.length === 0) {
+                setLoadingDeleted(true);
+                const { data } = await expenseService.getDeletedExpenses(tripId);
+                setDeletedExpenses(data ?? []);
+                setLoadingDeleted(false);
+              }
+              setShowDeleted(v => !v);
+            }}
+          >
+            <Text style={styles.deletedTitle}>🗑 Deleted Expenses</Text>
+            <Text style={styles.deletedToggle}>{loadingDeleted ? '⏳' : showDeleted ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+          {showDeleted && deletedExpenses.map(e => (
+            <View key={e.id} style={styles.deletedCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.deletedName}>{e.title}</Text>
+                <Text style={styles.deletedMeta}>
+                  {currentTrip?.currency}{e.amount.toFixed(2)} · {e.date}
+                  {e.deleted_at ? ` · Deleted ${new Date(e.deleted_at).toLocaleDateString()}` : ''}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.historyBtn}
+                onPress={() => navigation.navigate('ExpenseHistory', { expenseId: e.id, tripId })}
+              >
+                <Text style={styles.historyBtnText}>↩ History</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+          {showDeleted && deletedExpenses.length === 0 && !loadingDeleted && (
+            <Text style={styles.deletedEmpty}>No deleted expenses.</Text>
+          )}
+        </View>
+      )}
+
       {/* Expense list */}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <ExpenseCard
-            expense={item}
-            onPress={() => navigation.navigate('AddEditExpense', { tripId, expenseId: item.id })}
-          />
+          <View>
+            <ExpenseCard
+              expense={item}
+              onPress={() => navigation.navigate('AddEditExpense', { tripId, expenseId: item.id })}
+            />
+            {/* Version indicator + history link */}
+            <View style={styles.versionRow}>
+              {(item.current_version ?? 1) > 1 && (
+                <Text style={styles.versionIndicator}>v{item.current_version}</Text>
+              )}
+              {item.last_edited_at && (
+                <Text style={styles.lastEdited}>
+                  Edited {new Date(item.last_edited_at).toLocaleDateString()}
+                </Text>
+              )}
+              {canManageTrip && (item.current_version ?? 1) > 1 && (
+                <TouchableOpacity
+                  style={styles.historyInlineBtn}
+                  onPress={() => navigation.navigate('ExpenseHistory', { expenseId: item.id, tripId })}
+                >
+                  <Text style={styles.historyInlineBtnText}>🕐 History</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
         )}
         contentContainerStyle={styles.list}
         refreshControl={
@@ -317,4 +382,21 @@ const styles = StyleSheet.create({
   sortChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
   sortCount: { marginLeft: 'auto', fontSize: FontSize.xs, color: Colors.textSecondary },
   list: { padding: Spacing.md, flexGrow: 1 },
+  // Deleted expenses
+  deletedSection: { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  deletedHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  deletedTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.danger },
+  deletedToggle: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  deletedCard: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm, gap: Spacing.sm },
+  deletedName: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.medium, textDecorationLine: 'line-through' },
+  deletedMeta: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  deletedEmpty: { padding: Spacing.md, color: Colors.textSecondary, fontSize: FontSize.sm },
+  historyBtn: { borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 4 },
+  historyBtnText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  // Version indicator
+  versionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingBottom: Spacing.xs, gap: Spacing.sm },
+  versionIndicator: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.bold },
+  lastEdited: { fontSize: FontSize.xs, color: Colors.textSecondary, fontStyle: 'italic' },
+  historyInlineBtn: { marginLeft: 'auto', borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  historyInlineBtnText: { fontSize: FontSize.xs, color: Colors.textSecondary },
 });

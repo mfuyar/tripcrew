@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
-import { Expense, ExpenseSplit, FamilySplitShare, ServiceResult } from '../types';
+import { Expense, ExpenseSplit, ExpenseVersion, FamilySplitShare, ServiceResult } from '../types';
 
 function isMissingReplaceSplitsFunction(error: { message?: string; code?: string } | null): boolean {
   if (!error) return false;
@@ -59,9 +59,128 @@ export const expenseService = {
     return { data: data as Expense, error: null };
   },
 
+  // ─── Hard delete (permanent — admin only) ───────────────────────────────────
   async deleteExpense(expenseId: string): Promise<ServiceResult<null>> {
     const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
     return { data: null, error: error?.message ?? null };
+  },
+
+  // ─── Versioning ─────────────────────────────────────────────────────────────
+
+  async saveVersion(
+    expense: Expense,
+    changeType: ExpenseVersion['change_type'],
+    changedByName: string,
+    changeSummary?: string
+  ): Promise<void> {
+    const nextVersion = (expense.current_version ?? 1) + (changeType === 'create' ? 0 : 1);
+    await supabase.from('expense_versions').insert({
+      expense_id:      expense.id,
+      trip_id:         expense.trip_id,
+      version_number:  nextVersion,
+      snapshot:        {
+        id: expense.id, trip_id: expense.trip_id,
+        title: expense.title, amount: expense.amount, currency: expense.currency,
+        category: expense.category, paid_by_family_id: expense.paid_by_family_id,
+        paid_by_user_id: expense.paid_by_user_id, split_method: expense.split_method,
+        date: expense.date, notes: expense.notes, receipt_url: expense.receipt_url,
+      },
+      change_type:     changeType,
+      change_summary:  changeSummary,
+      changed_by_name: changedByName,
+    });
+  },
+
+  async getVersions(expenseId: string): Promise<ServiceResult<ExpenseVersion[]>> {
+    const { data, error } = await supabase
+      .from('expense_versions')
+      .select('*')
+      .eq('expense_id', expenseId)
+      .order('version_number', { ascending: false });
+    if (error) return { data: null, error: error.message };
+    return { data: data as ExpenseVersion[], error: null };
+  },
+
+  // Soft-delete: marks as deleted, saves version, keeps data
+  async softDeleteExpense(
+    expense: Expense,
+    deletedByUserId: string,
+    deletedByName: string
+  ): Promise<ServiceResult<null>> {
+    await expenseService.saveVersion(expense, 'delete', deletedByName, 'Expense deleted');
+    const nextVersion = (expense.current_version ?? 1) + 1;
+    const { error } = await supabase
+      .from('expenses')
+      .update({
+        is_deleted: true,
+        deleted_at: new Date().toISOString(),
+        deleted_by: deletedByUserId,
+        current_version: nextVersion,
+        last_edited_by: deletedByUserId,
+        last_edited_at: new Date().toISOString(),
+      })
+      .eq('id', expense.id);
+    return { data: null, error: error?.message ?? null };
+  },
+
+  // Restore from a specific version snapshot
+  async restoreVersion(
+    version: ExpenseVersion,
+    restoredByUserId: string,
+    restoredByName: string
+  ): Promise<ServiceResult<Expense>> {
+    const snap = version.snapshot;
+    const { data: current } = await expenseService.getExpenseById(version.expense_id);
+    const nextVersion = (current?.current_version ?? version.version_number) + 1;
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .update({
+        ...snap,
+        is_deleted: false,
+        deleted_at: null,
+        deleted_by: null,
+        current_version: nextVersion,
+        last_edited_by: restoredByUserId,
+        last_edited_at: new Date().toISOString(),
+      })
+      .eq('id', version.expense_id)
+      .select('*, paid_by_family:families(*), expense_splits(*, family:families(*))')
+      .single();
+
+    if (error) return { data: null, error: error.message };
+
+    // Record the restore as a new version
+    await supabase.from('expense_versions').insert({
+      expense_id:      version.expense_id,
+      trip_id:         version.trip_id,
+      version_number:  nextVersion,
+      snapshot:        snap,
+      change_type:     'restore',
+      change_summary:  `Restored to v${version.version_number}`,
+      changed_by_name: restoredByName,
+    });
+
+    return { data: data as Expense, error: null };
+  },
+
+  // Purge old versions (non-current) 7+ days after trip closes
+  async purgeOldVersions(tripId: string): Promise<ServiceResult<number>> {
+    const { data, error } = await supabase.rpc('purge_old_expense_versions', { p_trip_id: tripId });
+    if (error) return { data: null, error: error.message };
+    return { data: data as number, error: null };
+  },
+
+  // Get soft-deleted expenses (admin only)
+  async getDeletedExpenses(tripId: string): Promise<ServiceResult<Expense[]>> {
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('*, paid_by_family:families(*)')
+      .eq('trip_id', tripId)
+      .eq('is_deleted', true)
+      .order('deleted_at', { ascending: false });
+    if (error) return { data: null, error: error.message };
+    return { data: data as Expense[], error: null };
   },
 
   async getExpenseSplits(expenseId: string): Promise<ServiceResult<ExpenseSplit[]>> {
