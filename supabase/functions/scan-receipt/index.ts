@@ -346,7 +346,11 @@ Deno.serve(async (req) => {
     const parsed = normalizeParsedReceipt(JSON.parse(text));
     const invalidReason = validationError(parsed);
     if (invalidReason) {
-      await deleteRejectedReceipt(supabaseUrl, supabaseServiceRoleKey, receipt);
+      // Clean up the pending receipt record
+      await fetch(`${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${supabaseServiceRoleKey}`, apikey: supabaseServiceRoleKey },
+      }).catch(() => null);
       return jsonResponse({
         error: `${invalidReason} Please add this expense manually and attach the compressed photo there if you still want to keep it.`,
       }, 422);
