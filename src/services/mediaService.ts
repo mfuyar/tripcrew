@@ -2,6 +2,7 @@ import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
+import { moderatePhoto } from './moderationService';
 import { Message, TripMedia, MediaType, ServiceResult } from '../types';
 
 const MEDIA_BUCKET = 'trip-media';
@@ -120,6 +121,15 @@ export const mediaService = {
     mediaType: MediaType,
     caption?: string
   ): Promise<ServiceResult<TripMedia>> {
+    // Moderate photos before storing — blocks +18/unsafe content
+    if (mediaType === 'photo') {
+      const mod = await moderatePhoto(uri);
+      if (!mod.ok && mod.block) {
+        return { data: null, error: `Photo rejected: ${mod.reason}` };
+      }
+      // uncertain = upload proceeds but could be flagged in future
+    }
+
     const upload = await uploadStorageObject(tripId, userId, uri, mediaType);
     if (upload.error || !upload.data) return { data: null, error: upload.error };
     const { fileName, contentType, fileSize } = upload.data;

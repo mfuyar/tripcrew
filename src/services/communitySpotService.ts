@@ -1,6 +1,7 @@
 import { File } from 'expo-file-system';
 import { fetch as expoFetch } from 'expo/fetch';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { moderatePhoto as moderatePhotoAI } from './moderationService';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { CommunitySpot, CommunitySpotCategory, CommunitySpotComment, ModerationStatus, ServiceResult } from '../types';
 
@@ -122,13 +123,24 @@ function parseGeminiJsonObject(text: string): any {
   return JSON.parse(jsonText);
 }
 
-// Photos go to admin review queue — no AI required.
-// Admins approve/reject via CommunitySpotReviewScreen.
-async function moderatePhoto(_file: File): Promise<ModerationDecision> {
-  return {
-    status: 'pending_review',
-    reason: 'Photo is awaiting review by a trip admin.',
-  };
+// Moderate photo using Gemini (via Edge Function — key stays server-side).
+// Falls back to pending_review if AI is unavailable.
+async function moderatePhoto(file: File): Promise<ModerationDecision> {
+  try {
+    const uri = file.uri ?? (file as any).name;
+    if (!uri) return { status: 'pending_review', reason: 'Photo will be reviewed by an admin.' };
+
+    const result = await moderatePhotoAI(uri);
+    if (!result.ok && result.block) {
+      return { status: 'rejected', reason: result.reason };
+    }
+    if (!result.ok && !result.block) {
+      return { status: 'pending_review', reason: result.reason };
+    }
+    return { status: 'approved' };
+  } catch {
+    return { status: 'pending_review', reason: 'Photo will be reviewed by an admin.' };
+  }
 }
 
 async function moderateSpotInput(input: CommunitySpotInput, photoFile?: File): Promise<ModerationDecision> {
