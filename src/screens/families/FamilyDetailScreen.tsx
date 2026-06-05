@@ -288,45 +288,48 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
           const isMe = user?.id === m.user_id || user?.email === m.profile?.email;
           return (
             <View key={m.id} style={styles.memberCard}>
-              <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
-              <View style={styles.memberInfo}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.memberName}>{m.profile?.full_name?.split(' ')[0] ?? 'Unknown'}</Text>
-                  {m.is_admin && (
-                    <View style={styles.adminBadge}>
-                      <Text style={styles.adminText}>Family Admin</Text>
-                    </View>
-                  )}
+              {/* Top row: avatar + info + push-talk */}
+              <View style={styles.memberCardTop}>
+                <FamilyAvatar name={m.profile?.full_name ?? '?'} size={40} />
+                <View style={styles.memberInfo}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.memberName}>{m.profile?.full_name?.split(' ')[0] ?? 'Unknown'}</Text>
+                    {m.is_admin && (
+                      <View style={styles.adminBadge}>
+                        <Text style={styles.adminText}>Family Admin</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.memberEmail}>{m.profile?.email ?? ''}</Text>
                 </View>
-                <Text style={styles.memberEmail}>{m.profile?.email ?? ''}</Text>
+                {/* Push talk toggle — only the member themselves can change it */}
+                {isMe ? (
+                  <TouchableOpacity
+                    style={[styles.pushTalkBtn2, m.push_talk_enabled && styles.pushTalkBtnOn]}
+                    onPress={() => handleTogglePushTalk(m, !m.push_talk_enabled)}
+                  >
+                    <Text style={[styles.pushTalkBtnText, m.push_talk_enabled && styles.pushTalkBtnTextOn]}>
+                      {m.push_talk_enabled ? '🔔 On' : '🔕 Off'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.pushTalkStatus}>
+                    {m.push_talk_enabled ? '🔔' : '🔕'}
+                  </Text>
+                )}
               </View>
 
-              {/* Push talk toggle — only the member themselves can change it */}
-              {isMe ? (
-                <TouchableOpacity
-                  style={[styles.pushTalkBtn2, m.push_talk_enabled && styles.pushTalkBtnOn]}
-                  onPress={() => handleTogglePushTalk(m, !m.push_talk_enabled)}
-                >
-                  <Text style={[styles.pushTalkBtnText, m.push_talk_enabled && styles.pushTalkBtnTextOn]}>
-                    {m.push_talk_enabled ? '🔔 On' : '🔕 Off'}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.pushTalkStatus}>
-                  {m.push_talk_enabled ? '🔔' : '🔕'}
-                </Text>
-              )}
-
+              {/* Bottom row: admin toggle + remove (managers only, not self) */}
               {canManageFamily && !isMe && (
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  {/* Family Admin toggle — only trip managers can promote */}
+                <View style={styles.memberCardActions}>
                   {canManageTrip && (
                     <TouchableOpacity
+                      style={[styles.memberActionBtn, m.is_admin && styles.memberActionBtnActive]}
                       onPress={() => {
                         const label = m.is_admin ? 'Remove Family Admin' : 'Make Family Admin';
                         const msg = m.is_admin
-                          ? `Remove Family Admin from ${m.profile?.full_name}? They can no longer manage family members.`
-                          : `Make ${m.profile?.full_name} a Family Admin? They can add/remove members in this family.`;
+                          ? `Remove Family Admin from ${m.profile?.full_name}?`
+                          : `Make ${m.profile?.full_name} a Family Admin? They can add/remove members.`;
                         Alert.alert(label, msg, [
                           { text: 'Cancel', style: 'cancel' },
                           {
@@ -340,13 +343,16 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                         ]);
                       }}
                     >
-                      <Text style={[styles.adminToggleText, m.is_admin && styles.adminToggleActiveText]}>
-                        {m.is_admin ? 'Family Admin ✓' : 'Family Admin'}
+                      <Text style={[styles.memberActionText, m.is_admin && styles.memberActionTextActive]}>
+                        {m.is_admin ? 'Family Admin ✓' : 'Make Family Admin'}
                       </Text>
                     </TouchableOpacity>
                   )}
                   {(!m.is_admin || canManageTrip) && (
-                    <TouchableOpacity onPress={() => handleRemoveMember(m.id, m.user_id)}>
+                    <TouchableOpacity
+                      style={styles.memberActionBtnDanger}
+                      onPress={() => handleRemoveMember(m.id, m.user_id)}
+                    >
                       <Text style={styles.removeText}>Remove</Text>
                     </TouchableOpacity>
                   )}
@@ -448,13 +454,42 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.semiBold, color: Colors.text, marginBottom: Spacing.md },
   emptyText: { fontSize: FontSize.md, color: Colors.textSecondary, textAlign: 'center' },
   memberCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
     padding: Spacing.md,
     marginBottom: Spacing.sm,
     ...Shadow.sm,
+  },
+  memberCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  memberCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    marginLeft: 40 + Spacing.md, // align with name (avatar width + margin)
+  },
+  memberActionBtn: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    borderColor: Colors.warning,
+  },
+  memberActionBtnActive: { backgroundColor: Colors.warning + '20' },
+  memberActionText: { fontSize: FontSize.xs, color: Colors.warning, fontWeight: FontWeight.semiBold },
+  memberActionTextActive: { color: Colors.warning },
+  memberActionBtnDanger: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    borderColor: Colors.danger + '60',
   },
   memberInfo: { flex: 1, marginLeft: Spacing.md },
   memberName: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text },
