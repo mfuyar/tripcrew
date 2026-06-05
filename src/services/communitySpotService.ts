@@ -431,9 +431,10 @@ export const communitySpotService = {
     if (containsBadLanguage(updates.name, updates.description, updates.address)) {
       return { data: null, error: 'Spot content cannot be posted.' };
     }
+    // M-7: reset to pending_review so edited content is re-moderated
     const { data, error } = await supabase
       .from('community_spots')
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update({ ...updates, moderation_status: 'pending_review', updated_at: new Date().toISOString() })
       .eq('id', spotId)
       .select('*, author:profiles(*), comments:community_spot_comments(*, author:profiles(*))')
       .single();

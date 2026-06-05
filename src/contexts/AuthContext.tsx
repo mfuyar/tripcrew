@@ -64,17 +64,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function handleAuthUrl(url: string) {
     try {
+      // M-6: validate URL comes from our Supabase project before trusting tokens
+      const VALID_ORIGINS = [
+        'travelcrew://',
+        'https://ydoooydyvipnfrywqaus.supabase.co',
+      ];
+      if (!VALID_ORIGINS.some((origin) => url.startsWith(origin))) return;
+
       const params = getUrlParams(url);
       const accessToken = params.get('access_token');
       const refreshToken = params.get('refresh_token');
       const type = params.get('type');
-      if (accessToken && refreshToken) {
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-        if (!error && type === 'recovery') setIsPasswordRecovery(true);
-      }
+
+      // Only handle known auth callback types
+      const VALID_TYPES = ['recovery', 'signup', 'magiclink', 'invite', 'email_change'];
+      if (!accessToken || !refreshToken) return;
+      if (type && !VALID_TYPES.includes(type)) return;
+
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (!error && type === 'recovery') setIsPasswordRecovery(true);
     } catch (_e) {}
   }
 
