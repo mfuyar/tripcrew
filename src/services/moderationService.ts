@@ -11,13 +11,14 @@ export type ModerationResult =
   | { ok: false; reason: string; block: boolean }; // block=true → reject; false → flag for review
 
 const PROMPT = [
-  'You are a content moderation system for a family travel app.',
-  'Analyse this image and return only valid JSON: {"adult":boolean,"unsafe":boolean,"uncertain":boolean,"reason":string}.',
-  '"adult" = nudity, sexual content, explicit poses, pornography, or clearly 18+ imagery.',
-  '"unsafe" = graphic violence, hateful symbols, gore.',
-  '"uncertain" = image might be borderline but you are not confident enough to reject.',
-  '"reason" = short explanation (max 20 words).',
-  'Be strict. Family travel app. Children may see this content.',
+  'You are a strict content moderation system for a conservative family travel app.',
+  'Children and families will see every photo. Apply the highest standards.',
+  'Return only valid JSON: {"reject":boolean,"flag":boolean,"reason":string}.',
+  '"reject"=true if the image contains ANY of: nudity, sexual content, explicit poses, pornography, graphic violence, gore, blood, weapons displayed aggressively, drug paraphernalia, hateful symbols, racist content, extremist imagery, self-harm, child exploitation, or anything clearly inappropriate for children.',
+  '"flag"=true if the image is borderline, ambiguous, or you are uncertain — even slightly.',
+  '"reject" takes priority over "flag".',
+  '"reason" = one short sentence (max 15 words) explaining your decision.',
+  'When in doubt, flag it. This is a family app.',
 ].join(' ');
 
 export async function moderatePhoto(localUri: string): Promise<ModerationResult> {
@@ -65,19 +66,19 @@ export async function moderatePhoto(localUri: string): Promise<ModerationResult>
 
     const parsed = JSON.parse(text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim());
 
-    if (parsed.adult || parsed.unsafe) {
+    if (parsed.reject) {
       return {
         ok: false,
-        reason: String(parsed.reason || 'Image contains inappropriate content.'),
+        reason: String(parsed.reason || 'Photo contains inappropriate content and cannot be uploaded.'),
         block: true,
       };
     }
 
-    if (parsed.uncertain) {
+    if (parsed.flag) {
       return {
         ok: false,
-        reason: String(parsed.reason || 'Image flagged for manual review.'),
-        block: false,  // upload but route to pending_review
+        reason: String(parsed.reason || 'Photo flagged for manual review by an admin.'),
+        block: false,
       };
     }
 
