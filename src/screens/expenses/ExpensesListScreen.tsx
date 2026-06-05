@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   RefreshControl,
 } from 'react-native';
@@ -44,6 +45,7 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
   const [filter, setFilter] = useState<ExpenseCategory | 'all'>('all');
   const [sortBy, setSortBy] = useState<'date' | 'family' | 'amount'>('date');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+  const [showFamilyTotals, setShowFamilyTotals] = useState(false);
 
   const loadExpenses = useCallback(async () => {
     if (isDemoMode) {
@@ -86,6 +88,19 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
 
   const sortArrow = (by: typeof sortBy) =>
     sortBy === by ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
+
+  // Family totals — group ALL expenses (not just filtered) by paying family
+  const familyTotals = Object.values(
+    expenses.reduce<Record<string, { name: string; color?: string; total: number; count: number }>>((acc, e) => {
+      const id = e.paid_by_family_id;
+      const name = e.paid_by_family?.name ?? 'Unknown';
+      const color = e.paid_by_family?.color;
+      if (!acc[id]) acc[id] = { name, color, total: 0, count: 0 };
+      acc[id].total += e.amount;
+      acc[id].count += 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b.total - a.total);
 
   return (
     <View style={styles.container}>
@@ -134,6 +149,34 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
         showsHorizontalScrollIndicator={false}
         style={styles.filterBar}
       />
+
+      {/* Family Totals */}
+      {expenses.length > 0 && (
+        <View style={styles.familyTotalsSection}>
+          <TouchableOpacity style={styles.familyTotalsHeader} onPress={() => setShowFamilyTotals(v => !v)}>
+            <Text style={styles.familyTotalsTitle}>👨‍👩‍👧 Family Totals</Text>
+            <Text style={styles.familyTotalsToggle}>{showFamilyTotals ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+          {showFamilyTotals && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.familyTotalsRow}>
+              {familyTotals.map(f => (
+                <TouchableOpacity
+                  key={f.name}
+                  style={styles.familyTotalCard}
+                  onPress={() => setSortBy('family')}
+                >
+                  <View style={[styles.familyDot, { backgroundColor: f.color ?? Colors.primary }]} />
+                  <Text style={styles.familyTotalName} numberOfLines={1}>{f.name}</Text>
+                  <Text style={styles.familyTotalAmount}>
+                    {currentTrip?.currency} {f.total.toFixed(2)}
+                  </Text>
+                  <Text style={styles.familyTotalCount}>{f.count} expense{f.count !== 1 ? 's' : ''}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      )}
 
       {/* Sort bar */}
       <View style={styles.sortBar}>
@@ -222,6 +265,34 @@ const styles = StyleSheet.create({
   filterChipActive: { backgroundColor: Colors.primaryLight },
   filterText: { fontSize: FontSize.sm, color: Colors.textSecondary },
   filterTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  familyTotalsSection: {
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  familyTotalsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  familyTotalsTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
+  familyTotalsToggle: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  familyTotalsRow: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.md },
+  familyTotalCard: {
+    backgroundColor: Colors.background,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginRight: Spacing.sm,
+    minWidth: 130,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  familyDot: { width: 10, height: 10, borderRadius: 5, marginBottom: 4 },
+  familyTotalName: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
+  familyTotalAmount: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.primary, marginTop: 2 },
+  familyTotalCount: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   sortBar: {
     flexDirection: 'row',
     alignItems: 'center',
