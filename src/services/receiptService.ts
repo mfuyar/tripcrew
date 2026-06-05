@@ -1,89 +1,88 @@
-import { File } from 'expo-file-system';
-import { fetch as expoFetch } from 'expo/fetch';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { ReceiptScan, ServiceResult } from '../types';
 
-const RECEIPT_BUCKET = 'trip-media';
-const MAX_RECEIPT_IMAGE_DIMENSION = 1600;
-const RECEIPT_IMAGE_COMPRESS_QUALITY = 0.78;
+const MAX_RECEIPT_DIM = 1600;
+const RECEIPT_QUALITY = 0.82;
 
-async function prepareReceiptImageForUpload(uri: string): Promise<string> {
-  const context = ImageManipulator.manipulate(uri);
-  const image = await context.renderAsync();
-  const resize =
-    image.width > image.height
-      ? { width: Math.min(image.width, MAX_RECEIPT_IMAGE_DIMENSION) }
-      : { height: Math.min(image.height, MAX_RECEIPT_IMAGE_DIMENSION) };
-
-  context.reset();
-  context.resize(resize);
-  const renderedImage = await context.renderAsync();
-  const result = await renderedImage.saveAsync({
-    compress: RECEIPT_IMAGE_COMPRESS_QUALITY,
-    format: SaveFormat.JPEG,
-  });
-  return result.uri;
+async function prepareBase64(uri: string): Promise<{ base64: string; mimeType: string }> {
+  try {
+    const resized = await manipulateAsync(
+      uri,
+      [{ resize: { width: MAX_RECEIPT_DIM } }],
+      { compress: RECEIPT_QUALITY, format: SaveFormat.JPEG }
+    );
+    const base64 = await FileSystem.readAsStringAsync(resized.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { base64, mimeType: 'image/jpeg' };
+  } catch {
+    // Fall back to original
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpeg';
+    return { base64, mimeType: ext === 'png' ? 'image/png' : 'image/jpeg' };
+  }
 }
 
 export const receiptService = {
+  /**
+   * Upload receipt image and run OCR in one call.
+   * Sends base64 directly to the Edge Function — no signed URL dependency.
+   */
   async uploadReceipt(
     tripId: string,
     userId: string,
     imageUri: string
   ): Promise<ServiceResult<ReceiptScan>> {
-    // Upload image to storage
-    const uploadUri = await prepareReceiptImageForUpload(imageUri);
-    const file = new File(uploadUri);
-    const fileName = `receipts/${tripId}/${userId}/${Date.now()}.jpg`;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token ?? supabaseAnonKey;
-
-    const uploadResponse = await expoFetch(
-      `${supabaseUrl}/storage/v1/object/${RECEIPT_BUCKET}/${fileName}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          apikey: supabaseAnonKey,
-          'Content-Type': 'image/jpeg',
-          'x-upsert': 'false',
-        },
-        body: file,
-      }
-    );
-
-    if (!uploadResponse.ok) {
-      const uploadError = await uploadResponse.text();
-      return { data: null, error: uploadError || 'Receipt upload failed' };
-    }
-
-    const { data: signed, error: signErr } = await supabase.storage
-      .from(RECEIPT_BUCKET)
-      .createSignedUrl(fileName, 60 * 60 * 24 * 30); // 30-day signed URL for receipts
-    if (signErr || !signed) return { data: null, error: 'Could not generate secure URL for receipt.' };
-
-    // Create receipt record
-    const { data, error } = await supabase
-      .from('receipt_scans')
-      .insert({
-        trip_id: tripId,
-        scanned_by: userId,
-        image_url: signed.signedUrl,
-      })
-      .select()
-      .single();
-    if (error) return { data: null, error: error.message };
-    return { data: data as ReceiptScan, error: null };
-  },
-
-  async scanReceipt(receiptId: string, imageUrl: string): Promise<ServiceResult<ReceiptScan>> {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
-
     if (!token) return { data: null, error: 'You must be signed in to scan receipts.' };
 
-    const response = await expoFetch(`${supabaseUrl}/functions/v1/scan-receipt`, {
+    // Prepare image as base64 locally
+    let imageData: { base64: string; mimeType: string };
+    try {
+      imageData = await prepareBase64(imageUri);
+    } catch (e: any) {
+      return { data: null, error: e?.message ?? 'Could not read receipt image.' };
+    }
+
+    // Send to Edge Function — OCR + DB record creation in one step
+    const response = await fetch(`${supabaseUrl}/functions/v1/scan-receipt`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: supabaseAnonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tripId,
+        userId,
+        imageBase64: imageData.base64,
+        mimeType: imageData.mimeType,
+      }),
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return { data: null, error: data?.error ?? 'Receipt scan failed. Please try again.' };
+    }
+    if (data?.error) return { data: null, error: data.error };
+    if (!data?.data) return { data: null, error: 'Receipt scan returned no data.' };
+
+    return { data: data.data as ReceiptScan, error: null };
+  },
+
+  /** Legacy: call scan separately if receipt was already uploaded */
+  async scanReceipt(receiptId: string, _imageUrl: string): Promise<ServiceResult<ReceiptScan>> {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return { data: null, error: 'You must be signed in to scan receipts.' };
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/scan-receipt`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -94,13 +93,9 @@ export const receiptService = {
     });
 
     const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      return { data: null, error: data?.error ?? 'Receipt scan failed' };
-    }
+    if (!response.ok) return { data: null, error: data?.error ?? 'Receipt scan failed' };
     if (data?.error) return { data: null, error: data.error };
     if (!data?.data) return { data: null, error: 'Receipt scan returned no data' };
-
     return { data: data.data as ReceiptScan, error: null };
   },
 
@@ -116,5 +111,15 @@ export const receiptService = {
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as ReceiptScan, error: null };
+  },
+
+  async getReceiptsForExpense(expenseId: string): Promise<ServiceResult<ReceiptScan[]>> {
+    const { data, error } = await supabase
+      .from('receipt_scans')
+      .select('*')
+      .eq('expense_id', expenseId)
+      .order('created_at', { ascending: false });
+    if (error) return { data: null, error: error.message };
+    return { data: data as ReceiptScan[], error: null };
   },
 };

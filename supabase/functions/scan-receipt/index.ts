@@ -233,37 +233,63 @@ Deno.serve(async (req) => {
 
     if (!authHeader) return jsonResponse({ error: 'Missing authorization header' }, 401);
 
-    const { receiptId } = await req.json();
-    if (!receiptId) {
-      return jsonResponse({ error: 'receiptId is required' }, 400);
-    }
+    const body = await req.json();
 
-    const receiptResponse = await fetch(
-      `${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}&select=id,trip_id,image_url&limit=1`,
-      {
-        headers: {
-          Authorization: authHeader,
-          apikey: supabaseAnonKey,
-        },
+    let receiptId: string;
+    let base64Image: string;
+    let contentType: string;
+
+    if (body.imageBase64) {
+      // New flow: base64 sent directly — no storage URL needed
+      const { tripId, userId, imageBase64, mimeType } = body;
+      if (!tripId || !userId || !imageBase64) {
+        return jsonResponse({ error: 'tripId, userId and imageBase64 are required' }, 400);
       }
-    );
+      base64Image = imageBase64;
+      contentType = mimeType ?? 'image/jpeg';
 
-    if (!receiptResponse.ok) {
-      const errorText = await receiptResponse.text();
-      return jsonResponse({ error: `Could not verify receipt access: ${errorText}` }, 403);
+      // Create the receipt_scans record now
+      const insertResp = await fetch(
+        `${supabaseUrl}/rest/v1/receipt_scans`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${supabaseServiceRoleKey}`,
+            apikey: supabaseAnonKey,
+            'Content-Type': 'application/json',
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({ trip_id: tripId, scanned_by: userId, image_url: '' }),
+        }
+      );
+      if (!insertResp.ok) {
+        return jsonResponse({ error: 'Could not create receipt record' }, 500);
+      }
+      const inserted = await insertResp.json();
+      receiptId = inserted[0]?.id;
+      if (!receiptId) return jsonResponse({ error: 'Failed to get receipt ID' }, 500);
+
+    } else {
+      // Legacy flow: receiptId provided, fetch from DB and download image
+      receiptId = body.receiptId;
+      if (!receiptId) return jsonResponse({ error: 'receiptId or imageBase64 is required' }, 400);
+
+      const receiptResponse = await fetch(
+        `${supabaseUrl}/rest/v1/receipt_scans?id=eq.${receiptId}&select=id,trip_id,image_url&limit=1`,
+        { headers: { Authorization: authHeader, apikey: supabaseAnonKey } }
+      );
+      if (!receiptResponse.ok) {
+        return jsonResponse({ error: 'Could not verify receipt access' }, 403);
+      }
+      const receiptRows = (await receiptResponse.json()) as ReceiptScanRow[];
+      const receipt = receiptRows[0];
+      if (!receipt) return jsonResponse({ error: 'Receipt scan not found' }, 404);
+
+      const imageResponse = await fetch(receipt.image_url);
+      if (!imageResponse.ok) return jsonResponse({ error: 'Could not download receipt image' }, 400);
+      contentType = imageResponse.headers.get('Content-Type') ?? 'image/jpeg';
+      base64Image = arrayBufferToBase64(await imageResponse.arrayBuffer());
     }
-
-    const receiptRows = (await receiptResponse.json()) as ReceiptScanRow[];
-    const receipt = receiptRows[0];
-    if (!receipt) return jsonResponse({ error: 'Receipt scan not found or not accessible' }, 404);
-
-    const imageResponse = await fetch(receipt.image_url);
-    if (!imageResponse.ok) {
-      return jsonResponse({ error: 'Could not download receipt image' }, 400);
-    }
-
-    const contentType = imageResponse.headers.get('Content-Type') ?? 'image/jpeg';
-    const base64Image = arrayBufferToBase64(await imageResponse.arrayBuffer());
     const geminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
       {
