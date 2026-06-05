@@ -225,8 +225,7 @@ export const mediaService = {
       .from(MEDIA_BUCKET)
       .createSignedUrl(fileName, CHAT_MEDIA_TTL_SECONDS);
     if (signErr || !signed) {
-      const { data: urlData } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
-      return { data: { url: urlData.publicUrl, mime_type: contentType }, error: null };
+      return { data: null, error: 'Could not generate a secure download URL for the uploaded file.' };
     }
     return { data: { url: signed.signedUrl, mime_type: contentType }, error: null };
   },

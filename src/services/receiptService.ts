@@ -58,9 +58,10 @@ export const receiptService = {
       return { data: null, error: uploadError || 'Receipt upload failed' };
     }
 
-    const { data: urlData } = supabase.storage
+    const { data: signed, error: signErr } = await supabase.storage
       .from(RECEIPT_BUCKET)
-      .getPublicUrl(fileName);
+      .createSignedUrl(fileName, 60 * 60 * 24 * 30); // 30-day signed URL for receipts
+    if (signErr || !signed) return { data: null, error: 'Could not generate secure URL for receipt.' };
 
     // Create receipt record
     const { data, error } = await supabase
@@ -68,7 +69,7 @@ export const receiptService = {
       .insert({
         trip_id: tripId,
         scanned_by: userId,
-        image_url: urlData.publicUrl,
+        image_url: signed.signedUrl,
       })
       .select()
       .single();

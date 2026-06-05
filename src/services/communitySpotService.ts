@@ -89,8 +89,12 @@ async function uploadPreparedSpotPhoto(userId: string, file: File): Promise<Serv
     return { data: null, error: uploadError || 'Spot photo upload failed' };
   }
 
-  const { data: urlData } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(fileName);
-  return { data: urlData.publicUrl, error: null };
+  // Use a 1-year signed URL — community spots are long-lived
+  const { data: signed, error: signErr } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .createSignedUrl(fileName, 60 * 60 * 24 * 365);
+  if (signErr || !signed) return { data: null, error: 'Could not generate secure URL for spot photo.' };
+  return { data: signed.signedUrl, error: null };
 }
 
 function containsBadLanguage(...values: Array<string | undefined>): boolean {
