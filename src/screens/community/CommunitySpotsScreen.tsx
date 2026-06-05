@@ -66,6 +66,7 @@ interface SpotCardProps {
   user: any;
   canManageTrip: boolean;
   distanceUnit: DistanceUnit;
+  currentTripId?: string;   // the trip the user is currently browsing
   onVote: (spot: CommunitySpot) => void;
   onLike: (spot: CommunitySpot) => void;
   onSave: (spot: CommunitySpot) => void;
@@ -77,7 +78,7 @@ interface SpotCardProps {
 }
 
 function SpotCard({
-  spot, user, canManageTrip, distanceUnit,
+  spot, user, canManageTrip, distanceUnit, currentTripId,
   onVote, onLike, onSave, onComment, onAddToItinerary, onEdit, onDelete, tripId,
 }: SpotCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -87,6 +88,31 @@ function SpotCard({
     : (spot.distance_miles ?? kmToMiles(spot.distance_km ?? 0)).toFixed(1);
 
   const canEdit = spot.user_id === user?.id || canManageTrip;
+
+  // Member spots from OTHER trips show name + category only — no details
+  const isOtherTripMemberSpot =
+    spot.source_type === 'member' &&
+    spot.trip_id &&
+    currentTripId &&
+    spot.trip_id !== currentTripId;
+
+  // API spots (OpenStreetMap, OpenTripMap) are public data — always show full details
+  const showFullDetails = !isOtherTripMemberSpot;
+
+  if (isOtherTripMemberSpot) {
+    return (
+      <View style={styles.cardMinimal}>
+        <Text style={styles.cardMinimalIcon}>{cat.icon}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardMinimalName}>{spot.name}</Text>
+          <Text style={styles.cardMinimalMeta}>{cat.label} · {distVal} {distanceUnit}</Text>
+        </View>
+        <View style={styles.sourceBadge}>
+          <Text style={[styles.sourceBadgeText, { color: Colors.textSecondary }]}>Member spot</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.card}>
@@ -644,6 +670,7 @@ export function CommunitySpotsScreen({ route }: Props) {
                 user={user}
                 canManageTrip={canManageTrip}
                 distanceUnit={distanceUnit}
+                currentTripId={tripId}
                 onVote={handleVote}
                 onLike={handleLike}
                 onSave={handleSave}
@@ -754,6 +781,15 @@ const styles = StyleSheet.create({
   list: { padding: Spacing.md, flexGrow: 1 },
   map: { flex: 1 },
   // Card
+  cardMinimal: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.surface, borderRadius: Radius.md,
+    padding: Spacing.md, marginBottom: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  cardMinimalIcon: { fontSize: 22 },
+  cardMinimalName: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text },
+  cardMinimalMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   card: { backgroundColor: Colors.surface, borderRadius: Radius.lg, marginBottom: Spacing.md, overflow: 'hidden', ...Shadow.sm },
   cardImage: { width: '100%', height: 160 },
   cardImagePlaceholder: { width: '100%', height: 80, alignItems: 'center', justifyContent: 'center' },
