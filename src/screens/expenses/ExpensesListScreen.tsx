@@ -42,6 +42,8 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<ExpenseCategory | 'all'>('all');
+  const [sortBy, setSortBy] = useState<'date' | 'family' | 'amount'>('date');
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
 
   const loadExpenses = useCallback(async () => {
     if (isDemoMode) {
@@ -66,8 +68,24 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
   if (loading) return <LoadingView />;
   if (error) return <ErrorState message={error} onRetry={loadExpenses} />;
 
-  const filtered = filter === 'all' ? expenses : expenses.filter((e) => e.category === filter);
+  const filtered = (filter === 'all' ? expenses : expenses.filter((e) => e.category === filter))
+    .slice()
+    .sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'date')   cmp = a.date.localeCompare(b.date);
+      if (sortBy === 'amount') cmp = a.amount - b.amount;
+      if (sortBy === 'family') cmp = (a.paid_by_family?.name ?? '').localeCompare(b.paid_by_family?.name ?? '');
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
   const total = filtered.reduce((s, e) => s + e.amount, 0);
+
+  function handleSort(by: 'date' | 'family' | 'amount') {
+    if (sortBy === by) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(by); setSortDir('desc'); }
+  }
+
+  const sortArrow = (by: typeof sortBy) =>
+    sortBy === by ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
 
   return (
     <View style={styles.container}>
@@ -116,6 +134,23 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
         showsHorizontalScrollIndicator={false}
         style={styles.filterBar}
       />
+
+      {/* Sort bar */}
+      <View style={styles.sortBar}>
+        <Text style={styles.sortLabel}>Sort:</Text>
+        {(['date', 'family', 'amount'] as const).map(by => (
+          <TouchableOpacity
+            key={by}
+            style={[styles.sortChip, sortBy === by && styles.sortChipActive]}
+            onPress={() => handleSort(by)}
+          >
+            <Text style={[styles.sortChipText, sortBy === by && styles.sortChipTextActive]}>
+              {by.charAt(0).toUpperCase() + by.slice(1)}{sortArrow(by)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <Text style={styles.sortCount}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}</Text>
+      </View>
 
       {/* Expense list */}
       <FlatList
@@ -187,5 +222,28 @@ const styles = StyleSheet.create({
   filterChipActive: { backgroundColor: Colors.primaryLight },
   filterText: { fontSize: FontSize.sm, color: Colors.textSecondary },
   filterTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  sortBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: Spacing.xs,
+  },
+  sortLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginRight: 2 },
+  sortChip: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  sortChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  sortChipText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  sortChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  sortCount: { marginLeft: 'auto', fontSize: FontSize.xs, color: Colors.textSecondary },
   list: { padding: Spacing.md, flexGrow: 1 },
 });
