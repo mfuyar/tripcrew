@@ -8,7 +8,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { MainStackParamList, FamilyBalance } from '../../types';
+import { MainStackParamList, FamilyBalance, Expense } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
@@ -27,14 +27,17 @@ export function BalancesScreen({ navigation, route }: Props) {
   const { families, currentTrip, canManageTrip } = useTripContext();
   const { isDemoMode } = useAuth();
   const [balances, setBalances] = useState<FamilyBalance[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [expandedFamily, setExpandedFamily] = useState<string | null>(null);
 
   async function loadBalances() {
-    const expenses = isDemoMode
+    const allExpenses = isDemoMode
       ? demoExpenses
       : (await expenseService.getExpenses(tripId)).data ?? [];
-    const result = calculateFamilyBalances(expenses, families);
+    setExpenses(allExpenses as Expense[]);
+    const result = calculateFamilyBalances(allExpenses, families);
     setBalances(result);
     setLoading(false);
     setRefreshing(false);
@@ -66,6 +69,8 @@ export function BalancesScreen({ navigation, route }: Props) {
       <Text style={styles.sectionTitle}>Family Balances</Text>
       {balances.map((b) => {
         const family = families.find((f) => f.id === b.familyId);
+        const isExpanded = expandedFamily === b.familyId;
+        const paidByFamily = expenses.filter((e) => e.paid_by_family_id === b.familyId);
         return (
           <View key={b.familyId} style={styles.balanceCard}>
             <View style={styles.balanceTop}>
@@ -102,6 +107,33 @@ export function BalancesScreen({ navigation, route }: Props) {
                 </Text>
               </View>
             </View>
+
+            {/* Expense breakdown — trip admins/organizers only */}
+            {canManageTrip && paidByFamily.length > 0 && (
+              <>
+                <TouchableOpacity
+                  style={styles.expandToggle}
+                  onPress={() => setExpandedFamily(isExpanded ? null : b.familyId)}
+                >
+                  <Text style={styles.expandToggleText}>
+                    {isExpanded ? '▲ Hide' : '▾ Show'} {paidByFamily.length} expense{paidByFamily.length !== 1 ? 's' : ''} paid by {b.familyName}
+                  </Text>
+                </TouchableOpacity>
+                {isExpanded && (
+                  <View style={styles.expenseList}>
+                    {paidByFamily.map((exp) => (
+                      <View key={exp.id} style={styles.expenseRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.expenseTitle} numberOfLines={1}>{exp.title}</Text>
+                          <Text style={styles.expenseDate}>{exp.date}</Text>
+                        </View>
+                        <Text style={styles.expenseAmount}>{currency} {exp.amount.toFixed(2)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
           </View>
         );
       })}
@@ -163,4 +195,23 @@ const styles = StyleSheet.create({
   breakdownValue: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
   breakdownDivider: { width: 1, backgroundColor: Colors.border },
   settleBtn: { marginTop: Spacing.md },
+  expandToggle: {
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    alignItems: 'center',
+  },
+  expandToggleText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  expenseList: { marginTop: Spacing.sm, gap: Spacing.xs },
+  expenseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  expenseTitle: { fontSize: FontSize.sm, color: Colors.text, fontWeight: FontWeight.medium },
+  expenseDate: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  expenseAmount: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
 });

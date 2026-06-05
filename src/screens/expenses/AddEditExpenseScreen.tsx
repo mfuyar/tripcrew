@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  Modal,
+  SafeAreaView,
 } from 'react-native';
 import { mediaService } from '../../services/mediaService';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -63,6 +65,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   const [canEdit, setCanEdit] = useState(!isEdit);
   const [receiptLocalUri, setReceiptLocalUri] = useState<string | undefined>(scannedExpense?.receiptImageUri);
   const [receiptUrl, setReceiptUrl] = useState<string | undefined>();
+  const [receiptFullScreen, setReceiptFullScreen] = useState(false);
 
   useEffect(() => {
     if (families.length > 0 && !paidByFamilyId) {
@@ -227,18 +230,36 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
         {/* Receipt thumbnail — admin/creator only */}
         {canManageTrip && (receiptLocalUri || receiptUrl) && (
           <View style={styles.receiptRow}>
-            <Text style={styles.receiptLabel}>📎 Receipt attached</Text>
-            <TouchableOpacity onPress={() => {
-              Alert.alert('Receipt', 'Remove attached receipt?', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Remove', style: 'destructive', onPress: () => { setReceiptLocalUri(undefined); setReceiptUrl(undefined); } },
-              ]);
-            }}>
+            <View style={styles.receiptRowHeader}>
+              <Text style={styles.receiptLabel}>📎 Receipt attached</Text>
+              {canEdit && (
+                <TouchableOpacity onPress={() => Alert.alert('Remove Receipt', 'Remove this receipt?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Remove', style: 'destructive', onPress: () => { setReceiptLocalUri(undefined); setReceiptUrl(undefined); } },
+                ])}>
+                  <Text style={styles.receiptRemove}>Remove</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity onPress={() => setReceiptFullScreen(true)} activeOpacity={0.85}>
               <Image source={{ uri: receiptLocalUri ?? receiptUrl }} style={styles.receiptThumb} resizeMode="cover" />
-              <Text style={styles.receiptRemove}>✕ Remove</Text>
+              <Text style={styles.receiptTapHint}>Tap to view full size</Text>
             </TouchableOpacity>
           </View>
         )}
+        {/* Full-screen receipt viewer */}
+        <Modal visible={receiptFullScreen} transparent animationType="fade">
+          <SafeAreaView style={styles.receiptModal}>
+            <TouchableOpacity style={styles.receiptModalClose} onPress={() => setReceiptFullScreen(false)}>
+              <Text style={styles.receiptModalCloseText}>✕ Close</Text>
+            </TouchableOpacity>
+            <Image
+              source={{ uri: receiptLocalUri ?? receiptUrl }}
+              style={styles.receiptFullImage}
+              resizeMode="contain"
+            />
+          </SafeAreaView>
+        </Modal>
 
         <AppTextInput label="Title" required value={title} onChangeText={setTitle} placeholder="Grocery run at Mercado..." />
         <AppTextInput
@@ -590,9 +611,15 @@ const styles = StyleSheet.create({
   previewOwesTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.warning },
   previewOwesSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   receiptRow: { marginBottom: Spacing.md },
-  receiptLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.xs },
-  receiptThumb: { width: '100%', height: 140, borderRadius: Radius.md, backgroundColor: Colors.border },
-  receiptRemove: { fontSize: FontSize.xs, color: Colors.danger, marginTop: 4, textAlign: 'center' },
+  receiptRowHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.xs },
+  receiptLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text },
+  receiptRemove: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: FontWeight.semiBold },
+  receiptThumb: { width: '100%', height: 160, borderRadius: Radius.md, backgroundColor: Colors.border },
+  receiptTapHint: { fontSize: FontSize.xs, color: Colors.textSecondary, textAlign: 'center', marginTop: 4 },
+  receiptModal: { flex: 1, backgroundColor: '#000' },
+  receiptModalClose: { padding: Spacing.md, alignSelf: 'flex-end' },
+  receiptModalCloseText: { color: '#fff', fontSize: FontSize.md, fontWeight: FontWeight.semiBold },
+  receiptFullImage: { flex: 1, width: '100%' },
   readOnlyBanner: {
     backgroundColor: Colors.border,
     borderRadius: Radius.md,
