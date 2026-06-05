@@ -572,7 +572,7 @@ export function CommunitySpotsScreen({ route }: Props) {
           ))}
         </ScrollView>
 
-        {/* Sort + Post */}
+        {/* Sort row */}
         <View style={styles.sortRow}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {(['recommended', 'closest', 'voted', 'saved'] as SortMode[]).map(s => (
@@ -581,8 +581,12 @@ export function CommunitySpotsScreen({ route }: Props) {
               </TouchableOpacity>
             ))}
           </ScrollView>
+        </View>
+
+        {/* Post Spot — full-width so it never overlaps */}
+        <View style={styles.postRow}>
           <TouchableOpacity style={styles.postBtn} onPress={() => navigation.navigate('CreateCommunitySpot', { tripId })}>
-            <Text style={styles.postBtnText}>+ Post Spot</Text>
+            <Text style={styles.postBtnText}>+ Post a Spot</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -736,13 +740,14 @@ const styles = StyleSheet.create({
   filterTabActive: { backgroundColor: Colors.primary },
   filterTabText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
   filterTabTextActive: { color: '#fff', fontWeight: FontWeight.semiBold },
-  sortRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingTop: Spacing.xs },
+  sortRow: { paddingHorizontal: Spacing.sm, paddingTop: Spacing.xs },
+  postRow: { paddingHorizontal: Spacing.sm, paddingTop: Spacing.xs },
   sortChip: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 4, marginRight: Spacing.xs },
   sortChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   sortChipText: { fontSize: FontSize.xs, color: Colors.textSecondary, textTransform: 'capitalize' },
   sortChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
-  postBtn: { marginLeft: 'auto', backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: 6 },
-  postBtnText: { color: '#fff', fontWeight: FontWeight.semiBold, fontSize: FontSize.xs },
+  postBtn: { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: 10, alignItems: 'center' },
+  postBtnText: { color: '#fff', fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
   errorBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.warning + '20', padding: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.warning + '40' },
   errorText: { flex: 1, fontSize: FontSize.xs, color: Colors.warning },
   errorDismiss: { color: Colors.warning, fontWeight: FontWeight.bold, paddingLeft: Spacing.sm },
