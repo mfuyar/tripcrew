@@ -35,7 +35,18 @@ export type PackingStatus = 'unpacked' | 'packed' | 'left_behind';
 
 export type ItineraryType = 'activity' | 'meal' | 'transport' | 'accommodation' | 'free_time' | 'other';
 
-export type CommunitySpotCategory = 'outdoor' | 'food' | 'culture' | 'hidden_gem' | 'other';
+export type CommunitySpotCategory =
+  | 'attraction' | 'park' | 'museum' | 'food' | 'shopping'
+  | 'religious' | 'family' | 'free' | 'indoor' | 'hidden_gem'
+  | 'outdoor' | 'culture' | 'other';
+
+export type SpotSourceType = 'api' | 'member' | 'gemini';
+
+export type SpotPreference =
+  | 'family-friendly' | 'kids' | 'free' | 'nature' | 'parks'
+  | 'museums' | 'historical' | 'indoor' | 'outdoor' | 'rainy-day'
+  | 'food' | 'shopping' | 'religious' | 'halal-friendly'
+  | 'low-walking' | 'hidden-gems';
 export type ModerationStatus = 'approved' | 'pending_review' | 'rejected';
 
 // ─── Core Entities ───────────────────────────────────────────────────────────
@@ -497,12 +508,23 @@ export interface LiveLocation {
 
 export interface CommunitySpot {
   id: string;
-  source?: 'community' | 'gemini';
+  trip_id?: string;
+  // Source
+  source?: 'community' | 'gemini' | 'api';
+  source_type?: SpotSourceType;
+  source_name?: string;       // 'OpenStreetMap', 'Member Suggested', etc.
+  source_url?: string;
+  osm_id?: string;
+  is_verified?: boolean;
+  verification_source?: string;
+  submitted_by_name?: string;
   user_id: string;
+  // Moderation
   moderation_status?: ModerationStatus;
   moderation_reason?: string;
   reviewed_by?: string;
   reviewed_at?: string;
+  // Place data
   name: string;
   category: CommunitySpotCategory;
   description: string;
@@ -510,12 +532,29 @@ export interface CommunitySpot {
   latitude: number;
   longitude: number;
   photo_url?: string;
+  website?: string;
+  opening_hours?: string;
+  tags?: string[];
+  // Ranking
+  why_recommended?: string;
+  priority_score?: number;
+  matched_preferences?: string[];
+  // Distance
+  distance_miles?: number;
+  distance_km?: number;
+  distance_unit?: 'miles' | 'km';
+  // Engagement
   upvotes_count: number;
   comments_count: number;
+  likes_count?: number;
+  saves_count?: number;
+  viewer_has_upvoted?: boolean;
+  viewer_has_liked?: boolean;
+  viewer_has_saved?: boolean;
+  // Timestamps
   created_at: string;
   updated_at: string;
-  distance_miles?: number;
-  viewer_has_upvoted?: boolean;
+  // Joined
   author?: Profile;
   comments?: CommunitySpotComment[];
 }
@@ -598,7 +637,7 @@ export type MainStackParamList = {
   Fairness: { tripId: string };
   Announcements: { tripId: string };
   CommunitySpots: { tripId?: string; startDate?: string } | undefined;
-  CreateCommunitySpot: { tripId?: string } | undefined;
+  CreateCommunitySpot: { tripId?: string; editSpot?: CommunitySpot } | undefined;
   CommunitySpotReview: undefined;
   GlobalAdmin: undefined;
   TripSettings: { tripId: string };

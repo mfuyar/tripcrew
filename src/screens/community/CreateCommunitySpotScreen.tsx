@@ -22,12 +22,27 @@ import { Colors, FontSize, FontWeight, Radius, Spacing } from '../../constants/t
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateCommunitySpot'>;
 
-const CATEGORIES: { value: CommunitySpotCategory; label: string; icon: string }[] = [
-  { value: 'outdoor', label: 'Outdoor', icon: '🌿' },
-  { value: 'food', label: 'Food', icon: '🍽️' },
-  { value: 'culture', label: 'Culture', icon: '🏛️' },
-  { value: 'hidden_gem', label: 'Hidden gem', icon: '✨' },
-  { value: 'other', label: 'Other', icon: '📍' },
+import { CATEGORY_META } from '../../services/placesService';
+
+const CATEGORIES = Object.entries(CATEGORY_META).map(([value, meta]) => ({
+  value: value as CommunitySpotCategory,
+  label: meta.label,
+  icon: meta.icon,
+}));
+
+const SPOT_TAGS = [
+  { id: 'family-friendly', label: '👨‍👩‍👧 Family Friendly' },
+  { id: 'kids', label: '🧒 Kids' },
+  { id: 'free', label: '🆓 Free' },
+  { id: 'outdoor', label: '☀️ Outdoor' },
+  { id: 'indoor', label: '🏠 Indoor' },
+  { id: 'hidden-gem', label: '✨ Hidden Gem' },
+  { id: 'halal-friendly', label: '✅ Halal Friendly*' },
+  { id: 'low-walking', label: '🪑 Low Walking' },
+  { id: 'pet-friendly', label: '🐾 Pet Friendly' },
+  { id: 'wheelchair', label: '♿ Wheelchair Access' },
+  { id: 'historical', label: '🏰 Historical' },
+  { id: 'religious', label: '🕌 Religious' },
 ];
 
 export function CreateCommunitySpotScreen({ navigation }: Props) {
@@ -39,8 +54,14 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [photoUri, setPhotoUri] = useState<string | undefined>();
+  const [website, setWebsite] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  function toggleTag(id: string) {
+    setSelectedTags(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]);
+  }
 
   async function handlePickPhoto() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -131,7 +152,11 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
       latitude: finalLat,
       longitude: finalLng,
       photoUri,
-    });
+      website: website.trim() || undefined,
+      tags: selectedTags,
+      source_type: 'member',
+      source_name: 'Member Suggested',
+    } as any);
     setSaving(false);
     if (error) {
       Alert.alert('Unable to post spot', error);
@@ -209,6 +234,31 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
         </View>
       </View>
 
+      {/* Website */}
+      <Text style={styles.label}>Website <Text style={styles.optional}>(optional)</Text></Text>
+      <TextInput style={styles.input} value={website} onChangeText={setWebsite} placeholder="https://..." placeholderTextColor={Colors.textSecondary} autoCapitalize="none" keyboardType="url" />
+
+      {/* Tags */}
+      <Text style={styles.label}>Tags <Text style={styles.optional}>(select all that apply)</Text></Text>
+      <View style={styles.tagGrid}>
+        {SPOT_TAGS.map(tag => (
+          <TouchableOpacity
+            key={tag.id}
+            style={[styles.tagChip, selectedTags.includes(tag.id) && styles.tagChipActive]}
+            onPress={() => toggleTag(tag.id)}
+          >
+            <Text style={[styles.tagChipText, selectedTags.includes(tag.id) && styles.tagChipTextActive]}>
+              {tag.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {selectedTags.includes('halal-friendly') && (
+        <Text style={styles.disclaimerText}>
+          * Halal-friendly tag will be shown as "Suggested as halal-friendly by a member" — not as verified certification.
+        </Text>
+      )}
+
       <AppButton title="Post Spot" onPress={handleSave} loading={saving} fullWidth style={styles.saveButton} />
     </FormKeyboardView>
   );
@@ -229,6 +279,7 @@ const styles = StyleSheet.create({
   },
   photo: { width: '100%', height: '100%' },
   photoText: { fontSize: FontSize.md, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  optional: { fontWeight: '400', color: Colors.textSecondary },
   label: { fontSize: FontSize.sm, color: Colors.text, fontWeight: FontWeight.semiBold, marginBottom: Spacing.xs },
   input: {
     borderWidth: 1,
@@ -256,4 +307,10 @@ const styles = StyleSheet.create({
   coordRow: { flexDirection: 'row', gap: Spacing.sm },
   coordInput: { flex: 1 },
   saveButton: { marginTop: Spacing.sm },
+  tagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },
+  tagChip: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, backgroundColor: Colors.surface },
+  tagChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  tagChipText: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  tagChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  disclaimerText: { fontSize: FontSize.xs, color: Colors.warning, fontStyle: 'italic', marginBottom: Spacing.md },
 });

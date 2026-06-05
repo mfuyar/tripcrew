@@ -1,28 +1,23 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  RefreshControl,
-  Alert,
-  Image,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Modal,
-  ScrollView,
+  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  RefreshControl, Alert, Image, TextInput, ScrollView,
+  Linking, ActivityIndicator, Platform,
 } from 'react-native';
+import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
-import { CommunitySpot, CommunitySpotCategory, ItineraryType, MainStackParamList } from '../../types';
+import { CommunitySpot, CommunitySpotCategory, ItineraryType, MainStackParamList, SpotPreference } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { communitySpotService } from '../../services/communitySpotService';
+import {
+  fetchNearbyPlaces, mergeAndRankSpots,
+  CATEGORY_META, PREFERENCE_META, RADIUS_OPTIONS_MILES,
+  haversineKm, kmToMiles, milesToKm,
+} from '../../services/placesService';
 import { addressSearchService } from '../../services/addressSearchService';
-import { tripService } from '../../services/tripService';
 import { LoadingView } from '../../components/LoadingView';
 import { AppButton } from '../../components/AppButton';
 import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
@@ -31,1041 +26,717 @@ import { Colors, FontSize, FontWeight, Radius, Shadow, Spacing } from '../../con
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Props = NativeStackScreenProps<MainStackParamList, 'CommunitySpots'>;
 
-type LookupLocation = {
-  latitude: number;
-  longitude: number;
-  label: string;
-  isFallback?: boolean;
-};
+type FilterTab = 'all' | 'api' | 'member' | 'saved' | 'voted' | 'family' | 'free' | 'indoor' | 'hidden';
+type ViewMode = 'list' | 'map';
+type SortMode = 'recommended' | 'closest' | 'voted' | 'saved';
+type DistanceUnit = 'miles' | 'km';
 
-const DEFAULT_RADIUS_MILES = 10;
-const MIN_RADIUS_MILES = 1;
-const MAX_RADIUS_MILES = 100;
-const RADIUS_OPTIONS = [1, 2, 5, 10, 15, 20, 25, 30, 50, 75, 100];
+const FILTER_TABS: { id: FilterTab; label: string }[] = [
+  { id: 'all',    label: 'All' },
+  { id: 'api',    label: 'Nearby' },
+  { id: 'member', label: 'By Members' },
+  { id: 'saved',  label: 'Saved' },
+  { id: 'voted',  label: 'Top Voted' },
+  { id: 'family', label: 'Family' },
+  { id: 'free',   label: 'Free' },
+  { id: 'indoor', label: 'Indoor' },
+  { id: 'hidden', label: 'Hidden Gems' },
+];
 
-function normalizeRadiusMiles(value: string): number {
-  const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed)) return DEFAULT_RADIUS_MILES;
-  return Math.min(MAX_RADIUS_MILES, Math.max(MIN_RADIUS_MILES, parsed));
+function publicName(name?: string): string {
+  return name?.trim().split(/\s+/)[0] || 'Member';
 }
 
-function formatRadiusMiles(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+// ─── Source badge ─────────────────────────────────────────────────────────────
+
+function SourceBadge({ sourceName, sourceType }: { sourceName?: string; sourceType?: string }) {
+  const label = sourceName ?? (sourceType === 'api' ? 'OpenStreetMap' : 'Member');
+  const color = sourceType === 'api' ? Colors.success : Colors.primary;
+  return (
+    <View style={[styles.sourceBadge, { borderColor: color + '60', backgroundColor: color + '15' }]}>
+      <Text style={[styles.sourceBadgeText, { color }]}>{label}</Text>
+    </View>
+  );
 }
 
-const CATEGORY_ICON: Record<CommunitySpotCategory, string> = {
-  outdoor: '🌿',
-  food: '🍽️',
-  culture: '🏛️',
-  hidden_gem: '✨',
-  other: '📍',
-};
+// ─── Spot Card ────────────────────────────────────────────────────────────────
 
-const CATEGORY_LABEL: Record<CommunitySpotCategory, string> = {
-  outdoor: 'Outdoor',
-  food: 'Food',
-  culture: 'Culture',
-  hidden_gem: 'Hidden gem',
-  other: 'Other',
-};
-
-const CATEGORY_TO_ITINERARY_TYPE: Record<CommunitySpotCategory, ItineraryType> = {
-  outdoor: 'activity',
-  food: 'meal',
-  culture: 'activity',
-  hidden_gem: 'activity',
-  other: 'other',
-};
-
-function publicName(fullName?: string): string {
-  const first = fullName?.trim().split(/\s+/)[0];
-  return first || 'Anonymous';
+interface SpotCardProps {
+  spot: CommunitySpot;
+  user: any;
+  canManageTrip: boolean;
+  distanceUnit: DistanceUnit;
+  onVote: (spot: CommunitySpot) => void;
+  onLike: (spot: CommunitySpot) => void;
+  onSave: (spot: CommunitySpot) => void;
+  onComment: (spot: CommunitySpot) => void;
+  onAddToItinerary: (spot: CommunitySpot) => void;
+  onEdit?: (spot: CommunitySpot) => void;
+  onDelete?: (spot: CommunitySpot) => void;
+  tripId?: string;
 }
 
-type ExplorePlaceModalProps = {
-  visible: boolean;
-  initialQuery: string;
-  tripDestination: string;
-  lookingAround: boolean;
-  radiusMiles: number;
-  onRadiusChange: (radius: number) => void;
-  onSearch: (query: string) => void;
-  onClose: () => void;
-};
+function SpotCard({
+  spot, user, canManageTrip, distanceUnit,
+  onVote, onLike, onSave, onComment, onAddToItinerary, onEdit, onDelete, tripId,
+}: SpotCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const cat = CATEGORY_META[spot.category] ?? CATEGORY_META.other;
+  const distVal = distanceUnit === 'km'
+    ? (spot.distance_km ?? 0).toFixed(1)
+    : (spot.distance_miles ?? kmToMiles(spot.distance_km ?? 0)).toFixed(1);
 
-const ExplorePlaceModal = memo(function ExplorePlaceModal({
-  visible,
-  initialQuery,
-  tripDestination,
-  lookingAround,
-  radiusMiles,
-  onRadiusChange,
-  onSearch,
-  onClose,
-}: ExplorePlaceModalProps) {
-  const [query, setQuery] = useState(initialQuery);
-
-  useEffect(() => {
-    if (visible) setQuery(initialQuery);
-  }, [initialQuery, visible]);
+  const canEdit = spot.user_id === user?.id || canManageTrip;
 
   return (
-    <Modal visible={visible} transparent animationType="slide">
-      <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={styles.modalBox}>
-          <Text style={styles.modalTitle}>Explore a Place</Text>
-          <Text style={styles.modalSubtitle}>Search before you arrive. Community posts and AI guide picks will use your selected radius.</Text>
-          {tripDestination ? (
-            <TouchableOpacity
-              style={styles.tripSuggestionCard}
-              onPress={() => setQuery(tripDestination)}
-              disabled={lookingAround}
-            >
-              <Text style={styles.tripSuggestionLabel}>Suggested from trip</Text>
-              <Text style={styles.tripSuggestionText} numberOfLines={2}>{tripDestination}</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TextInput
-            style={styles.modalInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Rosemary Beach, FL or your hotel address"
-            placeholderTextColor={Colors.textSecondary}
-            autoFocus
-            returnKeyType="search"
-            onSubmitEditing={() => onSearch(query)}
-          />
-          <View style={styles.radiusBlock}>
-            <Text style={styles.radiusLabel}>Radius</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.radiusWheel}
-            >
-              {RADIUS_OPTIONS.map((option) => {
-                const selected = radiusMiles === option;
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={[styles.radiusOption, selected && styles.radiusOptionSelected]}
-                    onPress={() => onRadiusChange(normalizeRadiusMiles(String(option)))}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[styles.radiusOptionText, selected && styles.radiusOptionTextSelected]}>
-                      {option}
-                    </Text>
-                    <Text style={[styles.radiusOptionUnit, selected && styles.radiusOptionTextSelected]}>
-                      mi
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+    <View style={styles.card}>
+      {spot.photo_url ? (
+        <Image source={{ uri: spot.photo_url }} style={styles.cardImage} resizeMode="cover" />
+      ) : (
+        <View style={[styles.cardImagePlaceholder, { backgroundColor: Colors.primaryLight }]}>
+          <Text style={styles.cardImageEmoji}>{cat.icon}</Text>
+        </View>
+      )}
+      <View style={styles.cardBody}>
+        {/* Header */}
+        <View style={styles.cardHeaderRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardName} numberOfLines={2}>{spot.name}</Text>
+            <View style={styles.cardMetaRow}>
+              <Text style={styles.catLabel}>{cat.icon} {cat.label}</Text>
+              <Text style={styles.distLabel}>· {distVal} {distanceUnit}</Text>
+            </View>
           </View>
-          <AppButton
-            title={`Search ${formatRadiusMiles(radiusMiles)} Miles`}
-            onPress={() => onSearch(query)}
-            loading={lookingAround}
-            fullWidth
-          />
-          <TouchableOpacity style={styles.modalCancel} onPress={onClose}>
-            <Text style={styles.modalCancelText}>Cancel</Text>
+          <SourceBadge sourceName={spot.source_name} sourceType={spot.source_type} />
+        </View>
+
+        {/* Address */}
+        {spot.address ? <Text style={styles.address} numberOfLines={1}>📍 {spot.address}</Text> : null}
+
+        {/* Description */}
+        {spot.description ? (
+          <Text style={styles.description} numberOfLines={expanded ? undefined : 2}>
+            {spot.description}
+          </Text>
+        ) : null}
+
+        {/* Why recommended */}
+        {spot.why_recommended ? (
+          <Text style={styles.whyText} numberOfLines={expanded ? undefined : 2}>
+            💡 {spot.why_recommended}
+          </Text>
+        ) : null}
+
+        {/* Expand toggle */}
+        {(spot.description?.length ?? 0) > 100 || (spot.why_recommended?.length ?? 0) > 80 ? (
+          <TouchableOpacity onPress={() => setExpanded(e => !e)}>
+            <Text style={styles.expandLink}>{expanded ? 'Show less' : 'Show more'}</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* Extra details (expanded) */}
+        {expanded && (
+          <View style={styles.extraDetails}>
+            {spot.website ? (
+              <TouchableOpacity onPress={() => Linking.openURL(spot.website!)}>
+                <Text style={styles.websiteLink}>🌐 {spot.website}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {spot.opening_hours ? (
+              <Text style={styles.detailRow}>🕐 {spot.opening_hours}</Text>
+            ) : null}
+            {spot.source_type === 'member' && (
+              <Text style={styles.memberClaim}>
+                ⚠️ Member-submitted. Claims are not independently verified.
+              </Text>
+            )}
+            {/* Matched preferences */}
+            {(spot.matched_preferences?.length ?? 0) > 0 && (
+              <View style={styles.prefChips}>
+                {spot.matched_preferences!.map(p => (
+                  <View key={p} style={styles.prefChip}>
+                    <Text style={styles.prefChipText}>{p}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Engagement row */}
+        <View style={styles.engagementRow}>
+          <TouchableOpacity style={styles.engBtn} onPress={() => onVote(spot)}>
+            <Text style={[styles.engBtnText, spot.viewer_has_upvoted && styles.engBtnActive]}>
+              ▲ {spot.upvotes_count}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.engBtn} onPress={() => onLike(spot)}>
+            <Text style={[styles.engBtnText, spot.viewer_has_liked && styles.engBtnActive]}>
+              ♥ {spot.likes_count ?? 0}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.engBtn} onPress={() => onComment(spot)}>
+            <Text style={styles.engBtnText}>💬 {spot.comments_count}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.engBtn} onPress={() => onSave(spot)}>
+            <Text style={[styles.engBtnText, spot.viewer_has_saved && styles.engBtnActive]}>
+              🔖 {spot.viewer_has_saved ? 'Saved' : 'Save'}
+            </Text>
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+
+        {/* Action buttons */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.actionBtn} onPress={() => openAppleMapsDirections(spot.address || `${spot.latitude},${spot.longitude}`)}>
+            <Text style={styles.actionBtnText}>Maps</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionBtn} onPress={() => openGoogleMapsDirections(spot.address || `${spot.latitude},${spot.longitude}`)}>
+            <Text style={styles.actionBtnText}>Google</Text>
+          </TouchableOpacity>
+          {tripId ? (
+            <TouchableOpacity style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={() => onAddToItinerary(spot)}>
+              <Text style={styles.actionBtnPrimaryText}>+ Itinerary</Text>
+            </TouchableOpacity>
+          ) : null}
+          {canEdit && onEdit ? (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => onEdit(spot)}>
+              <Text style={styles.actionBtnText}>Edit</Text>
+            </TouchableOpacity>
+          ) : null}
+          {(canManageTrip || spot.user_id === user?.id) && onDelete ? (
+            <TouchableOpacity style={[styles.actionBtn, styles.actionBtnDanger]} onPress={() => onDelete(spot)}>
+              <Text style={styles.actionBtnDangerText}>Delete</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+    </View>
   );
-});
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export function CommunitySpotsScreen({ route }: Props) {
   const navigation = useNavigation<Nav>();
   const { tripId, startDate } = route.params ?? {};
-  const { user, isGlobalAdmin } = useAuth();
-  const { currentTrip, canManageTrip, isTripOrganizer } = useTripContext();
+  const { user } = useAuth();
+  const { currentTrip, canManageTrip } = useTripContext();
+
+  // Spots state
   const [spots, setSpots] = useState<CommunitySpot[]>([]);
-  const [guideSummary, setGuideSummary] = useState('');
-  const [showingGemini, setShowingGemini] = useState(false);
+  const [memberSpots, setMemberSpots] = useState<CommunitySpot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lookingAround, setLookingAround] = useState(false);
-  const [selectedLocation, setSelectedLocation] = useState<LookupLocation | null>(null);
-  const [manualLocationVisible, setManualLocationVisible] = useState(false);
-  const [manualLocationInitialQuery, setManualLocationInitialQuery] = useState('');
-  const [radiusMiles, setRadiusMiles] = useState(DEFAULT_RADIUS_MILES);
-  const [tripDestinationOverride, setTripDestinationOverride] = useState('');
+
+  // UI state
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+  const [sortMode, setSortMode] = useState<SortMode>('recommended');
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('miles');
+
+  // Search config
+  const [radius, setRadius] = useState(10);
+  const [preferences, setPreferences] = useState<SpotPreference[]>([]);
+  const [searchLocation, setSearchLocation] = useState<{ lat: number; lon: number; label: string } | null>(null);
+  const [showPrefs, setShowPrefs] = useState(false);
+  const [showRadiusPicker, setShowRadiusPicker] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  // Comment state
   const [commentText, setCommentText] = useState<Record<string, string>>({});
   const [commenting, setCommenting] = useState<string | null>(null);
-  // commentId → draft text while editing
-  const [editingComment, setEditingComment] = useState<Record<string, string>>({});
-  const [savingComment, setSavingComment] = useState<string | null>(null);
-  // spotId → true when that spot is in edit mode
-  const [editingSpot, setEditingSpot] = useState<string | null>(null);
-  const [spotEditDraft, setSpotEditDraft] = useState<Partial<CommunitySpot>>({});
-  const [savingSpot, setSavingSpot] = useState(false);
-  const contextTripDestination =
-    (!tripId || currentTrip?.id === tripId) ? currentTrip?.destination?.trim() : undefined;
-  const tripDestination = contextTripDestination || tripDestinationOverride;
 
-  const loadRecent = useCallback(async () => {
-    const { data, error } = await communitySpotService.getRecent(user?.id);
-    if (error) Alert.alert('Unable to load spots', error);
-    setSpots(data ?? []);
-    setGuideSummary('');
-    setShowingGemini(false);
-    setLoading(false);
-    setRefreshing(false);
-  }, [user?.id]);
+  // Map state
+  const mapRef = useRef<MapView>(null);
 
-  const loadTripDestination = useCallback(async () => {
-    if (!tripId || contextTripDestination) {
-      setTripDestinationOverride('');
-      return;
-    }
-    const { data } = await tripService.getTripById(tripId);
-    setTripDestinationOverride(data?.destination?.trim() ?? '');
-  }, [tripId, contextTripDestination]);
+  // ─── Load member spots ──────────────────────────────────────────────────────
+
+  const loadMemberSpots = useCallback(async () => {
+    const { data } = await communitySpotService.getRecent(user?.id);
+    const spots = (data ?? []).map(s => ({
+      ...s,
+      source_type: (s.source === 'gemini' ? 'gemini' : 'member') as any,
+      source_name: s.source === 'gemini' ? 'Gemini' : 'Member Suggested',
+      distance_km: searchLocation
+        ? haversineKm(searchLocation.lat, searchLocation.lon, s.latitude, s.longitude)
+        : undefined,
+    }));
+    setMemberSpots(spots);
+    return spots;
+  }, [user?.id, searchLocation]);
 
   useFocusEffect(useCallback(() => {
-    loadRecent();
-    loadTripDestination();
-  }, [loadRecent, loadTripDestination]));
+    loadMemberSpots().finally(() => setLoading(false));
+  }, [loadMemberSpots]));
 
-  async function resolveTripDestination(): Promise<string | null> {
-    if (tripDestination) return tripDestination;
-    if (!tripId) return null;
-    const { data } = await tripService.getTripById(tripId);
-    const destination = data?.destination?.trim();
-    if (destination) {
-      setTripDestinationOverride(destination);
-      return destination;
-    }
-    return null;
-  }
+  // ─── Resolve location ───────────────────────────────────────────────────────
 
-  async function getTripDestinationFallback(): Promise<LookupLocation | null> {
-    const destination = await resolveTripDestination();
-    if (!destination) return null;
-
-    const { data } = await addressSearchService.search(destination, 1);
-    const match = data?.[0];
-    if (!match) return null;
-
-    return {
-      latitude: match.latitude,
-      longitude: match.longitude,
-      label: match.label || destination,
-    };
-  }
-
-  function openManualLocation(initialQuery = '') {
-    setManualLocationInitialQuery(initialQuery);
-    setManualLocationVisible(true);
-  }
-
-  async function getDeviceLocation(): Promise<LookupLocation | null> {
-    const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => true);
-    if (servicesEnabled) {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status === 'granted') {
+  async function resolveLocation(): Promise<{ lat: number; lon: number; label: string } | null> {
+    // 1. Try current GPS
+    const enabled = await Location.hasServicesEnabledAsync().catch(() => false);
+    if (enabled) {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status === 'granted') {
         try {
-          const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          return {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            label: 'your current location',
-            isFallback: false,
-          };
-        } catch {
-          const lastKnown = await Location.getLastKnownPositionAsync({
-            maxAge: 15 * 60 * 1000,
-            requiredAccuracy: 5000,
-          }).catch(() => null);
-          if (lastKnown) {
-            return {
-              latitude: lastKnown.coords.latitude,
-              longitude: lastKnown.coords.longitude,
-              label: 'your last known location',
-              isFallback: true,
-            };
-          }
-        }
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          return { lat: pos.coords.latitude, lon: pos.coords.longitude, label: 'your location' };
+        } catch {}
       }
     }
-
+    // 2. Trip destination fallback
+    const dest = currentTrip?.destination?.trim();
+    if (dest) {
+      const { data } = await addressSearchService.search(dest, 1);
+      const match = data?.[0];
+      if (match) return { lat: match.latitude, lon: match.longitude, label: dest };
+    }
     return null;
   }
 
-  async function getLookAroundLocation(): Promise<LookupLocation | null> {
-    const deviceLocation = await getDeviceLocation();
-    if (deviceLocation) return deviceLocation;
+  // ─── Search nearby ──────────────────────────────────────────────────────────
 
-    const fallback = await getTripDestinationFallback();
-    if (!fallback) return null;
-    return { ...fallback, isFallback: true };
-  }
+  async function handleSearch(forceRefresh = false) {
+    setSearching(true);
+    setLastError(null);
 
-  async function runExplore(
-    lookupLocation: LookupLocation,
-    options: { includeCommunity: boolean; includeGemini: boolean }
-  ) {
-    setLookingAround(true);
-    setSelectedLocation(lookupLocation);
-    const { latitude, longitude } = lookupLocation;
-    const searchRadius = radiusMiles;
-
-    const [community, gemini] = await Promise.all([
-      options.includeCommunity
-        ? communitySpotService.getNearby(latitude, longitude, searchRadius, user?.id)
-        : Promise.resolve({ data: [] as CommunitySpot[], error: null }),
-      options.includeGemini
-        ? communitySpotService.getGeminiFavorites(latitude, longitude, searchRadius, lookupLocation.label)
-        : Promise.resolve({ data: [] as CommunitySpot[], error: null }),
-    ]);
-
-    if (community.error) {
-      setLookingAround(false);
-      Alert.alert('Unable to look around', community.error);
+    const loc = searchLocation ?? await resolveLocation();
+    if (!loc) {
+      setSearching(false);
+      Alert.alert('Location unavailable', 'Enable location services or set a trip destination.');
       return;
     }
+    setSearchLocation(loc);
 
-    const communitySpots = community.data ?? [];
-    const geminiSpots = gemini.data ?? [];
-    const merged = [...communitySpots, ...geminiSpots];
-    const geminiError = options.includeGemini ? gemini.error : null;
-    const radiusLabel = formatRadiusMiles(searchRadius);
-    const summaryLines = [
-      lookupLocation.isFallback ? `Using ${lookupLocation.label} because live location was unavailable.` : null,
-      options.includeCommunity ? `${communitySpots.length} community spot${communitySpots.length === 1 ? '' : 's'} within ${radiusLabel} miles.` : null,
-      options.includeGemini
-        ? geminiSpots.length > 0
-          ? `${geminiSpots.length} AI travel-guide pick${geminiSpots.length === 1 ? '' : 's'} within about ${radiusLabel} miles.`
-          : `AI travel-guide picks could not load${geminiError ? `: ${geminiError}` : '.'}`
-        : null,
-      communitySpotService.summarizeNearbySpots(merged),
-    ].filter(Boolean);
+    const { spots: apiSpots, error } = await fetchNearbyPlaces({
+      lat: loc.lat, lon: loc.lon, radiusMiles: radius,
+      preferences, distanceUnit, forceRefresh,
+    });
 
-    setLookingAround(false);
+    if (error) setLastError(error);
+
+    const members = await loadMemberSpots();
+    // Attach distance to member spots
+    const membersWithDist = members.map(s => ({
+      ...s,
+      distance_km: haversineKm(loc.lat, loc.lon, s.latitude, s.longitude),
+      distance_miles: kmToMiles(haversineKm(loc.lat, loc.lon, s.latitude, s.longitude)),
+    }));
+
+    const merged = mergeAndRankSpots(apiSpots, membersWithDist, preferences, distanceUnit);
     setSpots(merged);
-    setShowingGemini(geminiSpots.length > 0);
-    setGuideSummary(`Around ${lookupLocation.label}\n${summaryLines.join('\n')}`);
+    setSearching(false);
+
+    // Pan map to location
+    if (viewMode === 'map') {
+      mapRef.current?.animateToRegion({
+        latitude: loc.lat, longitude: loc.lon,
+        latitudeDelta: 0.05, longitudeDelta: 0.05,
+      });
+    }
   }
 
-  async function handleLookAround() {
-    const lookupLocation = await getLookAroundLocation();
-    if (!lookupLocation) {
-      Alert.alert(
-        'Location unavailable',
-        'Turn on Location Services, set a Simulator location, choose a place, or add a trip destination so Travel Crew can search around that area.'
-      );
-      return;
+  // ─── Filtering & sorting ────────────────────────────────────────────────────
+
+  function applyFilter(s: CommunitySpot): boolean {
+    switch (activeFilter) {
+      case 'api':     return s.source_type === 'api';
+      case 'member':  return s.source_type === 'member';
+      case 'saved':   return s.viewer_has_saved === true;
+      case 'voted':   return (s.upvotes_count ?? 0) > 0;
+      case 'family':  return ['park', 'family', 'attraction', 'museum'].includes(s.category);
+      case 'free':    return ['park', 'religious', 'outdoor', 'hidden_gem', 'free'].includes(s.category);
+      case 'indoor':  return ['museum', 'shopping', 'indoor', 'food'].includes(s.category);
+      case 'hidden':  return s.category === 'hidden_gem';
+      default:        return true;
     }
-    await runExplore(lookupLocation, { includeCommunity: true, includeGemini: true });
   }
 
-  async function handleTravelLocation() {
-    const lookupLocation = await getTripDestinationFallback();
-    if (!lookupLocation) {
-      const destination = await resolveTripDestination();
-      if (destination) {
-        openManualLocation(destination);
-        Alert.alert(
-          'Trip address needs search',
-          'I put the trip destination in the search box. Edit it if needed, choose the radius, then search.'
-        );
-      } else {
-        openManualLocation();
-        Alert.alert('Trip location needed', 'Add a trip destination or choose a place to explore before you arrive.');
-      }
-      return;
+  function applySort(a: CommunitySpot, b: CommunitySpot): number {
+    switch (sortMode) {
+      case 'closest': return (a.distance_km ?? 99) - (b.distance_km ?? 99);
+      case 'voted':   return (b.upvotes_count ?? 0) - (a.upvotes_count ?? 0);
+      case 'saved':   return (b.saves_count ?? 0) - (a.saves_count ?? 0);
+      default:        return (b.priority_score ?? 0) - (a.priority_score ?? 0);
     }
-    await runExplore(lookupLocation, { includeCommunity: true, includeGemini: true });
   }
 
-  async function handleGeminiPicks() {
-    const lookupLocation = selectedLocation ?? await getTripDestinationFallback() ?? await getLookAroundLocation();
-    if (!lookupLocation) {
-      openManualLocation();
-      return;
-    }
-    await runExplore(lookupLocation, { includeCommunity: false, includeGemini: true });
-  }
+  const displaySpots = spots.length > 0
+    ? spots.filter(applyFilter).sort(applySort)
+    : memberSpots.filter(applyFilter).sort(applySort);
 
-  async function handleManualLocationSearch(searchText: string) {
-    const query = searchText.trim();
-    if (query.length < 3) {
-      Alert.alert('Choose Location', 'Type a city, beach, attraction, hotel, or address.');
-      return;
-    }
-    setLookingAround(true);
-    const { data, error } = await addressSearchService.search(query, 1);
-    setLookingAround(false);
-    if (error) {
-      Alert.alert('Location search failed', error);
-      return;
-    }
-    const match = data?.[0];
-    if (!match) {
-      const deviceLocation = await getDeviceLocation();
-      if (!deviceLocation) {
-        Alert.alert(
-          'That does not look like a location',
-          'Type a real city, landmark, hotel, or address. Location access is unavailable, so I could not show spots around you.'
-        );
-        return;
-      }
-      setManualLocationVisible(false);
-      Alert.alert('That does not look like a location', 'Showing spots around your current location instead.');
-      await runExplore(deviceLocation, { includeCommunity: true, includeGemini: true });
-      return;
-    }
-    setManualLocationVisible(false);
-    await runExplore(
-      { latitude: match.latitude, longitude: match.longitude, label: match.label || query },
-      { includeCommunity: true, includeGemini: true }
-    );
-  }
+  // ─── Actions ────────────────────────────────────────────────────────────────
 
-  async function handleToggleUpvote(spot: CommunitySpot) {
-    if (!user) return;
-    if (spot.source === 'gemini') {
-      Alert.alert('Suggested place', 'Gemini suggestions cannot be upvoted yet. Post it as a community spot if you want others to vote on it.');
+  async function handleVote(spot: CommunitySpot) {
+    if (!user || spot.source_type === 'api') {
+      if (spot.source_type === 'api') Alert.alert('Suggested place', 'Save this spot first to vote on it.');
       return;
     }
     const { data, error } = await communitySpotService.toggleUpvote(spot.id, user.id);
-    if (error) {
-      Alert.alert('Unable to vote', error);
-      return;
-    }
-    setSpots((prev) => prev.map((item) => (
-      item.id === spot.id
-        ? { ...item, ...data, viewer_has_upvoted: !(spot.viewer_has_upvoted ?? false) }
-        : item
-    )));
+    if (error) { Alert.alert('Error', error); return; }
+    updateSpot(spot.id, { upvotes_count: data?.upvotes_count ?? spot.upvotes_count, viewer_has_upvoted: !spot.viewer_has_upvoted });
   }
 
-  async function handleAddComment(spot: CommunitySpot) {
+  async function handleLike(spot: CommunitySpot) {
+    if (!user || spot.source_type === 'api') return;
+    updateSpot(spot.id, { viewer_has_liked: !spot.viewer_has_liked, likes_count: (spot.likes_count ?? 0) + (spot.viewer_has_liked ? -1 : 1) });
+    // DB like toggle would go here
+  }
+
+  async function handleSave(spot: CommunitySpot) {
     if (!user) return;
-    if (spot.source === 'gemini') {
-      Alert.alert('Suggested place', 'Comments are for community posts. Post this place as a spot first.');
+    updateSpot(spot.id, { viewer_has_saved: !spot.viewer_has_saved, saves_count: (spot.saves_count ?? 0) + (spot.viewer_has_saved ? -1 : 1) });
+  }
+
+  async function handleComment(spot: CommunitySpot) {
+    if (!user || spot.source_type === 'api') {
+      if (spot.source_type === 'api') Alert.alert('Suggested place', 'Post this spot to comment on it.');
       return;
     }
     const content = commentText[spot.id]?.trim();
     if (!content) return;
-
     setCommenting(spot.id);
     const { data, error } = await communitySpotService.addComment(spot.id, user.id, content);
     setCommenting(null);
-    if (error) {
-      Alert.alert('Unable to comment', error);
-      return;
-    }
-    setCommentText((prev) => ({ ...prev, [spot.id]: '' }));
-    setSpots((prev) => prev.map((item) => (
-      item.id === spot.id
-        ? {
-            ...item,
-            comments_count: item.comments_count + 1,
-            comments: [data!, ...(item.comments ?? [])],
-          }
-        : item
-    )));
+    if (error) { Alert.alert('Error', error); return; }
+    setCommentText(prev => ({ ...prev, [spot.id]: '' }));
+    updateSpot(spot.id, { comments_count: spot.comments_count + 1, comments: [data!, ...(spot.comments ?? [])] });
   }
 
-  async function handleSaveEditComment(spotId: string, commentId: string) {
-    const draft = editingComment[commentId]?.trim();
-    if (!draft) return;
-    setSavingComment(commentId);
-    const { data, error } = await communitySpotService.updateComment(commentId, draft);
-    setSavingComment(null);
-    if (error) { Alert.alert('Unable to update comment', error); return; }
-    setEditingComment((prev) => { const next = { ...prev }; delete next[commentId]; return next; });
-    setSpots((prev) => prev.map((item) =>
-      item.id !== spotId ? item : {
-        ...item,
-        comments: (item.comments ?? []).map((c) => c.id === commentId ? data! : c),
-      }
-    ));
+  async function handleAddToItinerary(spot: CommunitySpot) {
+    if (!tripId) return;
+    navigation.navigate('AddEditItineraryItem', {
+      tripId,
+      prefill: {
+        title: spot.name,
+        location: spot.address || `${spot.latitude},${spot.longitude}`,
+        notes: spot.description,
+        itemType: spot.category === 'food' ? 'meal' : 'activity',
+        startDate: startDate,
+      },
+    });
   }
 
-  async function handleDeleteSpot(spotId: string) {
-    Alert.alert('Delete Spot', 'Remove this community spot permanently?', [
+  async function handleDeleteSpot(spot: CommunitySpot) {
+    Alert.alert('Delete Spot', `Remove "${spot.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete',
-        style: 'destructive',
+        text: 'Delete', style: 'destructive',
         onPress: async () => {
-          const { error } = await communitySpotService.deleteSpot(spotId);
-          if (error) { Alert.alert('Error', error); return; }
-          setSpots((prev) => prev.filter((s) => s.id !== spotId));
+          const { error } = await communitySpotService.deleteSpot(spot.id);
+          if (error) Alert.alert('Error', error);
+          else setSpots(prev => prev.filter(s => s.id !== spot.id));
         },
       },
     ]);
   }
 
-  async function handleSaveSpotEdit(spotId: string) {
-    const draft = spotEditDraft;
-    if (!draft.name?.trim() || !draft.description?.trim()) {
-      Alert.alert('Required', 'Name and description are required.');
-      return;
-    }
-    setSavingSpot(true);
-    const { data, error } = await communitySpotService.updateSpot(spotId, {
-      name: draft.name.trim(),
-      category: (draft.category ?? 'other') as CommunitySpot['category'],
-      description: draft.description.trim(),
-      address: draft.address?.trim(),
-    });
-    setSavingSpot(false);
-    if (error) { Alert.alert('Error', error); return; }
-    setEditingSpot(null);
-    setSpots((prev) => prev.map((s) => s.id === spotId ? { ...s, ...data } : s));
+  function updateSpot(id: string, updates: Partial<CommunitySpot>) {
+    setSpots(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+    setMemberSpots(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
   }
 
-  function handleAddToItinerary(spot: CommunitySpot) {
-    if (!tripId) return;
-    const location = spot.address || `${spot.latitude.toFixed(5)}, ${spot.longitude.toFixed(5)}`;
-    navigation.navigate('AddEditItineraryItem', {
-      tripId,
-      prefill: {
-        title: spot.name,
-        itemType: CATEGORY_TO_ITINERARY_TYPE[spot.category],
-        location,
-        startDate,
-        notes: spot.source === 'gemini'
-          ? `${spot.description}\n\nSuggested by Gemini local guide.`
-          : spot.description,
-      },
-    });
+  function togglePreference(pref: SpotPreference) {
+    setPreferences(prev =>
+      prev.includes(pref) ? prev.filter(p => p !== pref) : [...prev, pref]
+    );
   }
+
+  // ─── Map region ─────────────────────────────────────────────────────────────
+
+  const mapRegion: Region | undefined = searchLocation ? {
+    latitude: searchLocation.lat,
+    longitude: searchLocation.lon,
+    latitudeDelta: milesToKm(radius) / 55,
+    longitudeDelta: milesToKm(radius) / 55,
+  } : undefined;
+
+  // ─── Category color for map pins ─────────────────────────────────────────────
+
+  const CAT_COLORS: Record<string, string> = {
+    attraction: '#FF6B35', park: '#4CAF50', museum: '#9C27B0',
+    food: '#FF9800', shopping: '#2196F3', religious: '#795548',
+    family: '#E91E63', free: '#00BCD4', indoor: '#607D8B',
+    hidden_gem: '#FFD700', outdoor: '#8BC34A', culture: '#673AB7', other: '#9E9E9E',
+  };
 
   if (loading) return <LoadingView />;
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={96}>
     <View style={styles.container}>
-      <View style={styles.actions}>
-        <AppButton
-          title="Current Location"
-          onPress={handleLookAround}
-          loading={lookingAround}
-          style={styles.actionButton}
-        />
-        <AppButton
-          title="Post Spot"
-          onPress={() => navigation.navigate('CreateCommunitySpot', { tripId })}
-          variant="outline"
-          style={styles.actionButton}
-        />
-      </View>
-      <View style={styles.secondaryActions}>
-        {tripDestination ? (
-          <TouchableOpacity style={[styles.secondaryButton, styles.tripSuggestionButton]} onPress={handleTravelLocation} disabled={lookingAround}>
-            <Text style={styles.secondaryButtonText} numberOfLines={1}>Trip: {tripDestination}</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleTravelLocation} disabled={lookingAround}>
-            <Text style={styles.secondaryButtonText}>Trip Location</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => openManualLocation()} disabled={lookingAround}>
-          <Text style={styles.secondaryButtonText}>Choose Place</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.secondaryButton, styles.aiButton]} onPress={handleGeminiPicks} disabled={lookingAround}>
-          <Text style={[styles.secondaryButtonText, styles.aiButtonText]}>AI Guide Picks</Text>
-        </TouchableOpacity>
-      </View>
-
-      <FlatList
-        data={spots}
-        keyExtractor={(item) => item.id}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadRecent(); }} tintColor={Colors.primary} />
-        }
-        contentContainerStyle={styles.content}
-        ListHeaderComponent={guideSummary ? (
-          <View style={styles.guideBox}>
-            <Text style={styles.guideTitle}>{showingGemini ? 'Gemini local guide' : 'Local guide'}</Text>
-            <Text style={styles.guideText}>{guideSummary}</Text>
-          </View>
-        ) : null}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📍</Text>
-            <Text style={styles.emptyTitle}>No community spots yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Find nearby favorites with Gemini or share the first local spot for other travelers.
+      {/* ── Top controls ── */}
+      <View style={styles.controls}>
+        {/* Row 1: search + radius + unit */}
+        <View style={styles.controlRow}>
+          <TouchableOpacity style={styles.searchBtn} onPress={() => handleSearch()}>
+            <Text style={styles.searchBtnText}>
+              {searching ? '⏳ Searching...' : '🔍 Look Around Me'}
             </Text>
-            <View style={styles.emptyActions}>
-              <AppButton
-                title="Find around trip/current location"
-                onPress={handleLookAround}
-                loading={lookingAround}
-                style={styles.emptyButton}
-              />
-              <AppButton
-                title="Choose another place"
-                onPress={() => openManualLocation()}
-                variant="outline"
-                style={styles.emptyButton}
-              />
-              <AppButton
-                title="Post Spot"
-                onPress={() => navigation.navigate('CreateCommunitySpot', { tripId })}
-                variant="outline"
-                style={styles.emptyButton}
-              />
-            </View>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            {item.photo_url ? <Image source={{ uri: item.photo_url }} style={styles.photo} /> : null}
-            <View style={styles.cardBody}>
-              <View style={styles.spotHeader}>
-                <View style={styles.spotTitleWrap}>
-                  <Text style={styles.spotName}>{item.name}</Text>
-                  <Text style={styles.category}>
-                    {CATEGORY_ICON[item.category]} {CATEGORY_LABEL[item.category]}
-                    {item.distance_miles != null ? ` • ${item.distance_miles.toFixed(1)} mi` : ''}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={[styles.voteButton, item.viewer_has_upvoted && styles.voteButtonActive]}
-                  onPress={() => handleToggleUpvote(item)}
-                >
-                  <Text style={[styles.voteText, item.viewer_has_upvoted && styles.voteTextActive]}>
-                    ▲ {item.upvotes_count}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              {(item.address || (item.latitude && item.longitude)) ? (
-                <View style={styles.directionsRow}>
-                  <Text style={styles.address} numberOfLines={1}>
-                    📍 {item.address || `${item.latitude?.toFixed(4)}, ${item.longitude?.toFixed(4)}`}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.dirBtn}
-                    onPress={() => openAppleMapsDirections(item.address || `${item.latitude},${item.longitude}`)}
-                  >
-                    <Text style={styles.dirBtnText}>Maps</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.dirBtn, styles.dirBtnGoogle]}
-                    onPress={() => openGoogleMapsDirections(item.address || `${item.latitude},${item.longitude}`)}
-                  >
-                    <Text style={styles.dirBtnText}>Google</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-              <Text style={styles.description}>{item.description}</Text>
-              <Text style={styles.meta}>
-                {item.source === 'gemini'
-                  ? 'Suggested by Gemini'
-                  : `By ${publicName(item.author?.full_name)} • ${item.comments_count} comment${item.comments_count === 1 ? '' : 's'}`}
+            {searchLocation && <Text style={styles.searchBtnSub} numberOfLines={1}>{searchLocation.label}</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.radiusBtn} onPress={() => setShowRadiusPicker(v => !v)}>
+            <Text style={styles.radiusBtnText}>{radius} mi</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.unitBtn} onPress={() => setDistanceUnit(u => u === 'miles' ? 'km' : 'miles')}>
+            <Text style={styles.unitBtnText}>{distanceUnit}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.viewToggle, viewMode === 'map' && styles.viewToggleActive]} onPress={() => setViewMode(v => v === 'list' ? 'map' : 'list')}>
+            <Text style={styles.viewToggleText}>{viewMode === 'list' ? '🗺️' : '📋'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Radius picker */}
+        {showRadiusPicker && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.radiusPicker}>
+            {RADIUS_OPTIONS_MILES.map(r => (
+              <TouchableOpacity key={r} style={[styles.radiusChip, radius === r && styles.radiusChipActive]} onPress={() => { setRadius(r); setShowRadiusPicker(false); }}>
+                <Text style={[styles.radiusChipText, radius === r && styles.radiusChipTextActive]}>{r} mi</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* Preference chips */}
+        <TouchableOpacity style={styles.prefToggle} onPress={() => setShowPrefs(v => !v)}>
+          <Text style={styles.prefToggleText}>
+            {showPrefs ? '▲' : '▾'} Preferences{preferences.length > 0 ? ` (${preferences.length})` : ''}
+          </Text>
+        </TouchableOpacity>
+        {showPrefs && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.prefRow}>
+            {PREFERENCE_META.map(p => (
+              <TouchableOpacity
+                key={p.id}
+                style={[styles.prefChipLarge, preferences.includes(p.id) && styles.prefChipLargeActive]}
+                onPress={() => togglePreference(p.id)}
+              >
+                <Text style={[styles.prefChipLargeText, preferences.includes(p.id) && styles.prefChipLargeTextActive]}>
+                  {p.icon} {p.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* Filter tabs */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterTabs}>
+          {FILTER_TABS.map(tab => (
+            <TouchableOpacity key={tab.id} style={[styles.filterTab, activeFilter === tab.id && styles.filterTabActive]} onPress={() => setActiveFilter(tab.id)}>
+              <Text style={[styles.filterTabText, activeFilter === tab.id && styles.filterTabTextActive]}>{tab.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Sort + Post */}
+        <View style={styles.sortRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {(['recommended', 'closest', 'voted', 'saved'] as SortMode[]).map(s => (
+              <TouchableOpacity key={s} style={[styles.sortChip, sortMode === s && styles.sortChipActive]} onPress={() => setSortMode(s)}>
+                <Text style={[styles.sortChipText, sortMode === s && styles.sortChipTextActive]}>{s}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <TouchableOpacity style={styles.postBtn} onPress={() => navigation.navigate('CreateCommunitySpot', { tripId })}>
+            <Text style={styles.postBtnText}>+ Post Spot</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Error */}
+      {lastError && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>⚠️ {lastError}</Text>
+          <TouchableOpacity onPress={() => setLastError(null)}><Text style={styles.errorDismiss}>✕</Text></TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Map view ── */}
+      {viewMode === 'map' && mapRegion ? (
+        <MapView ref={mapRef} style={styles.map} region={mapRegion} showsUserLocation>
+          {displaySpots.map(spot => (
+            <Marker
+              key={spot.id}
+              coordinate={{ latitude: spot.latitude, longitude: spot.longitude }}
+              title={spot.name}
+              description={spot.address || spot.category}
+              pinColor={CAT_COLORS[spot.category] ?? '#9E9E9E'}
+            />
+          ))}
+        </MapView>
+      ) : (
+        /* ── List view ── */
+        <FlatList
+          data={displaySpots}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); handleSearch(true).finally(() => setRefreshing(false)); }} tintColor={Colors.primary} />}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>🗺️</Text>
+              <Text style={styles.emptyTitle}>
+                {searching ? 'Searching for nearby places...' : 'No spots found'}
               </Text>
-
-              {/* Spot owner / organizer / global admin actions */}
-              {item.source !== 'gemini' && (item.user_id === user?.id || isTripOrganizer || isGlobalAdmin) && (
-                editingSpot === item.id ? (
-                  <View style={styles.spotEditBox}>
-                    <TextInput
-                      style={styles.spotEditInput}
-                      value={spotEditDraft.name ?? ''}
-                      onChangeText={(v) => setSpotEditDraft((d) => ({ ...d, name: v }))}
-                      placeholder="Name"
-                      placeholderTextColor={Colors.textSecondary}
-                    />
-                    <TextInput
-                      style={[styles.spotEditInput, { minHeight: 64, textAlignVertical: 'top' }]}
-                      value={spotEditDraft.description ?? ''}
-                      onChangeText={(v) => setSpotEditDraft((d) => ({ ...d, description: v }))}
-                      placeholder="Description"
-                      placeholderTextColor={Colors.textSecondary}
-                      multiline
-                    />
-                    <TextInput
-                      style={styles.spotEditInput}
-                      value={spotEditDraft.address ?? ''}
-                      onChangeText={(v) => setSpotEditDraft((d) => ({ ...d, address: v }))}
-                      placeholder="Address (optional)"
-                      placeholderTextColor={Colors.textSecondary}
-                    />
-                    <View style={styles.spotEditActions}>
-                      <TouchableOpacity
-                        style={[styles.spotSaveBtn, savingSpot && styles.commentButtonDisabled]}
-                        onPress={() => handleSaveSpotEdit(item.id)}
-                        disabled={savingSpot}
-                      >
-                        <Text style={styles.spotSaveBtnText}>{savingSpot ? 'Saving…' : 'Save'}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.commentCancelBtn}
-                        onPress={() => setEditingSpot(null)}
-                      >
-                        <Text style={styles.commentCancelText}>✕</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.spotOwnerActions}>
-                    {/* Poster or global admin can edit */}
-                    {(item.user_id === user?.id || isGlobalAdmin) && (
-                      <TouchableOpacity
-                        hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-                        onPress={() => {
-                          setSpotEditDraft({ name: item.name, description: item.description, category: item.category, address: item.address });
-                          setEditingSpot(item.id);
-                        }}
-                      >
-                        <Text style={styles.commentEditLink}>Edit</Text>
-                      </TouchableOpacity>
-                    )}
-                    {/* Poster OR organizer can delete */}
-                    <TouchableOpacity
-                      hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-                      onPress={() => handleDeleteSpot(item.id)}
-                    >
-                      <Text style={styles.spotDeleteLink}>Delete</Text>
-                    </TouchableOpacity>
-                  </View>
-                )
+              <Text style={styles.emptySub}>
+                {searching
+                  ? 'Fetching real places from OpenStreetMap...'
+                  : spots.length === 0
+                    ? 'Tap "Look Around Me" to discover nearby attractions, parks, museums, restaurants and more.'
+                    : 'Try a different filter or increase the radius.'}
+              </Text>
+              {!searching && spots.length === 0 && (
+                <AppButton title="Search Nearby" onPress={() => handleSearch()} style={styles.emptyBtn} />
               )}
-
-              {tripId ? (
-                <AppButton
-                  title="Add to Itinerary"
-                  onPress={() => handleAddToItinerary(item)}
-                  variant="outline"
-                  style={styles.itineraryButton}
-                />
-              ) : null}
-
-              {item.source !== 'gemini' && (item.comments ?? []).slice(0, 2).map((comment) => {
-                const isEditing = comment.id in editingComment;
-                const canEdit = comment.user_id === user?.id || canManageTrip || isGlobalAdmin;
-                return (
-                  <View key={comment.id} style={styles.comment}>
-                    <View style={styles.commentHeader}>
-                      <Text style={styles.commentAuthor}>{publicName(comment.author?.full_name)}</Text>
-                      {canEdit && !isEditing && (
-                        <TouchableOpacity
-                          hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
-                          onPress={() => setEditingComment((prev) => ({ ...prev, [comment.id]: comment.content }))}
-                        >
-                          <Text style={styles.commentEditLink}>Edit</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    {isEditing ? (
-                      <View style={styles.commentRow}>
-                        <TextInput
-                          style={[styles.commentInput, { flex: 1 }]}
-                          value={editingComment[comment.id]}
-                          onChangeText={(v) => setEditingComment((prev) => ({ ...prev, [comment.id]: v }))}
-                          autoFocus
-                          multiline
-                        />
-                        <TouchableOpacity
-                          style={[styles.commentButton, savingComment === comment.id && styles.commentButtonDisabled]}
-                          onPress={() => handleSaveEditComment(item.id, comment.id)}
-                          disabled={savingComment === comment.id}
-                        >
-                          <Text style={styles.commentButtonText}>{savingComment === comment.id ? '...' : 'Save'}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.commentCancelBtn}
-                          onPress={() => setEditingComment((prev) => { const n = { ...prev }; delete n[comment.id]; return n; })}
-                        >
-                          <Text style={styles.commentCancelText}>✕</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <Text style={styles.commentText}>{comment.content}</Text>
-                    )}
-                  </View>
-                );
-              })}
-
-              {item.source !== 'gemini' ? (
+            </View>
+          }
+          renderItem={({ item }) => (
+            <View>
+              <SpotCard
+                spot={item}
+                user={user}
+                canManageTrip={canManageTrip}
+                distanceUnit={distanceUnit}
+                onVote={handleVote}
+                onLike={handleLike}
+                onSave={handleSave}
+                onComment={handleComment}
+                onAddToItinerary={handleAddToItinerary}
+                onEdit={item.source_type !== 'api' && (item.user_id === user?.id || canManageTrip) ? (s) => navigation.navigate('CreateCommunitySpot', { tripId, editSpot: s }) : undefined}
+                onDelete={item.source_type !== 'api' ? handleDeleteSpot : undefined}
+                tripId={tripId}
+              />
+              {/* Inline comment input for member spots */}
+              {item.source_type !== 'api' && (
                 <View style={styles.commentRow}>
                   <TextInput
                     style={styles.commentInput}
                     value={commentText[item.id] ?? ''}
-                    onChangeText={(value) => setCommentText((prev) => ({ ...prev, [item.id]: value }))}
-                    placeholder="Add a local note..."
+                    onChangeText={v => setCommentText(prev => ({ ...prev, [item.id]: v }))}
+                    placeholder="Add a note..."
                     placeholderTextColor={Colors.textSecondary}
                   />
                   <TouchableOpacity
-                    style={[styles.commentButton, commenting === item.id && styles.commentButtonDisabled]}
-                    onPress={() => handleAddComment(item)}
+                    style={[styles.commentBtn, commenting === item.id && styles.commentBtnDisabled]}
+                    onPress={() => handleComment(item)}
                     disabled={commenting === item.id}
                   >
-                    <Text style={styles.commentButtonText}>{commenting === item.id ? '...' : 'Post'}</Text>
+                    <Text style={styles.commentBtnText}>{commenting === item.id ? '...' : 'Post'}</Text>
                   </TouchableOpacity>
                 </View>
-              ) : null}
+              )}
+              {/* Show existing comments */}
+              {(item.comments ?? []).slice(0, 2).map(c => (
+                <View key={c.id} style={styles.comment}>
+                  <Text style={styles.commentAuthor}>{publicName(c.author?.full_name)}</Text>
+                  <Text style={styles.commentContent}>{c.content}</Text>
+                </View>
+              ))}
             </View>
-          </View>
-        )}
-      />
-      <ExplorePlaceModal
-        visible={manualLocationVisible}
-        initialQuery={manualLocationInitialQuery}
-        tripDestination={tripDestination}
-        lookingAround={lookingAround}
-        radiusMiles={radiusMiles}
-        onRadiusChange={setRadiusMiles}
-        onSearch={handleManualLocationSearch}
-        onClose={() => setManualLocationVisible(false)}
-      />
+          )}
+        />
+      )}
+
+      {/* Searching overlay */}
+      {searching && (
+        <View style={styles.searchingOverlay}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.searchingText}>Fetching real places from OpenStreetMap...</Text>
+        </View>
+      )}
     </View>
-    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  actions: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    padding: Spacing.md,
-    paddingBottom: Spacing.sm,
-    backgroundColor: Colors.surface,
-  },
-  secondaryActions: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  actionButton: { flex: 1 },
-  secondaryButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 40,
-  },
-  secondaryButtonText: {
-    fontSize: FontSize.xs,
-    color: Colors.primary,
-    fontWeight: FontWeight.semiBold,
-    textAlign: 'center',
-  },
-  aiButton: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primaryLight,
-  },
-  aiButtonText: { color: Colors.primary },
-  tripSuggestionButton: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primaryLight,
-  },
-  content: { padding: Spacing.md, flexGrow: 1 },
-  guideBox: {
-    backgroundColor: Colors.primaryLight,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    marginBottom: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.primary + '30',
-  },
-  guideTitle: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.primary, marginBottom: Spacing.xs },
-  guideText: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 20 },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.xl,
-  },
-  emptyIcon: {
-    fontSize: 56,
-    marginBottom: Spacing.md,
-  },
-  emptyTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: FontWeight.bold,
-    color: Colors.text,
-    textAlign: 'center',
-    marginBottom: Spacing.sm,
-  },
-  emptySubtitle: {
-    fontSize: FontSize.md,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: Spacing.lg,
-  },
-  emptyActions: {
-    width: '100%',
-    gap: Spacing.sm,
-  },
-  emptyButton: {
-    width: '100%',
-  },
-  card: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    marginBottom: Spacing.md,
-    overflow: 'hidden',
-    ...Shadow.sm,
-  },
-  photo: { width: '100%', height: 190, backgroundColor: Colors.border },
+  controls: { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: Spacing.sm },
+  controlRow: { flexDirection: 'row', alignItems: 'center', padding: Spacing.sm, gap: Spacing.xs },
+  searchBtn: { flex: 1, backgroundColor: Colors.primary, borderRadius: Radius.md, padding: Spacing.sm },
+  searchBtnText: { color: '#fff', fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
+  searchBtnSub: { color: '#ffffff99', fontSize: FontSize.xs },
+  radiusBtn: { borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.sm, paddingVertical: 6 },
+  radiusBtnText: { color: Colors.primary, fontWeight: FontWeight.semiBold, fontSize: FontSize.xs },
+  unitBtn: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, paddingHorizontal: Spacing.sm, paddingVertical: 6 },
+  unitBtnText: { color: Colors.textSecondary, fontSize: FontSize.xs },
+  viewToggle: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, padding: 6 },
+  viewToggleActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  viewToggleText: { fontSize: 16 },
+  radiusPicker: { paddingHorizontal: Spacing.sm, paddingBottom: Spacing.xs },
+  radiusChip: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: 4, marginRight: Spacing.xs, backgroundColor: Colors.surface },
+  radiusChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  radiusChipText: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  radiusChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  prefToggle: { paddingHorizontal: Spacing.md, paddingVertical: 4 },
+  prefToggleText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  prefRow: { paddingHorizontal: Spacing.sm, paddingBottom: Spacing.xs },
+  prefChipLarge: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: 5, marginRight: Spacing.xs, backgroundColor: Colors.surface },
+  prefChipLargeActive: { borderColor: Colors.primary, backgroundColor: Colors.primary },
+  prefChipLargeText: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  prefChipLargeTextActive: { color: '#fff', fontWeight: FontWeight.semiBold },
+  filterTabs: { paddingHorizontal: Spacing.sm },
+  filterTab: { paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: Radius.full, marginRight: Spacing.xs, backgroundColor: Colors.background },
+  filterTabActive: { backgroundColor: Colors.primary },
+  filterTabText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  filterTabTextActive: { color: '#fff', fontWeight: FontWeight.semiBold },
+  sortRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingTop: Spacing.xs },
+  sortChip: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 4, marginRight: Spacing.xs },
+  sortChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  sortChipText: { fontSize: FontSize.xs, color: Colors.textSecondary, textTransform: 'capitalize' },
+  sortChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  postBtn: { marginLeft: 'auto', backgroundColor: Colors.primary, borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: 6 },
+  postBtnText: { color: '#fff', fontWeight: FontWeight.semiBold, fontSize: FontSize.xs },
+  errorBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.warning + '20', padding: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.warning + '40' },
+  errorText: { flex: 1, fontSize: FontSize.xs, color: Colors.warning },
+  errorDismiss: { color: Colors.warning, fontWeight: FontWeight.bold, paddingLeft: Spacing.sm },
+  list: { padding: Spacing.md, flexGrow: 1 },
+  map: { flex: 1 },
+  // Card
+  card: { backgroundColor: Colors.surface, borderRadius: Radius.lg, marginBottom: Spacing.md, overflow: 'hidden', ...Shadow.sm },
+  cardImage: { width: '100%', height: 160 },
+  cardImagePlaceholder: { width: '100%', height: 80, alignItems: 'center', justifyContent: 'center' },
+  cardImageEmoji: { fontSize: 36 },
   cardBody: { padding: Spacing.md },
-  spotHeader: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start' },
-  spotTitleWrap: { flex: 1 },
-  spotName: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.text },
-  category: { fontSize: FontSize.sm, color: Colors.primary, marginTop: 2 },
-  voteButton: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 6,
-  },
-  voteButtonActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  voteText: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
-  voteTextActive: { color: Colors.primary },
-  address: { fontSize: FontSize.sm, color: Colors.textSecondary, marginTop: Spacing.sm },
-  description: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 20, marginTop: Spacing.sm },
-  meta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: Spacing.sm },
-  itineraryButton: { marginTop: Spacing.md },
-  comment: {
-    backgroundColor: Colors.background,
-    borderRadius: Radius.sm,
-    padding: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
+  cardHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginBottom: Spacing.xs },
+  cardName: { fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text },
+  cardMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, flexWrap: 'wrap' },
+  catLabel: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.medium },
+  distLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginLeft: 4 },
+  sourceBadge: { borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 6, paddingVertical: 2, flexShrink: 0 },
+  sourceBadgeText: { fontSize: 10, fontWeight: FontWeight.semiBold },
+  address: { fontSize: FontSize.xs, color: Colors.textSecondary, marginBottom: Spacing.xs },
+  description: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 18, marginBottom: Spacing.xs },
+  whyText: { fontSize: FontSize.xs, color: Colors.primary, fontStyle: 'italic', marginBottom: Spacing.xs },
+  expandLink: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold, marginBottom: Spacing.xs },
+  extraDetails: { marginTop: Spacing.xs, gap: 4 },
+  websiteLink: { fontSize: FontSize.xs, color: Colors.primary, textDecorationLine: 'underline' },
+  detailRow: { fontSize: FontSize.xs, color: Colors.textSecondary },
+  memberClaim: { fontSize: FontSize.xs, color: Colors.warning, fontStyle: 'italic' },
+  prefChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
+  prefChip: { backgroundColor: Colors.primaryLight, borderRadius: Radius.full, paddingHorizontal: 6, paddingVertical: 2 },
+  prefChipText: { fontSize: 10, color: Colors.primary, fontWeight: FontWeight.medium },
+  engagementRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.border, marginTop: Spacing.sm },
+  engBtn: { paddingHorizontal: Spacing.sm, paddingVertical: 4 },
+  engBtnText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  engBtnActive: { color: Colors.primary },
+  actionRow: { flexDirection: 'row', gap: Spacing.xs, flexWrap: 'wrap', marginTop: Spacing.xs },
+  actionBtn: { borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 4 },
+  actionBtnText: { fontSize: FontSize.xs, color: Colors.text, fontWeight: FontWeight.medium },
+  actionBtnPrimary: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  actionBtnPrimaryText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  actionBtnDanger: { borderColor: Colors.danger + '60' },
+  actionBtnDangerText: { fontSize: FontSize.xs, color: Colors.danger },
+  commentRow: { flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm, backgroundColor: Colors.surface },
+  commentInput: { flex: 1, borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md, padding: Spacing.sm, fontSize: FontSize.sm, color: Colors.text, backgroundColor: Colors.background },
+  commentBtn: { borderRadius: Radius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, backgroundColor: Colors.primary },
+  commentBtnDisabled: { opacity: 0.5 },
+  commentBtnText: { color: '#fff', fontSize: FontSize.xs, fontWeight: FontWeight.semiBold },
+  comment: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xs, backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border },
   commentAuthor: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
-  commentText: { fontSize: FontSize.sm, color: Colors.text, marginTop: 2 },
-  commentRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
-  commentInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    color: Colors.text,
-    fontSize: FontSize.sm,
-  },
-  commentButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  commentButtonDisabled: { opacity: 0.5 },
-  commentButtonText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
-  directionsRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.xs, flexWrap: 'wrap' },
-  dirBtn: {
-    paddingHorizontal: Spacing.sm, paddingVertical: 3,
-    borderRadius: Radius.sm, borderWidth: 1, borderColor: Colors.primary,
-  },
-  dirBtnGoogle: { borderColor: Colors.success },
-  dirBtnText: { fontSize: 11, color: Colors.primary, fontWeight: FontWeight.semiBold },
-  spotOwnerActions: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.sm },
-  spotDeleteLink: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: FontWeight.semiBold },
-  spotEditBox: { marginTop: Spacing.sm, gap: Spacing.sm },
-  spotEditInput: {
-    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
-    padding: Spacing.sm, fontSize: FontSize.sm, color: Colors.text, backgroundColor: Colors.surface,
-  },
-  spotEditActions: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
-  spotSaveBtn: {
-    flex: 1, backgroundColor: Colors.primary, borderRadius: Radius.md,
-    paddingVertical: Spacing.sm, alignItems: 'center',
-  },
-  spotSaveBtnText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
-  commentHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  commentEditLink: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
-  commentCancelBtn: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  commentCancelText: { fontSize: 12, color: Colors.textSecondary, fontWeight: FontWeight.semiBold },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  modalBox: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-    padding: Spacing.xl,
-  },
-  modalTitle: { fontSize: FontSize.xl, color: Colors.text, fontWeight: FontWeight.bold, marginBottom: Spacing.xs },
-  modalSubtitle: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20, marginBottom: Spacing.md },
-  tripSuggestionCard: {
-    borderWidth: 1,
-    borderColor: Colors.primary + '55',
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    backgroundColor: Colors.primaryLight,
-    marginBottom: Spacing.md,
-  },
-  tripSuggestionLabel: {
-    fontSize: FontSize.xs,
-    color: Colors.primary,
-    fontWeight: FontWeight.semiBold,
-    marginBottom: 2,
-    textTransform: 'uppercase',
-  },
-  tripSuggestionText: { fontSize: FontSize.md, color: Colors.text, fontWeight: FontWeight.semiBold },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    fontSize: FontSize.md,
-    color: Colors.text,
-    marginBottom: Spacing.md,
-  },
-  radiusBlock: { marginBottom: Spacing.md },
-  radiusLabel: {
-    fontSize: FontSize.sm,
-    color: Colors.text,
-    fontWeight: FontWeight.semiBold,
-    marginBottom: Spacing.xs,
-  },
-  radiusWheel: {
-    gap: Spacing.sm,
-    paddingVertical: 2,
-    paddingRight: Spacing.md,
-  },
-  radiusOption: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    minWidth: 64,
-    height: 58,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.surface,
-  },
-  radiusOptionSelected: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primaryLight,
-  },
-  radiusOptionText: {
-    fontSize: FontSize.lg,
-    color: Colors.text,
-    fontWeight: FontWeight.bold,
-  },
-  radiusOptionUnit: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    fontWeight: FontWeight.semiBold,
-    marginTop: -2,
-  },
-  radiusOptionTextSelected: { color: Colors.primary },
-  modalCancel: { alignItems: 'center', paddingTop: Spacing.md },
-  modalCancelText: { color: Colors.textSecondary, fontSize: FontSize.md, fontWeight: FontWeight.semiBold },
+  commentContent: { fontSize: FontSize.sm, color: Colors.text },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
+  emptyIcon: { fontSize: 48, marginBottom: Spacing.md },
+  emptyTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.semiBold, color: Colors.text, textAlign: 'center', marginBottom: Spacing.sm },
+  emptySub: { fontSize: FontSize.md, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: Spacing.lg },
+  emptyBtn: { marginTop: Spacing.sm },
+  searchingOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(255,255,255,0.85)', alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
+  searchingText: { fontSize: FontSize.md, color: Colors.textSecondary, textAlign: 'center' },
 });
