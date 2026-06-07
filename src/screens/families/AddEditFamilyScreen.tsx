@@ -34,12 +34,33 @@ export function AddEditFamilyScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!isEdit && !canManageTrip) {
+      Alert.alert(
+        'Organizer needed',
+        'Only the trip organizer or a trip admin can create families.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    }
+  }, [isEdit, canManageTrip, navigation]);
+
   async function handleSave() {
+    if (!isEdit && !canManageTrip) {
+      setError('Only the trip organizer or a trip admin can create families.');
+      return;
+    }
     if (!name.trim()) { setError('Family name is required'); return; }
     const adultsNum = parseInt(adults, 10);
     const childrenNum = parseInt(children, 10);
     if (isNaN(adultsNum) || adultsNum < 1) { setError('At least 1 adult required'); return; }
     if (isNaN(childrenNum) || childrenNum < 0) { setError('Children count cannot be negative'); return; }
+    if (isEdit && familyId) {
+      const linkedMembers = members.filter((m) => m.family_id === familyId).length;
+      if (linkedMembers > adultsNum + childrenNum) {
+        setError('This family already has more members than the new head count. Remove members or increase the head count first.');
+        return;
+      }
+    }
     setError('');
 
     // Demo mode: update local context only, no Supabase

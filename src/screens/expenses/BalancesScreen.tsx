@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, FamilyBalance, Expense } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
@@ -44,7 +45,7 @@ export function BalancesScreen({ navigation, route }: Props) {
     setRefreshing(false);
   }
 
-  useEffect(() => { loadBalances(); }, [tripId, families]);
+  useFocusEffect(useCallback(() => { loadBalances(); }, [tripId, families, isDemoMode]));
 
   if (loading) return <LoadingView />;
 

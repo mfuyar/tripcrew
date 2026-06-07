@@ -116,6 +116,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           body: notification.body,
           data: {
             ...((notification.data as Record<string, unknown> | null) ?? {}),
+            type: notification.type,
             notification_id: notification.id,
             source: LOCAL_NOTIFICATION_SOURCE,
           },

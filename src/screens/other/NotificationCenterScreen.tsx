@@ -2,8 +2,9 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { Notification } from '../../types';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Notification, MainStackParamList } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { notificationService } from '../../services/notificationService';
@@ -12,12 +13,46 @@ import { EmptyState } from '../../components/EmptyState';
 import { AppButton } from '../../components/AppButton';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
+type Nav = NativeStackNavigationProp<MainStackParamList>;
+
+function navigateForNotification(navigation: Nav, n: Notification) {
+  const tripId = n.trip_id;
+  if (!tripId) return;
+
+  if (n.type === 'message' || n.type === 'push_talk') {
+    (navigation as any).navigate('TripStack', { tripId, screen: 'Chat' });
+    return;
+  }
+
+  // Join request notifications carry request_id in data — go straight to TripSettings
+  if (n.data?.request_id) {
+    navigation.navigate('TripSettings' as any, { tripId });
+    return;
+  }
+
+  const SCREEN_MAP: Partial<Record<Notification['type'], keyof MainStackParamList>> = {
+    expense_added: 'Settlements',
+    settlement_request: 'Settlements',
+    payment_confirmed: 'PaymentTracking',
+    announcement: 'Announcements',
+    poll: 'Polls',
+  };
+
+  const screen = SCREEN_MAP[n.type];
+  if (screen) {
+    navigation.navigate(screen as any, { tripId });
+  } else {
+    (navigation as any).navigate('TripStack', { tripId, screen: 'Dashboard' });
+  }
+}
+
 const TYPE_ICONS: Record<string, string> = {
   expense_added: '💰', settlement_request: '💸', payment_confirmed: '✅',
   message: '💬', announcement: '📢', poll: '🗳️', push_talk: '🎙️', other: '🔔',
 };
 
 export function NotificationCenterScreen() {
+  const navigation = useNavigation<Nav>();
   const { user, isDemoMode } = useAuth();
   const { refreshUnread } = useNotifications();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -34,16 +69,27 @@ export function NotificationCenterScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  async function handleMarkRead(id: string) {
-    await notificationService.markRead(id);
-    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, is_read: true } : n));
+  async function handleTap(n: Notification) {
+    if (!n.is_read) {
+      await notificationService.markRead(n.id);
+      setNotifications((prev) => prev.map((item) => item.id === n.id ? { ...item, is_read: true } : item));
+      refreshUnread();
+    }
+    navigateForNotification(navigation, n);
   }
 
   async function handleMarkAllRead() {
     if (!user) return;
     await notificationService.markAllRead(user.id);
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    refreshUnread(); // clear badge
+    refreshUnread();
+  }
+
+  async function handleDeleteAll() {
+    if (!user) return;
+    await notificationService.deleteAll(user.id);
+    setNotifications([]);
+    refreshUnread();
   }
 
   if (loading) return <LoadingView />;
@@ -52,12 +98,19 @@ export function NotificationCenterScreen() {
 
   return (
     <View style={styles.container}>
-      {unreadCount > 0 && (
+      {notifications.length > 0 && (
         <View style={styles.header}>
-          <Text style={styles.headerText}>{unreadCount} unread</Text>
-          <TouchableOpacity onPress={handleMarkAllRead}>
-            <Text style={styles.markAll}>Mark all read</Text>
-          </TouchableOpacity>
+          <Text style={styles.headerText}>{unreadCount > 0 ? `${unreadCount} unread` : 'All read'}</Text>
+          <View style={styles.headerActions}>
+            {unreadCount > 0 && (
+              <TouchableOpacity onPress={handleMarkAllRead}>
+                <Text style={styles.markAll}>Mark all read</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={handleDeleteAll}>
+              <Text style={styles.deleteAll}>Delete all</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
       <FlatList
@@ -73,7 +126,7 @@ export function NotificationCenterScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={[styles.card, !item.is_read && styles.cardUnread]}
-            onPress={() => handleMarkRead(item.id)}
+            onPress={() => handleTap(item)}
           >
             <Text style={styles.typeIcon}>{TYPE_ICONS[item.type] ?? '🔔'}</Text>
             <View style={styles.info}>
@@ -95,7 +148,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.md, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   headerText: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   markAll: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  deleteAll: { fontSize: FontSize.sm, color: Colors.danger, fontWeight: FontWeight.semiBold },
   content: { padding: Spacing.md, flexGrow: 1 },
   card: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md, marginBottom: Spacing.sm, gap: Spacing.md, ...Shadow.sm },
   cardUnread: { borderLeftWidth: 4, borderLeftColor: Colors.primary },

@@ -87,24 +87,19 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
   async function handleScan() {
     if (!imageUri || !user) return;
     setScanning(true);
-    const { data: receipt, error } = await receiptService.uploadReceipt(tripId, user.id, imageUri);
+    const { data: scanned, error } = await receiptService.uploadReceipt(tripId, user.id, imageUri);
     if (error) {
-      Alert.alert('Upload Error', error);
+      Alert.alert('Receipt not scanned', error);
       setScanning(false);
       return;
     }
-    if (receipt) {
-      const { data: scanned, error: scanError } = await receiptService.scanReceipt(receipt.id, receipt.image_url);
-      if (scanError) {
-        Alert.alert('Receipt not scanned', scanError);
-      } else if (scanned) {
-        setResult({
-          amount: scanned.parsed_amount,
-          merchant: scanned.parsed_merchant,
-          date: scanned.parsed_date,
-          items: scanned.parsed_items,
-        });
-      }
+    if (scanned) {
+      setResult({
+        amount: scanned.parsed_amount,
+        merchant: scanned.parsed_merchant,
+        date: scanned.parsed_date,
+        items: scanned.parsed_items,
+      });
     }
     setScanning(false);
   }

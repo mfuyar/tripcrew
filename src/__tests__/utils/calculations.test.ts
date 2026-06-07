@@ -297,6 +297,32 @@ describe('calculateFamilyBalances', () => {
     const sum = balances.reduce((s, b) => s + b.balance, 0);
     expect(sum).toBeCloseTo(0, 2);
   });
+
+  it('treats one-cent split drift as settled when each family paid the same amount', () => {
+    const expenses = [
+      makeExpense('e1', 20, 'a', [
+        { family_id: 'a', share_amount: 6.66 },
+        { family_id: 'b', share_amount: 6.67 },
+        { family_id: 'c', share_amount: 6.67 },
+      ]),
+      makeExpense('e2', 20, 'b', [
+        { family_id: 'a', share_amount: 6.66 },
+        { family_id: 'b', share_amount: 6.67 },
+        { family_id: 'c', share_amount: 6.67 },
+      ]),
+      makeExpense('e3', 20, 'c', [
+        { family_id: 'a', share_amount: 6.66 },
+        { family_id: 'b', share_amount: 6.67 },
+        { family_id: 'c', share_amount: 6.67 },
+      ]),
+    ];
+
+    const balances = calculateFamilyBalances(expenses, families);
+
+    expect(find(balances, 'a').balance).toBe(0);
+    expect(find(balances, 'b').balance).toBe(0);
+    expect(find(balances, 'c').balance).toBe(0);
+  });
 });
 
 // ─── calculateSettlements ───────────────────────────────────────────────────

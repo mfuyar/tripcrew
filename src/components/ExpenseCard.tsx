@@ -17,6 +17,10 @@ export function ExpenseCard({ expense, onPress }: Props) {
     month: 'short',
     day: 'numeric',
   });
+  const payerName = expense.paid_by_family?.name
+    ?? expense.paid_by_profile?.full_name
+    ?? expense.paid_by_profile?.email
+    ?? 'Person';
 
   return (
     <TouchableOpacity
@@ -30,7 +34,7 @@ export function ExpenseCard({ expense, onPress }: Props) {
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={1}>{expense.title}</Text>
         <Text style={styles.meta}>
-          {expense.paid_by_family?.name ?? 'Unknown'} • {dateStr}
+          {payerName} • {dateStr}
         </Text>
       </View>
       <CurrencyAmount amount={expense.amount} size="md" />

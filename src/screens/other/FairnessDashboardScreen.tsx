@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
@@ -31,7 +32,7 @@ export function FairnessDashboardScreen({ route }: { route: { params: { tripId: 
     setRefreshing(false);
   }
 
-  useEffect(() => { load(); }, [tripId, families]);
+  useFocusEffect(useCallback(() => { load(); }, [tripId, families, isDemoMode]));
 
   if (loading) return <LoadingView />;
 

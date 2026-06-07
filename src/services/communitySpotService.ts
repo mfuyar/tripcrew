@@ -8,6 +8,12 @@ import { CommunitySpot, CommunitySpotCategory, CommunitySpotComment, ModerationS
 const MEDIA_BUCKET = 'trip-media';
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_COMPRESS_QUALITY = 0.78;
+const COMMUNITY_SPOT_AUTHOR_SELECT = 'author:profiles!community_spots_user_id_fkey(*)';
+const COMMUNITY_SPOT_COMMENT_AUTHOR_SELECT = 'author:profiles!community_spot_comments_user_id_fkey(*)';
+const COMMUNITY_SPOT_WITH_AUTHOR_SELECT = `*, ${COMMUNITY_SPOT_AUTHOR_SELECT}`;
+const COMMUNITY_SPOT_WITH_AUTHOR_AND_COMMENTS_SELECT =
+  `*, ${COMMUNITY_SPOT_AUTHOR_SELECT}, comments:community_spot_comments(*, ${COMMUNITY_SPOT_COMMENT_AUTHOR_SELECT})`;
+const COMMUNITY_SPOT_COMMENT_WITH_AUTHOR_SELECT = `*, ${COMMUNITY_SPOT_COMMENT_AUTHOR_SELECT}`;
 const BAD_LANGUAGE_PATTERNS = [
   /\bfuck(?:ing|er|ed)?\b/i,
   /\bshit(?:ty)?\b/i,
@@ -49,6 +55,10 @@ export interface CommunitySpotInput {
   latitude: number;
   longitude: number;
   photoUri?: string;
+  website?: string;
+  tags?: string[];
+  source_type?: 'member';
+  source_name?: string;
 }
 
 interface ModerationDecision {
@@ -303,10 +313,14 @@ export const communitySpotService = {
         latitude: input.latitude,
         longitude: input.longitude,
         photo_url: photoUrl,
+        website: input.website ?? null,
+        tags: input.tags ?? [],
+        source_type: input.source_type ?? 'member',
+        source_name: input.source_name ?? 'Member Suggested',
         moderation_status: moderation.status,
         moderation_reason: moderation.reason ?? null,
       })
-      .select('*, author:profiles(*)')
+      .select(COMMUNITY_SPOT_WITH_AUTHOR_SELECT)
       .single();
 
     if (error) return { data: null, error: error.message };
@@ -336,7 +350,7 @@ export const communitySpotService = {
   async getRecent(userId?: string): Promise<ServiceResult<CommunitySpot[]>> {
     const { data, error } = await supabase
       .from('community_spots')
-      .select('*, author:profiles(*), comments:community_spot_comments(*, author:profiles(*))')
+      .select(COMMUNITY_SPOT_WITH_AUTHOR_AND_COMMENTS_SELECT)
       .eq('moderation_status', 'approved')
       .order('created_at', { ascending: false })
       .limit(25);
@@ -380,7 +394,7 @@ export const communitySpotService = {
     const { data, error } = await supabase
       .from('community_spot_comments')
       .insert({ spot_id: spotId, user_id: userId, content })
-      .select('*, author:profiles(*)')
+      .select(COMMUNITY_SPOT_COMMENT_WITH_AUTHOR_SELECT)
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as CommunitySpotComment, error: null };
@@ -406,7 +420,7 @@ export const communitySpotService = {
       .from('community_spots')
       .update({ ...updates, moderation_status: 'pending_review', updated_at: new Date().toISOString() })
       .eq('id', spotId)
-      .select('*, author:profiles(*), comments:community_spot_comments(*, author:profiles(*))')
+      .select(COMMUNITY_SPOT_WITH_AUTHOR_AND_COMMENTS_SELECT)
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as CommunitySpot, error: null };
@@ -420,7 +434,7 @@ export const communitySpotService = {
       .from('community_spot_comments')
       .update({ content: trimmed })
       .eq('id', commentId)
-      .select('*, author:profiles(*)')
+      .select(COMMUNITY_SPOT_COMMENT_WITH_AUTHOR_SELECT)
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as CommunitySpotComment, error: null };
@@ -429,7 +443,7 @@ export const communitySpotService = {
   async getPendingReview(): Promise<ServiceResult<CommunitySpot[]>> {
     const { data, error } = await supabase
       .from('community_spots')
-      .select('*, author:profiles(*)')
+      .select(COMMUNITY_SPOT_WITH_AUTHOR_SELECT)
       .eq('moderation_status', 'pending_review')
       .order('created_at', { ascending: true });
     if (error) return { data: null, error: error.message };

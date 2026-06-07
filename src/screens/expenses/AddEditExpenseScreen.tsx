@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,11 @@ import {
 } from 'react-native';
 import { mediaService } from '../../services/mediaService';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { MainStackParamList, ExpenseCategory, SplitMethod, FamilySplitShare } from '../../types';
+import { MainStackParamList, ExpenseCategory, SplitMethod, FamilySplitShare, PersonSplitShare } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
+import { settlementService } from '../../services/settlementService';
 import { calculateExpenseSplits } from '../../utils/calculations';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
@@ -55,8 +56,8 @@ function buildChangeSummary(prev: any, next: any, currency: string): string {
 
 export function AddEditExpenseScreen({ navigation, route }: Props) {
   const { tripId, expenseId, scannedExpense } = route.params;
-  const { families, currentTrip, userFamily, canManageTrip } = useTripContext();
-  const { user, profile, isDemoMode } = useAuth();
+  const { families, members, currentTrip, userFamily, canManageTrip, isTripOrganizer } = useTripContext();
+  const { user, profile, isDemoMode, isGlobalAdmin } = useAuth();
   const isEdit = !!expenseId;
 
   const [title, setTitle] = useState('');
@@ -68,21 +69,55 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [selectedFamilies, setSelectedFamilies] = useState<string[]>(families.map((f) => f.id));
+  const [paidByUserId, setPaidByUserId] = useState(user?.id ?? '');
+  const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
+  const [personSplitMode, setPersonSplitMode] = useState<'everyone' | 'selected'>('everyone');
+  const [expenseScope, setExpenseScope] = useState<'family' | 'person'>('family');
   const [splits, setSplits] = useState<FamilySplitShare[]>([]);
+  const [personSplits, setPersonSplits] = useState<PersonSplitShare[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(isEdit);
   // For edit mode: whether the current user can modify this expense
   const [canEdit, setCanEdit] = useState(!isEdit);
+  const [expenseIsDeleted, setExpenseIsDeleted] = useState(false);
   const [receiptLocalUri, setReceiptLocalUri] = useState<string | undefined>(scannedExpense?.receiptImageUri);
   const [receiptUrl, setReceiptUrl] = useState<string | undefined>();
   const [receiptFullScreen, setReceiptFullScreen] = useState(false);
+  const hasFamilies = families.length > 0;
+  const usePersonExpense = !hasFamilies || expenseScope === 'person';
+  const tripMembers = useMemo(() => members.filter((m) => m.profile), [members]);
+  const personNames = useMemo(
+    () => new Map(tripMembers.map((m) => [m.user_id, m.profile?.full_name ?? m.profile?.email ?? 'Member'])),
+    [tripMembers]
+  );
 
   useEffect(() => {
-    if (families.length > 0 && !paidByFamilyId) {
+    if (!hasFamilies) {
+      setExpenseScope('person');
+      setPaidByFamilyId('');
+      setSelectedFamilies([]);
+      setSplitMethod('equal_by_person');
+      setBaseSplitMethod('equal_by_person');
+      setSelectedPersonIds((prev) => (prev.length ? prev : tripMembers.map((m) => m.user_id)));
+      return;
+    }
+    if (!paidByFamilyId) {
+      setExpenseScope((prev) => (prev === 'person' ? prev : 'family'));
       setPaidByFamilyId(userFamily?.id ?? families[0].id);
       setSelectedFamilies(families.map((f) => f.id));
     }
-  }, [families]);
+  }, [families, hasFamilies, paidByFamilyId, tripMembers, userFamily?.id]);
+
+  useEffect(() => {
+    if (!paidByUserId && user?.id) setPaidByUserId(user.id);
+  }, [paidByUserId, user?.id]);
+
+  function togglePerson(userId: string) {
+    setSelectedPersonIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+    setPersonSplitMode('selected');
+  }
 
   useEffect(() => {
     if (isEdit) loadExpense();
@@ -116,19 +151,34 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setTitle(data.title);
       setAmount(String(data.amount));
       setCategory(data.category);
-      setPaidByFamilyId(data.paid_by_family_id);
+      setPaidByFamilyId(data.paid_by_family_id ?? '');
+      setPaidByUserId(data.paid_by_user_id);
       setSplitMethod(data.split_method);
       setDate(data.date);
       setNotes(data.notes ?? '');
-      setCanEdit(canManageTrip || data.paid_by_user_id === user?.id);
       if (data.receipt_url) setReceiptUrl(data.receipt_url);
+      setExpenseIsDeleted(!!data.is_deleted);
       if (data.split_method === 'selected_families_only' && data.expense_splits?.length) {
         const included = data.expense_splits.filter((s) => s.share_amount > 0).map((s) => s.family_id);
         setSelectedFamilies(included);
         setBaseSplitMethod('equal_by_family');
+      } else if (!data.paid_by_family_id && data.expense_person_splits?.length) {
+        setExpenseScope('person');
+        const included = data.expense_person_splits.filter((s) => s.share_amount > 0).map((s) => s.user_id);
+        setSelectedPersonIds(included);
+        setPersonSplitMode(included.length === tripMembers.length ? 'everyone' : 'selected');
       } else {
         setBaseSplitMethod(data.split_method as SplitMethod);
       }
+
+      // Only the trip organizer (or global admin) and the expense's own
+      // payer/creator can edit or delete it — other trip admins cannot.
+      let baseCanEdit = isTripOrganizer || isGlobalAdmin || data.paid_by_user_id === user?.id;
+      if (baseCanEdit && data.paid_by_family_id) {
+        const locked = await settlementService.isExpenseEditLocked(tripId, data.paid_by_family_id);
+        if (locked) baseCanEdit = false;
+      }
+      setCanEdit(baseCanEdit);
     }
     setFetching(false);
   }
@@ -136,6 +186,28 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   // Recalculate preview whenever relevant fields change
   useEffect(() => {
     const amt = parseFloat(amount);
+    if (usePersonExpense && !isNaN(amt) && amt > 0) {
+      const includedIds =
+        personSplitMode === 'everyone'
+          ? tripMembers.map((m) => m.user_id)
+          : selectedPersonIds;
+      if (!includedIds.length) {
+        setPersonSplits([]);
+        return;
+      }
+      const share = Math.round((amt / includedIds.length) * 100) / 100;
+      const shares = includedIds.map((id) => ({
+        userId: id,
+        userName: personNames.get(id) ?? 'Member',
+        shareAmount: share,
+      }));
+      const total = shares.reduce((sum, s) => sum + s.shareAmount, 0);
+      const diff = Math.round((amt - total) * 100) / 100;
+      if (shares.length) shares[shares.length - 1].shareAmount = Math.round((shares[shares.length - 1].shareAmount + diff) * 100) / 100;
+      setPersonSplits(shares);
+      setSplits([]);
+      return;
+    }
     if (!isNaN(amt) && amt > 0 && families.length > 0) {
       const opts =
         splitMethod === 'selected_families_only'
@@ -145,16 +217,21 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setSplits(result);
     } else {
       setSplits([]);
+      setPersonSplits([]);
     }
-  }, [amount, splitMethod, families, selectedFamilies]);
+  }, [amount, splitMethod, families, selectedFamilies, usePersonExpense, personSplitMode, selectedPersonIds, tripMembers]);
 
   async function handleSave() {
     if (!title.trim()) { Alert.alert('Error', 'Please enter a title.'); return; }
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) { Alert.alert('Error', 'Please enter a valid amount.'); return; }
-    if (!paidByFamilyId) { Alert.alert('Error', 'Please select who paid.'); return; }
-    if (selectedFamilies.length === 0) {
+    if (hasFamilies && !paidByFamilyId) { Alert.alert('Error', 'Please select which family paid.'); return; }
+    if (usePersonExpense && !paidByUserId) { Alert.alert('Error', 'Please select who paid.'); return; }
+    if (!usePersonExpense && selectedFamilies.length === 0) {
       Alert.alert('Error', 'Select at least one family under "Applies to".'); return;
+    }
+    if (usePersonExpense && personSplits.length === 0) {
+      Alert.alert('Error', 'Select at least one person under "Applies to".'); return;
     }
     if (!user || isDemoMode) { Alert.alert('Demo Mode', 'Adding expenses is disabled in demo.'); return; }
 
@@ -170,8 +247,9 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       amount: amt,
       currency: currentTrip?.currency ?? 'USD',
       category,
-      paid_by_family_id: paidByFamilyId,
-      split_method: splitMethod,
+      paid_by_family_id: usePersonExpense ? null : paidByFamilyId,
+      paid_by_user_id: usePersonExpense ? paidByUserId : user.id,
+      split_method: usePersonExpense ? 'equal_by_person' : splitMethod,
       date,
       notes: notes.trim() || undefined,
       receipt_url: finalReceiptUrl || undefined,
@@ -193,7 +271,9 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
         current_version: (existing?.current_version ?? 1) + 1,
       } as any);
       if (!error) {
-        const splitResult = await expenseService.saveExpenseSplits(expenseId!, tripId, splits);
+        const splitResult = !usePersonExpense
+          ? await expenseService.saveExpenseSplits(expenseId!, tripId, splits)
+          : await expenseService.saveExpensePersonSplits(expenseId!, tripId, personSplits);
         if (splitResult.error) Alert.alert('Error', splitResult.error);
         else navigation.goBack();
       } else {
@@ -204,7 +284,9 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       if (!error && data) {
         // Save v1 snapshot
         await expenseService.saveVersion(data, 'create', editorName, 'Expense created');
-        const splitResult = await expenseService.saveExpenseSplits(data.id, tripId, splits);
+        const splitResult = !usePersonExpense
+          ? await expenseService.saveExpenseSplits(data.id, tripId, splits)
+          : await expenseService.saveExpensePersonSplits(data.id, tripId, personSplits);
         if (splitResult.error) {
           await expenseService.deleteExpense(data.id);
           Alert.alert('Error', splitResult.error);
@@ -220,22 +302,45 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
 
   async function handleDelete() {
     if (!expenseId || !user) return;
-    const { data: existing } = await expenseService.getExpenseById(expenseId);
-    const editorName = profile?.full_name ?? user.email ?? 'Unknown';
     Alert.alert(
       'Delete Expense',
-      'This expense will be soft-deleted. Organizers can restore it from the expense history.',
+      'This expense will be hidden from the list. The organizer can see and restore it.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            if (existing) {
-              await expenseService.softDeleteExpense(existing, user.id, editorName);
-            } else {
-              await expenseService.deleteExpense(expenseId);
+            const { data: existing, error: fetchError } = await expenseService.getExpenseById(expenseId);
+            if (!existing) {
+              Alert.alert('Error', fetchError ?? 'Could not find this expense.');
+              return;
             }
+            const editorName = profile?.full_name ?? user.email ?? 'Unknown';
+            const { error: deleteError } = await expenseService.softDeleteExpense(existing, user.id, editorName);
+            if (deleteError) {
+              Alert.alert('Error', deleteError);
+              return;
+            }
+            navigation.goBack();
+          },
+        },
+      ]
+    );
+  }
+
+  async function handlePermanentDelete() {
+    if (!expenseId || !user) return;
+    Alert.alert(
+      'Permanently Delete',
+      'This will erase the expense and all its history forever. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Forever',
+          style: 'destructive',
+          onPress: async () => {
+            await expenseService.deleteExpense(expenseId);
             navigation.goBack();
           },
         },
@@ -329,95 +434,237 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           ))}
         </ScrollView>
 
-        {/* Paid by */}
-        <Text style={styles.label}>Paid by</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-          {families.map((f) => (
-            <TouchableOpacity
-              key={f.id}
-              style={[styles.famChip, paidByFamilyId === f.id && styles.famChipActive]}
-              onPress={() => setPaidByFamilyId(f.id)}
-            >
-              <View style={[styles.famDot, { backgroundColor: f.color ?? Colors.primary }]} />
-              <Text style={[styles.famChipText, paidByFamilyId === f.id && styles.famChipTextActive]}>
-                {f.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {hasFamilies && (
+          <>
+            <Text style={styles.label}>Expense type</Text>
+            <View style={styles.scopeRow}>
+              <TouchableOpacity
+                style={[styles.scopeBtn, expenseScope === 'family' && styles.scopeBtnActive]}
+                onPress={() => setExpenseScope('family')}
+              >
+                <Text style={[styles.scopeBtnText, expenseScope === 'family' && styles.scopeBtnTextActive]}>
+                  Family split
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.scopeBtn, expenseScope === 'person' && styles.scopeBtnActive]}
+                onPress={() => {
+                  setExpenseScope('person');
+                  setSelectedPersonIds((prev) => prev.length ? prev : tripMembers.map((m) => m.user_id));
+                }}
+              >
+                <Text style={[styles.scopeBtnText, expenseScope === 'person' && styles.scopeBtnTextActive]}>
+                  Person split
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
 
-        {/* Applies to — always visible, all families ticked by default */}
-        <View style={styles.appliesToSection}>
-          <View style={styles.appliesToHeader}>
-            <Text style={styles.label}>Applies to</Text>
-            <View style={styles.appliesToShortcuts}>
-              {/* "Just for us" — sets Applies To = payer family only */}
-              {!(selectedFamilies.length === 1 && selectedFamilies[0] === paidByFamilyId) && paidByFamilyId && (
-                <TouchableOpacity onPress={() => {
-                  setSelectedFamilies([paidByFamilyId]);
-                  setSplitMethod('selected_families_only');
-                }}>
-                  <Text style={styles.shortcutText}>Just for us</Text>
+        {usePersonExpense ? (
+          <View style={styles.noFamiliesPanel}>
+            <Text style={styles.noFamiliesTitle}>{hasFamilies ? 'Person split' : 'No families yet'}</Text>
+            <Text style={styles.noFamiliesText}>
+              {hasFamilies
+                ? 'Split this expense among selected trip members. Person settlements will be shown separately from family settlements.'
+                : canManageTrip
+                ? 'Create a family to use family expense splitting, or record this as an equal-by-person expense for the current trip members.'
+                : 'The trip organizer must create families before family expense splitting is available.'}
+            </Text>
+            <View style={styles.noFamiliesActions}>
+              {canManageTrip && (
+                <TouchableOpacity
+                  style={styles.createFamilyBtn}
+                  onPress={() => navigation.navigate('AddEditFamily', { tripId })}
+                >
+                  <Text style={styles.createFamilyBtnText}>Create Family</Text>
                 </TouchableOpacity>
               )}
-              {selectedFamilies.length < families.length && (
+              <View style={styles.personModePill}>
+                <Text style={styles.personModePillText}>Equal by person</Text>
+              </View>
+            </View>
+
+            <Text style={styles.label}>Paid by person</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+              {tripMembers.map((m) => (
+                <TouchableOpacity
+                  key={m.user_id}
+                  style={[styles.famChip, paidByUserId === m.user_id && styles.famChipActive]}
+                  onPress={() => setPaidByUserId(m.user_id)}
+                >
+                  <View style={styles.personDot}>
+                    <Text style={styles.personDotText}>
+                      {(m.profile?.full_name ?? m.profile?.email ?? '?').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={[styles.famChipText, paidByUserId === m.user_id && styles.famChipTextActive]}>
+                    {m.profile?.full_name ?? m.profile?.email ?? 'Member'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.appliesToHeader}>
+              <Text style={styles.label}>Applies to people</Text>
+              {personSplitMode === 'selected' && selectedPersonIds.length < tripMembers.length && (
                 <TouchableOpacity onPress={() => {
-                  setSelectedFamilies(families.map((f) => f.id));
-                  setSplitMethod(baseSplitMethod);
+                  setPersonSplitMode('everyone');
+                  setSelectedPersonIds(tripMembers.map((m) => m.user_id));
                 }}>
-                  <Text style={styles.selectAllText}>All families</Text>
+                  <Text style={styles.selectAllText}>Everyone</Text>
                 </TouchableOpacity>
               )}
             </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+              {tripMembers.map((m) => {
+                const included = personSplitMode === 'everyone' || selectedPersonIds.includes(m.user_id);
+                const label = m.profile?.full_name ?? m.profile?.email ?? 'Member';
+                return (
+                  <TouchableOpacity
+                    key={m.user_id}
+                    style={[styles.famChip, included ? styles.famChipIncluded : styles.famChipExcluded]}
+                    onPress={() => togglePerson(m.user_id)}
+                  >
+                    <View style={[styles.personDot, !included && styles.personDotMuted]}>
+                      <Text style={styles.personDotText}>{label.charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <Text style={[styles.famChipText, included ? styles.famChipTextActive : styles.famChipTextExcluded]}>
+                      {label}
+                    </Text>
+                    {!included && <Text style={styles.excludedX}>✕</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            {personSplitMode === 'selected' && selectedPersonIds.length === 0 && (
+              <Text style={styles.noFamilyWarning}>Select at least one person</Text>
+            )}
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-            {families.map((f) => {
-              const included = selectedFamilies.includes(f.id);
-              return (
+        ) : (
+          <>
+            {/* Paid by */}
+            <Text style={styles.label}>Paid by family</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+              {families.map((f) => (
                 <TouchableOpacity
                   key={f.id}
-                  style={[styles.famChip, included ? styles.famChipIncluded : styles.famChipExcluded]}
-                  onPress={() => toggleAppliesTo(f.id)}
+                  style={[styles.famChip, paidByFamilyId === f.id && styles.famChipActive]}
+                  onPress={() => setPaidByFamilyId(f.id)}
                 >
-                  <View style={[styles.famDot, { backgroundColor: included ? (f.color ?? Colors.primary) : Colors.border }]} />
-                  <Text style={[styles.famChipText, included ? styles.famChipTextActive : styles.famChipTextExcluded]}>
+                  <View style={[styles.famDot, { backgroundColor: f.color ?? Colors.primary }]} />
+                  <Text style={[styles.famChipText, paidByFamilyId === f.id && styles.famChipTextActive]}>
                     {f.name}
                   </Text>
-                  {!included && <Text style={styles.excludedX}>✕</Text>}
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          {selectedFamilies.length === 0 && (
-            <Text style={styles.noFamilyWarning}>Select at least one family</Text>
-          )}
-        </View>
+              ))}
+            </ScrollView>
 
-        {/* Split method — only shown when all families included (specific = always equal) */}
-        {splitMethod !== 'selected_families_only' && (
-          <>
-            <Text style={styles.label}>How to split</Text>
-            {SPLIT_METHODS.map((m) => (
-              <TouchableOpacity
-                key={m.value}
-                style={[styles.methodRow, splitMethod === m.value && styles.methodRowActive]}
-                onPress={() => { setSplitMethod(m.value); setBaseSplitMethod(m.value); }}
-              >
-                <View style={[styles.radio, splitMethod === m.value && styles.radioActive]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.methodLabel, splitMethod === m.value && styles.methodLabelActive]}>
-                    {m.label}
-                  </Text>
-                  <Text style={styles.methodDesc}>{m.desc}</Text>
+            {/* Applies to — always visible, all families ticked by default */}
+            <View style={styles.appliesToSection}>
+              <View style={styles.appliesToHeader}>
+                <Text style={styles.label}>Applies to</Text>
+                <View style={styles.appliesToShortcuts}>
+                  {!(selectedFamilies.length === 1 && selectedFamilies[0] === paidByFamilyId) && paidByFamilyId && (
+                    <TouchableOpacity onPress={() => {
+                      setSelectedFamilies([paidByFamilyId]);
+                      setSplitMethod('selected_families_only');
+                    }}>
+                      <Text style={styles.shortcutText}>Just for us</Text>
+                    </TouchableOpacity>
+                  )}
+                  {selectedFamilies.length < families.length && (
+                    <TouchableOpacity onPress={() => {
+                      setSelectedFamilies(families.map((f) => f.id));
+                      setSplitMethod(baseSplitMethod);
+                    }}>
+                      <Text style={styles.selectAllText}>All families</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
-              </TouchableOpacity>
-            ))}
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+                {families.map((f) => {
+                  const included = selectedFamilies.includes(f.id);
+                  return (
+                    <TouchableOpacity
+                      key={f.id}
+                      style={[styles.famChip, included ? styles.famChipIncluded : styles.famChipExcluded]}
+                      onPress={() => toggleAppliesTo(f.id)}
+                    >
+                      <View style={[styles.famDot, { backgroundColor: included ? (f.color ?? Colors.primary) : Colors.border }]} />
+                      <Text style={[styles.famChipText, included ? styles.famChipTextActive : styles.famChipTextExcluded]}>
+                        {f.name}
+                      </Text>
+                      {!included && <Text style={styles.excludedX}>✕</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              {selectedFamilies.length === 0 && (
+                <Text style={styles.noFamilyWarning}>Select at least one family</Text>
+              )}
+            </View>
+
+            {/* Split method — only shown when all families included (specific = always equal) */}
+            {splitMethod !== 'selected_families_only' && (
+              <>
+                <Text style={styles.label}>How to split</Text>
+                {SPLIT_METHODS.map((m) => (
+                  <TouchableOpacity
+                    key={m.value}
+                    style={[styles.methodRow, splitMethod === m.value && styles.methodRowActive]}
+                    onPress={() => { setSplitMethod(m.value); setBaseSplitMethod(m.value); }}
+                  >
+                    <View style={[styles.radio, splitMethod === m.value && styles.radioActive]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.methodLabel, splitMethod === m.value && styles.methodLabelActive]}>
+                        {m.label}
+                      </Text>
+                      <Text style={styles.methodDesc}>{m.desc}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
           </>
         )}
 
         {/* Split Preview */}
         {(() => {
           const amt = parseFloat(amount);
+          if (usePersonExpense && !isNaN(amt) && amt > 0) {
+            const payer = tripMembers.find((m) => m.user_id === paidByUserId);
+            const singleOther =
+              personSplits.length === 1 && personSplits[0].userId !== paidByUserId
+                ? personSplits[0]
+                : null;
+            return (
+              <View style={styles.preview}>
+                <Text style={styles.previewTitle}>Person Split Preview</Text>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewFamily}>Paid by</Text>
+                  <Text style={styles.previewFamily}>{payer?.profile?.full_name ?? 'Selected member'}</Text>
+                </View>
+                {singleOther ? (
+                  <View style={styles.previewRow}>
+                    <Text style={styles.previewFamily}>{singleOther.userName} owes</Text>
+                    <CurrencyAmount amount={amt} currency={currentTrip?.currency ?? '$'} />
+                  </View>
+                ) : (
+                  personSplits.map((s) => (
+                    <View key={s.userId} style={styles.previewRow}>
+                      <Text style={styles.previewFamily}>{s.userName}</Text>
+                      <CurrencyAmount amount={s.shareAmount} currency={currentTrip?.currency ?? '$'} />
+                    </View>
+                  ))
+                )}
+                <Text style={styles.previewNote}>
+                  Person settlements appear separately from family settlements.
+                </Text>
+              </View>
+            );
+          }
           const paidByFamily = families.find((f) => f.id === paidByFamilyId);
           const isPersonal =
             selectedFamilies.length === 1 && selectedFamilies[0] === paidByFamilyId;
@@ -494,10 +741,24 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
                 style={{ marginTop: Spacing.sm }}
               />
             )}
+            {isEdit && isTripOrganizer && expenseIsDeleted ? (
+              <AppButton
+                title="Permanently Delete"
+                onPress={handlePermanentDelete}
+                variant="danger"
+                fullWidth
+                style={{ marginTop: Spacing.xs }}
+              />
+            ) : null}
           </>
         ) : (
           <View style={styles.readOnlyBanner}>
             <Text style={styles.readOnlyText}>View only — only the expense creator or an admin can edit this.</Text>
+            {isEdit && (
+              <Text style={[styles.readOnlyText, { marginTop: 4 }]}>
+                This expense may be part of an active settlement and cannot be edited.
+              </Text>
+            )}
           </View>
         )}
     </FormKeyboardView>
@@ -609,6 +870,91 @@ const styles = StyleSheet.create({
   methodDesc: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   selectAllText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: FontWeight.semiBold },
   noFamilyWarning: { fontSize: FontSize.sm, color: Colors.danger, marginTop: Spacing.xs },
+  scopeRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  scopeBtn: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    padding: Spacing.md,
+    alignItems: 'center',
+  },
+  scopeBtnActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  scopeBtnText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    fontWeight: FontWeight.semiBold,
+  },
+  scopeBtnTextActive: { color: Colors.primary },
+  noFamiliesPanel: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  noFamiliesTitle: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.text,
+    marginBottom: Spacing.xs,
+  },
+  noFamiliesText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.md,
+  },
+  noFamiliesActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  createFamilyBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  createFamilyBtnText: {
+    color: Colors.surface,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
+  personModePill: {
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  personModePillText: {
+    color: Colors.primary,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
+  personDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personDotMuted: { backgroundColor: Colors.border },
+  personDotText: {
+    color: Colors.surface,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+  },
   preview: {
     backgroundColor: Colors.primaryLight,
     borderRadius: Radius.md,
@@ -627,6 +973,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   previewFamily: { fontSize: FontSize.sm, color: Colors.text },
+  previewNote: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: Spacing.xs },
   previewPersonal: {
     flexDirection: 'row',
     alignItems: 'center',

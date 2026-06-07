@@ -19,8 +19,10 @@ import { MainStackParamList, Trip, TripJoinRequest } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
+import { supabase } from '../../lib/supabaseClient';
 import { tripService } from '../../services/tripService';
 import { familyService } from '../../services/familyService';
+import { featureFlagService } from '../../services/featureFlagService';
 import { demoTrip, demoFamilies } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -29,6 +31,19 @@ import { AppButton } from '../../components/AppButton';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
+
+function greetingForHour(hour: number): string {
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function firstName(nameOrEmail: string | null | undefined): string {
+  const value = nameOrEmail?.trim();
+  if (!value) return 'there';
+  const display = value.includes('@') ? value.split('@')[0] : value;
+  return display.split(/\s+/)[0] || 'there';
+}
 
 function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
   const start = new Date(trip.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -71,9 +86,9 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
 export function TripsListScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { user, isDemoMode, isGlobalAdmin } = useAuth();
+  const { user, profile, isDemoMode, isGlobalAdmin } = useAuth();
   const { unreadCount } = useNotifications();
-  const { setCurrentTrip, setFamilies, setMembers } = useTripContext();
+  const { setCurrentTrip, setFamilies, setMembers, setFeatureFlags } = useTripContext();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -83,6 +98,12 @@ export function TripsListScreen() {
   const [joining, setJoining] = useState(false);
   const [myRequests, setMyRequests] = useState<TripJoinRequest[]>([]);
   const [showPast, setShowPast] = useState(false);
+  const greeting = greetingForHour(new Date().getHours());
+  const greetingName = firstName(
+    profile?.full_name
+      ?? user?.user_metadata?.full_name
+      ?? user?.email
+  );
 
   const loadTrips = useCallback(async () => {
     if (!user) return;
@@ -98,7 +119,11 @@ export function TripsListScreen() {
     ]);
     if (tripsResult.error) setError(tripsResult.error);
     else setTrips(tripsResult.data ?? []);
-    setMyRequests((requestsResult.data ?? []).filter((r) => r.status === 'pending'));
+    if (requestsResult.error) {
+      Alert.alert('Pending request error', requestsResult.error);
+    } else {
+      setMyRequests((requestsResult.data ?? []).filter((r) => r.status === 'pending'));
+    }
     setLoading(false);
     setRefreshing(false);
   }, [user, isDemoMode]);
@@ -109,18 +134,57 @@ export function TripsListScreen() {
     }, [loadTrips])
   );
 
+  useEffect(() => {
+    if (!user || isDemoMode) return undefined;
+
+    const channelName = `trip-list-refresh-${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trip_join_requests',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          loadTrips();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trip_members',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          loadTrips();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, isDemoMode, loadTrips]);
+
   async function openTrip(trip: Trip) {
     setCurrentTrip(trip);
     if (isDemoMode) {
       setFamilies(demoFamilies);
       setMembers([]);
     } else {
-      const [fam, mem] = await Promise.all([
+      const [fam, mem, flags] = await Promise.all([
         familyService.getFamilies(trip.id),
         tripService.getTripMembers(trip.id),
+        featureFlagService.getTripFlags(trip.id),
       ]);
       setFamilies(fam.data ?? []);
       setMembers(mem.data ?? []);
+      if (flags.data) setFeatureFlags(flags.data);
     }
     navigation.navigate('TripStack', { tripId: trip.id });
   }
@@ -135,6 +199,7 @@ export function TripsListScreen() {
     } else if (data) {
       setShowJoin(false);
       setInviteCode('');
+      await loadTrips(); // refresh so pending request appears immediately
       Alert.alert(
         'Request sent',
         'The trip organizer will review your request before you can see or join the trip.'
@@ -150,7 +215,10 @@ export function TripsListScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
         <View style={styles.headerTop}>
-          <Text style={styles.headerTitle}>My Trips</Text>
+          <View style={styles.headerCopy}>
+            <Text style={styles.greetingText}>{greeting}, {greetingName}</Text>
+            <Text style={styles.headerTitle}>My Trips</Text>
+          </View>
           <View style={styles.headerIcons}>
             {isGlobalAdmin && (
               <TouchableOpacity
@@ -331,11 +399,17 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     marginBottom: Spacing.md,
   },
+  headerCopy: { flex: 1, minWidth: 0 },
+  greetingText: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.medium,
+    color: Colors.textSecondary,
+    marginBottom: 2,
+  },
   headerTitle: {
     fontSize: FontSize.xxl,
     fontWeight: FontWeight.bold,
     color: Colors.text,
-    flex: 1,
   },
   headerIcons: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   adminBtn: {

@@ -22,7 +22,8 @@ import { demoExpenses, demoAnnouncements } from '../../lib/mockData';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 import { LoadingView } from '../../components/LoadingView';
 import { TripClosedBanner } from '../../components/TripClosedBanner';
-import { openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
+import { isMappableDestination, openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
+import { TripFeatureKey } from '../../constants/features';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -30,20 +31,21 @@ interface QuickLink {
   emoji: string;
   label: string;
   screen: keyof MainStackParamList;
+  feature: TripFeatureKey;
 }
 
-const ALL_QUICK_LINKS: (QuickLink & { adminOnly?: boolean })[] = [
-  { emoji: '🧭', label: 'Explore', screen: 'CommunitySpots' },
-  { emoji: '👨‍👩‍👧‍👦', label: 'Families', screen: 'Families' },
-  { emoji: '⚖️', label: 'Balances', screen: 'Balances', adminOnly: true },
-  { emoji: '💸', label: 'Settlements', screen: 'Settlements', adminOnly: true },
-  { emoji: '📷', label: 'Receipt Scan', screen: 'ReceiptScanner', adminOnly: true },
+const ALL_QUICK_LINKS: (QuickLink & { adminOnly?: boolean; expenseOnly?: boolean })[] = [
+  { emoji: '🧭', label: 'Explore', screen: 'CommunitySpots', feature: 'community_spots' },
+  { emoji: '👨‍👩‍👧‍👦', label: 'Families', screen: 'Families', feature: 'families' },
+  { emoji: '⚖️', label: 'Balances', screen: 'Balances', feature: 'expenses', expenseOnly: true },
+  { emoji: '💸', label: 'Settlements', screen: 'Settlements', feature: 'expenses', expenseOnly: true },
+  { emoji: '📷', label: 'Receipt Scan', screen: 'ReceiptScanner', feature: 'receipt_scan', adminOnly: true, expenseOnly: true },
 ];
 
 export function TripDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip, families, members, setMembers, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip, isTripClosed } = useTripContext();
+  const { currentTrip, families, members, setMembers, userFamily, isTripOrganizer, canManageAnnouncements, canManageTrip, canViewExpenses, isFeatureEnabled, isTripClosed } = useTripContext();
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -60,9 +62,9 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       return;
     }
     const [expResult, annResult, pollResult] = await Promise.all([
-      expenseService.getExpenses(tripId),
-      announcementService.getLatest(tripId, 3),
-      pollService.getActivePolls(tripId, 3),
+      canViewExpenses ? expenseService.getExpenses(tripId) : Promise.resolve({ data: [], error: null }),
+      isFeatureEnabled('announcements') ? announcementService.getLatest(tripId, 3) : Promise.resolve({ data: [], error: null }),
+      isFeatureEnabled('polls') ? pollService.getActivePolls(tripId, 3) : Promise.resolve({ data: [], error: null }),
     ]);
     const total = (expResult.data ?? []).reduce((s, e) => s + e.amount, 0);
     setTotalExpenses(total);
@@ -73,7 +75,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
     setActivePolls(pollResult.data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId]);
+  }, [tripId, canViewExpenses, isFeatureEnabled]);
 
   useFocusEffect(
     useCallback(() => {
@@ -102,6 +104,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
   }
 
   const trip = currentTrip;
+  const canOpenDestinationMaps = isMappableDestination(trip?.destination);
   const daysLeft = trip
     ? Math.ceil(
         (new Date(trip.end_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
@@ -152,6 +155,15 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
         >
           <Text style={styles.settingsBtnText}>⚙️ Settings</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.allTripsBtn}
+          onPress={() => navigation.navigate('Tabs')}
+          accessibilityRole="button"
+          accessibilityLabel="Go to all trips"
+          activeOpacity={0.85}
+        >
+          <Text style={styles.allTripsBtnText}>← All Trips</Text>
+        </TouchableOpacity>
       </View>
 
       {trip?.destination ? (
@@ -163,27 +175,51 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
               <Text style={styles.destinationText}>{trip.destination}</Text>
             </View>
           </View>
+          {!canOpenDestinationMaps ? (
+            <View style={styles.destinationFixRow}>
+              <Text style={styles.destinationWarning}>
+                Add a proper address or place to enable maps.
+              </Text>
+              <TouchableOpacity
+                style={styles.destinationEditBtn}
+                onPress={() => navigation.navigate('TripSettings', { tripId })}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.destinationEditBtnText}>Edit address</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
           <View style={styles.directionRow}>
             <TouchableOpacity
-              style={styles.directionBtn}
+              style={[styles.directionBtn, !canOpenDestinationMaps && styles.directionBtnDisabled]}
               onPress={() => openAppleMapsDirections(trip.destination)}
+              disabled={!canOpenDestinationMaps}
               activeOpacity={0.8}
             >
-              <Text style={styles.directionBtnText}>Maps</Text>
+              <Text style={[styles.directionBtnText, !canOpenDestinationMaps && styles.directionBtnTextDisabled]}>Maps</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.directionBtn, styles.googleDirectionBtn]}
+              style={[
+                styles.directionBtn,
+                styles.googleDirectionBtn,
+                !canOpenDestinationMaps && styles.googleDirectionBtnDisabled,
+              ]}
               onPress={() => openGoogleMapsDirections(trip.destination)}
+              disabled={!canOpenDestinationMaps}
               activeOpacity={0.8}
             >
-              <Text style={[styles.directionBtnText, styles.googleDirectionBtnText]}>Google Maps</Text>
+              <Text style={[
+                styles.directionBtnText,
+                styles.googleDirectionBtnText,
+                !canOpenDestinationMaps && styles.directionBtnTextDisabled,
+              ]}>Google Maps</Text>
             </TouchableOpacity>
           </View>
         </View>
       ) : null}
 
       {/* Announcements — only shown when there are active announcements */}
-      {announcements.length > 0 && (
+      {isFeatureEnabled('announcements') && announcements.length > 0 && (
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>📢 Announcements</Text>
@@ -244,37 +280,55 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       )}
 
       {/* Explore community spots — moved above stats for visibility */}
-      <TouchableOpacity
-        style={styles.exploreCard}
-        onPress={() => (navigation as any).navigate('CommunitySpots', { tripId })}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.exploreEmoji}>🧭</Text>
-        <View style={styles.exploreCopy}>
-          <Text style={styles.exploreTitle}>Explore Community Spots</Text>
-          <Text style={styles.exploreSubtitle}>Discover local gems near your destination</Text>
-        </View>
-        <Text style={styles.chevron}>›</Text>
-      </TouchableOpacity>
+      {isFeatureEnabled('community_spots') && (
+        <TouchableOpacity
+          style={styles.exploreCard}
+          onPress={() => (navigation as any).navigate('CommunitySpots', { tripId })}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.exploreEmoji}>🧭</Text>
+          <View style={styles.exploreCopy}>
+            <Text style={styles.exploreTitle}>Explore Community Spots</Text>
+            <Text style={styles.exploreSubtitle}>Discover local gems near your destination</Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Stats Row */}
       <View style={styles.statsRow}>
-        <View style={styles.statCard}>
+        <TouchableOpacity
+          style={styles.statCard}
+          onPress={() => navigation.navigate('Families', { tripId })}
+          accessibilityRole="button"
+          accessibilityLabel="Open families"
+          activeOpacity={0.8}
+        >
           <Text style={styles.statValue}>{families.length}</Text>
           <Text style={styles.statLabel}>Families</Text>
-        </View>
-        <View style={styles.statCard}>
+          <Text style={styles.statAction}>View</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.statCard}
+          onPress={() => navigation.navigate('TripSettings', { tripId })}
+          accessibilityRole="button"
+          accessibilityLabel="Open trip members"
+          activeOpacity={0.8}
+        >
           <Text style={styles.statValue}>{members.length}</Text>
           <Text style={styles.statLabel}>Members</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{trip?.currency} {totalExpenses.toFixed(0)}</Text>
-          <Text style={styles.statLabel}>Expenses</Text>
-        </View>
+          <Text style={styles.statAction}>Manage</Text>
+        </TouchableOpacity>
+        {canViewExpenses && isFeatureEnabled('expenses') && (
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{trip?.currency} {totalExpenses.toFixed(0)}</Text>
+            <Text style={styles.statLabel}>Expenses</Text>
+          </View>
+        )}
       </View>
 
       {/* Active Polls */}
-      {activePolls.length > 0 && (
+      {isFeatureEnabled('polls') && activePolls.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>🗳️ Active Polls</Text>
@@ -310,7 +364,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       )}
 
       {/* Join-family prompt for users without a family */}
-      {families.length > 0 && !userFamily && !isTripOrganizer && (
+      {isFeatureEnabled('families') && families.length > 0 && !userFamily && !isTripOrganizer && (
         <View style={styles.section}>
           <TouchableOpacity
             style={[styles.setupBanner, { borderColor: Colors.warning, borderWidth: 1.5 }]}
@@ -328,53 +382,14 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
         </View>
       )}
 
-      {/* Families section */}
-      {families.length === 0 ? (
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.setupBanner}
-            onPress={() => navigation.navigate('AddEditFamily', { tripId })}
-          >
-            <Text style={styles.setupBannerEmoji}>👨‍👩‍👧‍👦</Text>
-            <View>
-              <Text style={styles.setupBannerTitle}>Add your family</Text>
-              <Text style={styles.setupBannerSubtitle}>Set up families to track expenses fairly</Text>
-            </View>
-            <Text style={styles.chevron}>›</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Families in this trip</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.familiesRow}>
-            {families.map((f) => (
-              <TouchableOpacity
-                key={f.id}
-                style={styles.familyChip}
-                onPress={() => navigation.navigate('FamilyDetail', { tripId, familyId: f.id })}
-              >
-                <View style={[styles.familyDot, { backgroundColor: f.color ?? Colors.primary }]} />
-                <Text style={styles.familyChipName}>{f.name}</Text>
-                <Text style={styles.familyChipCount}>
-                  {f.adults_count}A {f.children_count > 0 ? `+ ${f.children_count}K` : ''}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              style={[styles.familyChip, styles.familyChipAdd]}
-              onPress={() => navigation.navigate('AddEditFamily', { tripId })}
-            >
-              <Text style={styles.familyChipAddText}>+ Add</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      )}
-
       {/* Quick Links Grid */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Access</Text>
         <View style={styles.linksGrid}>
-          {ALL_QUICK_LINKS.filter((l) => !l.adminOnly || canManageTrip).map((link) => (
+          {ALL_QUICK_LINKS.filter((l) =>
+            isFeatureEnabled(l.feature) &&
+            (!l.adminOnly || canManageTrip) && (!l.expenseOnly || canViewExpenses)
+          ).map((link) => (
             <TouchableOpacity
               key={link.label}
               style={styles.linkCard}
@@ -430,6 +445,21 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   settingsBtnText: { color: Colors.surface, fontSize: FontSize.sm },
+  allTripsBtn: {
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.surface + '88',
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    minWidth: 132,
+    alignItems: 'center',
+  },
+  allTripsBtnText: {
+    color: Colors.surface,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+  },
   destinationCard: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,
@@ -458,6 +488,32 @@ const styles = StyleSheet.create({
     color: Colors.text,
     lineHeight: 22,
   },
+  destinationFixRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    flexWrap: 'wrap',
+    marginBottom: Spacing.sm,
+  },
+  destinationWarning: {
+    flex: 1,
+    minWidth: 190,
+    fontSize: FontSize.xs,
+    color: Colors.warning,
+    lineHeight: 17,
+  },
+  destinationEditBtn: {
+    borderWidth: 1,
+    borderColor: Colors.warning,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 5,
+  },
+  destinationEditBtnText: {
+    fontSize: FontSize.xs,
+    color: Colors.warning,
+    fontWeight: FontWeight.semiBold,
+  },
   directionRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -471,12 +527,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  directionBtnDisabled: {
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+    opacity: 0.65,
+  },
   directionBtnText: {
     color: Colors.primary,
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semiBold,
   },
+  directionBtnTextDisabled: { color: Colors.textSecondary },
   googleDirectionBtn: { backgroundColor: Colors.primary },
+  googleDirectionBtnDisabled: { backgroundColor: Colors.background },
   googleDirectionBtnText: { color: Colors.surface },
   inviteCodeRow: {
     flexDirection: 'row',
@@ -510,6 +573,12 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
   statLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  statAction: {
+    fontSize: FontSize.xs,
+    color: Colors.primary,
+    fontWeight: FontWeight.semiBold,
+    marginTop: Spacing.xs,
+  },
   section: { marginBottom: Spacing.md },
   sectionHeader: {
     flexDirection: 'row',

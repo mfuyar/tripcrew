@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -8,11 +8,13 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { MainStackParamList, TripJoinRequest } from '../../types';
+import { AdminConsentRequest, MainStackParamList, TripJoinRequest, TripMember } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabaseClient';
 import { tripService } from '../../services/tripService';
 import { familyService } from '../../services/familyService';
+import { adminAccessService } from '../../services/adminAccessService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { displayName } from '../../utils/displayName';
@@ -21,6 +23,14 @@ import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'TripSettings'>;
+
+function tripMemberName(member: TripMember, fallbackName?: string | null, fallbackEmail?: string | null): string {
+  return member.profile?.full_name?.trim()
+    || fallbackName?.trim()
+    || member.profile?.email
+    || fallbackEmail
+    || 'Unknown';
+}
 
 export function TripSettingsScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
@@ -34,33 +44,66 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     canManageTrip,
     setCurrentTrip,
   } = useTripContext();
-  const { user, isDemoMode, isGlobalAdmin } = useAuth();
+  const { user, profile, isDemoMode, isGlobalAdmin } = useAuth();
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(currentTrip?.name ?? '');
   const [destination, setDestination] = useState(currentTrip?.destination ?? '');
   const [joinRequests, setJoinRequests] = useState<TripJoinRequest[]>([]);
+  const [canSeeRequests, setCanSeeRequests] = useState(canManageTrip || isGlobalAdmin);
   const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
+  const [adminRequests, setAdminRequests] = useState<AdminConsentRequest[]>([]);
+  const [activeAdminAccess, setActiveAdminAccess] = useState<AdminConsentRequest[]>([]);
+  const [reviewingConsentId, setReviewingConsentId] = useState<string | null>(null);
 
-  // Re-fetch members on focus, then load join requests once we know the user's role
+  async function loadJoinRequests() {
+    const { data, error } = await tripService.getPendingJoinRequests(tripId);
+    if (error) {
+      Alert.alert('Join requests error', error);
+      return;
+    }
+    setJoinRequests(data ?? []);
+  }
+
   useFocusEffect(useCallback(() => {
     if (isDemoMode) return;
+    const contextCanSeeRequests = canManageTrip || isGlobalAdmin;
+    setCanSeeRequests(contextCanSeeRequests);
+    if (contextCanSeeRequests) {
+      loadJoinRequests();
+    }
+    // Load trip if not already in context (e.g. deep-linked from a notification)
+    if (!currentTrip) {
+      tripService.getTripById(tripId).then(({ data }) => {
+        if (data) setCurrentTrip(data);
+      });
+    }
     tripService.getTripMembers(tripId).then(({ data: freshMembers }) => {
-      if (freshMembers) {
-        setMembers(freshMembers);
-        // Check role from fresh data — don't rely on stale canManageTrip state
-        const isManager = freshMembers.some(
-          (m) => m.user_id === user?.id &&
-                 (m.role === 'trip_organizer' || m.role === 'trip_admin')
-        );
-        if (isManager || isGlobalAdmin) {
-          tripService.getPendingJoinRequests(tripId).then(({ data, error }) => {
-            if (error) Alert.alert('Join requests error', error);
-            setJoinRequests(data ?? []);
-          });
-        }
+      if (!freshMembers) return;
+      setMembers(freshMembers);
+      const isOrganizer = freshMembers.some(
+        (m) => m.user_id === user?.id && m.role === 'trip_organizer'
+      );
+      const isManager = isGlobalAdmin || freshMembers.some(
+        (m) => m.user_id === user?.id &&
+               (m.role === 'trip_organizer' || m.role === 'trip_admin')
+      );
+      setCanSeeRequests(isManager);
+      if (isManager) {
+        loadJoinRequests();
+      } else {
+        setJoinRequests([]);
+      }
+      if (isOrganizer) {
+        Promise.all([
+          adminAccessService.getPendingForTrip(tripId),
+          adminAccessService.getActiveForTrip(tripId),
+        ]).then(([pendingResult, activeResult]) => {
+          setAdminRequests(pendingResult.data ?? []);
+          setActiveAdminAccess(activeResult.data ?? []);
+        });
       }
     });
-  }, [tripId, isDemoMode, user?.id, isGlobalAdmin]));
+  }, [tripId, isDemoMode, user?.id, isGlobalAdmin, canManageTrip, currentTrip]));
 
   async function handleSave() {
     if (isDemoMode) { Alert.alert('Demo Mode', 'Editing trip settings is disabled in demo.'); return; }
@@ -167,25 +210,63 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     ]);
   }
 
-  async function refreshMembersAndRequests() {
+  const refreshMembersAndRequests = useCallback(async () => {
     const [freshMembers, freshRequests] = await Promise.all([
       tripService.getTripMembers(tripId),
-      canManageTrip ? tripService.getPendingJoinRequests(tripId) : Promise.resolve({ data: [], error: null }),
+      canSeeRequests ? tripService.getPendingJoinRequests(tripId) : Promise.resolve({ data: [], error: null }),
     ]);
     if (freshMembers.data) setMembers(freshMembers.data);
     if (freshRequests.data) setJoinRequests(freshRequests.data);
-  }
+  }, [tripId, canSeeRequests, setMembers]);
+
+  useEffect(() => {
+    if (isDemoMode) return undefined;
+
+    const channelName = `trip-settings-refresh-${tripId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trip_join_requests',
+          filter: `trip_id=eq.${tripId}`,
+        },
+        () => {
+          refreshMembersAndRequests();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trip_members',
+          filter: `trip_id=eq.${tripId}`,
+        },
+        () => {
+          refreshMembersAndRequests();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tripId, isDemoMode, refreshMembersAndRequests]);
 
   async function handleReviewJoinRequest(request: TripJoinRequest, status: 'approved' | 'rejected') {
     if (!user) return;
     setReviewingRequestId(request.id);
     const { error } = await tripService.reviewJoinRequest(request.id, user.id, status);
-    setReviewingRequestId(null);
     if (error) {
+      setReviewingRequestId(null);
       Alert.alert('Request review failed', error);
       return;
     }
     await refreshMembersAndRequests();
+    setReviewingRequestId(null);
   }
 
   return (
@@ -214,18 +295,139 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         </View>
       )}
 
+      {/* Admin Access Requests */}
+      {isTripOrganizer && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Admin Access Requests</Text>
+          {adminRequests.length === 0 && activeAdminAccess.length === 0 ? (
+            <Text style={styles.emptyText}>No admin access requests.</Text>
+          ) : null}
+          {adminRequests.map((req) => (
+            <View key={req.id} style={styles.memberRow}>
+              <View style={styles.memberInfo}>
+                <Text style={styles.memberName}>
+                  {req.admin?.full_name || req.admin?.email || 'Admin'}
+                </Text>
+                <Text style={styles.memberRole}>{req.reason}</Text>
+                <Text style={styles.memberRole}>
+                  Requested {new Date(req.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </Text>
+              </View>
+              <View style={styles.memberActions}>
+                <TouchableOpacity
+                  style={[styles.roleBtn, styles.approveBtn]}
+                  disabled={reviewingConsentId === req.id}
+                  onPress={async () => {
+                    setReviewingConsentId(req.id);
+                    const { error } = await adminAccessService.approveRequest(req.id, 24);
+                    setReviewingConsentId(null);
+                    if (error) { Alert.alert('Error', error); return; }
+                    const [p, a] = await Promise.all([
+                      adminAccessService.getPendingForTrip(tripId),
+                      adminAccessService.getActiveForTrip(tripId),
+                    ]);
+                    setAdminRequests(p.data ?? []);
+                    setActiveAdminAccess(a.data ?? []);
+                  }}
+                >
+                  <Text style={[styles.roleBtnText, styles.approveBtnText]}>
+                    {reviewingConsentId === req.id ? '...' : '24h'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.roleBtn, styles.approveBtn]}
+                  disabled={reviewingConsentId === req.id}
+                  onPress={async () => {
+                    setReviewingConsentId(req.id);
+                    const { error } = await adminAccessService.approveRequest(req.id, 48);
+                    setReviewingConsentId(null);
+                    if (error) { Alert.alert('Error', error); return; }
+                    const [p, a] = await Promise.all([
+                      adminAccessService.getPendingForTrip(tripId),
+                      adminAccessService.getActiveForTrip(tripId),
+                    ]);
+                    setAdminRequests(p.data ?? []);
+                    setActiveAdminAccess(a.data ?? []);
+                  }}
+                >
+                  <Text style={[styles.roleBtnText, styles.approveBtnText]}>
+                    {reviewingConsentId === req.id ? '...' : '48h'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.roleBtn, styles.approveBtn]}
+                  disabled={reviewingConsentId === req.id}
+                  onPress={async () => {
+                    setReviewingConsentId(req.id);
+                    const { error } = await adminAccessService.approveRequest(req.id, 168);
+                    setReviewingConsentId(null);
+                    if (error) { Alert.alert('Error', error); return; }
+                    const [p, a] = await Promise.all([
+                      adminAccessService.getPendingForTrip(tripId),
+                      adminAccessService.getActiveForTrip(tripId),
+                    ]);
+                    setAdminRequests(p.data ?? []);
+                    setActiveAdminAccess(a.data ?? []);
+                  }}
+                >
+                  <Text style={[styles.roleBtnText, styles.approveBtnText]}>
+                    {reviewingConsentId === req.id ? '...' : '7 days'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  disabled={reviewingConsentId === req.id}
+                  onPress={async () => {
+                    setReviewingConsentId(req.id);
+                    const { error } = await adminAccessService.rejectRequest(req.id);
+                    setReviewingConsentId(null);
+                    if (error) { Alert.alert('Error', error); return; }
+                    const { data } = await adminAccessService.getPendingForTrip(tripId);
+                    setAdminRequests(data ?? []);
+                  }}
+                >
+                  <Text style={styles.removeText}>Reject</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+          {activeAdminAccess.map((req) => (
+            <View key={req.id} style={styles.memberRow}>
+              <View style={styles.memberInfo}>
+                <Text style={styles.memberName}>
+                  {req.admin?.full_name || req.admin?.email || 'Admin'}
+                </Text>
+                <Text style={styles.memberRole}>
+                  Expires {req.expires_at
+                    ? new Date(req.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : 'never'}
+                </Text>
+              </View>
+              <View style={styles.memberActions}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    const { error } = await adminAccessService.revokeAccess(req.id);
+                    if (error) { Alert.alert('Error', error); return; }
+                    const { data } = await adminAccessService.getActiveForTrip(tripId);
+                    setActiveAdminAccess(data ?? []);
+                  }}
+                >
+                  <Text style={styles.removeText}>Revoke</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
       {/* Join Requests */}
-      {canManageTrip && (
+      {canSeeRequests && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, styles.sectionTitleInHeader]}>
               Join Requests ({joinRequests.length})
             </Text>
             <TouchableOpacity
-              onPress={async () => {
-                const { data } = await tripService.getPendingJoinRequests(tripId);
-                if (data) setJoinRequests(data);
-              }}
+              onPress={loadJoinRequests}
               hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
             >
               <Text style={styles.refreshText}>↻ Refresh</Text>
@@ -327,6 +529,8 @@ export function TripSettingsScreen({ navigation, route }: Props) {
           <Text style={[styles.legendDot, { color: Colors.textSecondary }]}>● Member</Text>
         </View>
         {members.map((m) => {
+          const isMe = m.user_id === user?.id || m.profile?.email === user?.email;
+          const name = tripMemberName(m, isMe ? profile?.full_name : undefined, isMe ? user?.email : undefined);
           const isTripAdmin = m.role === 'trip_admin';
           const canPromote = isTripOrganizer && m.user_id !== user?.id && m.role !== 'trip_organizer';
           const roleLabel = m.role === 'trip_organizer' ? 'Trip Organizer'
@@ -340,9 +544,18 @@ export function TripSettingsScreen({ navigation, route }: Props) {
             : Colors.textSecondary;
           return (
             <View key={m.id} style={styles.memberRow}>
-              <FamilyAvatar name={m.profile?.full_name ?? '?'} size={36} />
+              <FamilyAvatar name={name} size={36} />
               <View style={styles.memberInfo}>
-                <Text style={styles.memberName}>{displayName(m.profile?.full_name, m.family?.name)}</Text>
+                <View style={styles.nameRow}>
+                  <Text style={[styles.memberName, isMe && styles.selfMemberName]}>
+                    {displayName(name, m.family?.name)}
+                  </Text>
+                  {isMe && (
+                    <View style={styles.youBadge}>
+                      <Text style={styles.youBadgeText}>You</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={[styles.memberRole, { color: roleColor }]}>{roleLabel}</Text>
               </View>
               {canPromote && (
@@ -560,6 +773,15 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.medium,
     color: Colors.text,
   },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
+  selfMemberName: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  youBadge: {
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+  },
+  youBadgeText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.bold },
   memberRole: {
     fontSize: FontSize.xs,
     color: Colors.textSecondary,

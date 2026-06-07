@@ -32,6 +32,7 @@ CREATE INDEX IF NOT EXISTS expense_versions_trip_id_idx    ON public.expense_ver
 ALTER TABLE public.expense_versions ENABLE ROW LEVEL SECURITY;
 
 -- Trip admins/organizers see all versions; regular members only see the current version
+DROP POLICY IF EXISTS "Admins can view all versions" ON public.expense_versions;
 CREATE POLICY "Admins can view all versions"
   ON public.expense_versions FOR SELECT
   USING (
@@ -44,11 +45,13 @@ CREATE POLICY "Admins can view all versions"
     )
   );
 
+DROP POLICY IF EXISTS "Authenticated members can insert versions" ON public.expense_versions;
 CREATE POLICY "Authenticated members can insert versions"
   ON public.expense_versions FOR INSERT
   WITH CHECK (is_trip_member(trip_id, auth.uid()));
 
 -- Admins/organizers can delete old versions (purge)
+DROP POLICY IF EXISTS "Admins can delete versions" ON public.expense_versions;
 CREATE POLICY "Admins can delete versions"
   ON public.expense_versions FOR DELETE
   USING (can_manage_trip(trip_id, auth.uid()));

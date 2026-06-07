@@ -23,7 +23,7 @@ export type ExpenseCategory =
 
 export type TripRole = 'trip_organizer' | 'trip_admin' | 'family_admin' | 'member' | 'viewer';
 
-export type PaymentStatus = 'pending' | 'paid' | 'confirmed' | 'disputed';
+export type PaymentStatus = 'proposed' | 'payer_approved' | 'receiver_approved' | 'completed' | 'disputed' | 'cancelled';
 
 export type MediaType = 'photo' | 'video' | 'document' | 'audio';
 
@@ -107,6 +107,21 @@ export interface TripJoinRequest {
   trip?: Trip;
 }
 
+export interface AdminConsentRequest {
+  id: string;
+  trip_id: string;
+  admin_id: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'revoked';
+  approved_by?: string;
+  approved_at?: string;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+  trip?: Trip;
+  admin?: Profile;
+}
+
 export interface Family {
   id: string;
   trip_id: string;
@@ -141,7 +156,7 @@ export interface Expense {
   amount: number;
   currency: string;
   category: ExpenseCategory;
-  paid_by_family_id: string;
+  paid_by_family_id?: string | null;
   paid_by_user_id: string;
   split_method: SplitMethod;
   date: string;
@@ -158,7 +173,9 @@ export interface Expense {
   updated_at: string;
   // Joined data
   paid_by_family?: Family;
+  paid_by_profile?: Profile;
   expense_splits?: ExpenseSplit[];
+  expense_person_splits?: ExpensePersonSplit[];
 }
 
 export type ExpenseVersionChangeType = 'create' | 'update' | 'delete' | 'restore';
@@ -188,6 +205,17 @@ export interface ExpenseSplit {
   family?: Family;
 }
 
+export interface ExpensePersonSplit {
+  id: string;
+  expense_id: string;
+  trip_id: string;
+  user_id: string;
+  share_amount: number;
+  percentage?: number;
+  created_at: string;
+  profile?: Profile;
+}
+
 export interface Settlement {
   id: string;
   trip_id: string;
@@ -198,6 +226,11 @@ export interface Settlement {
   status: PaymentStatus;
   notes?: string;
   confirmed_at?: string;
+  payer_family_approved_at?: string;
+  receiver_family_approved_at?: string;
+  dispute_reason?: string;
+  cancel_reason?: string;
+  deleted_at?: string;
   created_at: string;
   updated_at: string;
   // Joined data
@@ -498,6 +531,29 @@ export interface SettlementCalculation {
   fromFamilyName: string;
   toFamilyId: string;
   toFamilyName: string;
+  amount: number;
+}
+
+export interface PersonSplitShare {
+  userId: string;
+  userName: string;
+  shareAmount: number;
+  percentage?: number;
+}
+
+export interface PersonBalance {
+  userId: string;
+  userName: string;
+  totalPaid: number;
+  totalOwed: number;
+  balance: number;
+}
+
+export interface PersonSettlementCalculation {
+  fromUserId: string;
+  fromUserName: string;
+  toUserId: string;
+  toUserName: string;
   amount: number;
 }
 

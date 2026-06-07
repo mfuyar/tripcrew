@@ -2,15 +2,18 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, RefreshControl, TextInput, Modal, Platform, KeyboardAvoidingView,
-  ScrollView,
+  ScrollView, Switch,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MainStackParamList, Trip, TripMember, TripRole } from '../../types';
+import { AdminConsentRequest, MainStackParamList, Trip, TripMember, TripRole } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { tripService } from '../../services/tripService';
 import { familyService } from '../../services/familyService';
+import { adminAccessService } from '../../services/adminAccessService';
+import { featureFlagService } from '../../services/featureFlagService';
+import { TRIP_FEATURES, TripFeatureKey } from '../../constants/features';
 import { LoadingView } from '../../components/LoadingView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
@@ -19,7 +22,7 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
 export function GlobalAdminScreen() {
   const navigation = useNavigation<Nav>();
   const { isGlobalAdmin } = useAuth();
-  const { setCurrentTrip, setFamilies, setMembers } = useTripContext();
+  const { setCurrentTrip, setFamilies, setMembers, setFeatureFlags } = useTripContext();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -30,10 +33,23 @@ export function GlobalAdminScreen() {
   const [memberModalMembers, setMemberModalMembers] = useState<TripMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
   const [acting, setActing] = useState(false);
+  const [consentRequests, setConsentRequests] = useState<AdminConsentRequest[]>([]);
+  const [consentModal, setConsentModal] = useState<Trip | null>(null);
+  const [featureModalTrip, setFeatureModalTrip] = useState<Trip | null>(null);
+  const [featureFlagsModal, setFeatureFlagsModal] = useState<Record<TripFeatureKey, boolean> | null>(null);
+  const [featureLoading, setFeatureLoading] = useState(false);
+  const [featureSaving, setFeatureSaving] = useState<TripFeatureKey | null>(null);
+  const [consentReason, setConsentReason] = useState('');
+  const [consentAgreed, setConsentAgreed] = useState(false);
+  const [submittingConsent, setSubmittingConsent] = useState(false);
 
   const load = useCallback(async () => {
-    const { data } = await tripService.getAllTrips();
-    setTrips(data ?? []);
+    const [tripsResult, consentResult] = await Promise.all([
+      tripService.getAllTrips(),
+      adminAccessService.getMyRequests(),
+    ]);
+    setTrips(tripsResult.data ?? []);
+    setConsentRequests(consentResult.data ?? []);
     setLoading(false);
     setRefreshing(false);
   }, []);
@@ -49,12 +65,14 @@ export function GlobalAdminScreen() {
 
   async function openTrip(trip: Trip) {
     setCurrentTrip(trip);
-    const [fam, mem] = await Promise.all([
+    const [fam, mem, flags] = await Promise.all([
       familyService.getFamilies(trip.id),
       tripService.getTripMembers(trip.id),
+      featureFlagService.getTripFlags(trip.id),
     ]);
     setFamilies(fam.data ?? []);
     setMembers(mem.data ?? []);
+    if (flags.data) setFeatureFlags(flags.data);
     navigation.navigate('TripStack', { tripId: trip.id });
   }
 
@@ -94,6 +112,33 @@ export function GlobalAdminScreen() {
     setMemberModalTrip(trip);
     setMemberModalMembers([]);
     await loadMembersForTrip(trip);
+  }
+
+  async function openFeatureFlags(trip: Trip) {
+    setFeatureModalTrip(trip);
+    setFeatureFlagsModal(null);
+    setFeatureLoading(true);
+    const { data, error } = await featureFlagService.getTripFlags(trip.id);
+    setFeatureLoading(false);
+    if (error) {
+      Alert.alert('Unable to load feature flags', error);
+      setFeatureModalTrip(null);
+      return;
+    }
+    setFeatureFlagsModal(data ?? null);
+  }
+
+  async function toggleFeature(featureKey: TripFeatureKey, enabled: boolean) {
+    if (!featureModalTrip || !featureFlagsModal) return;
+    const previous = featureFlagsModal[featureKey] !== false;
+    setFeatureFlagsModal({ ...featureFlagsModal, [featureKey]: enabled });
+    setFeatureSaving(featureKey);
+    const { error } = await featureFlagService.setTripFlag(featureModalTrip.id, featureKey, enabled);
+    setFeatureSaving(null);
+    if (error) {
+      Alert.alert('Feature update failed', error);
+      setFeatureFlagsModal({ ...featureFlagsModal, [featureKey]: previous });
+    }
   }
 
   async function refreshAdminTrips() {
@@ -166,6 +211,23 @@ export function GlobalAdminScreen() {
     );
   }
 
+  function consentForTrip(tripId: string): AdminConsentRequest | undefined {
+    return consentRequests.find((r) => r.trip_id === tripId && (r.status === 'pending' || r.status === 'approved'));
+  }
+
+  async function handleConsentSubmit() {
+    if (!consentModal || !consentReason.trim()) return;
+    setSubmittingConsent(true);
+    const { error } = await adminAccessService.requestAccess(consentModal.id, consentReason.trim());
+    setSubmittingConsent(false);
+    if (error) { Alert.alert('Error', error); return; }
+    const { data } = await adminAccessService.getMyRequests();
+    setConsentRequests(data ?? []);
+    setConsentModal(null);
+    setConsentReason('');
+    setConsentAgreed(false);
+  }
+
   async function handleDelete(trip: Trip) {
     Alert.alert(
       'Delete Trip',
@@ -202,6 +264,7 @@ export function GlobalAdminScreen() {
           },
         },
         { text: 'View Members', onPress: () => openMembers(trip) },
+        { text: 'Feature Flags', onPress: () => openFeatureFlags(trip) },
         { text: 'Delete Trip', style: 'destructive', onPress: () => handleDelete(trip) },
         { text: 'Open Trip', onPress: () => openTrip(trip) },
         { text: 'Cancel', style: 'cancel' },
@@ -262,6 +325,9 @@ export function GlobalAdminScreen() {
               <TouchableOpacity style={styles.inlineBtn} onPress={() => openMembers(item)}>
                 <Text style={styles.inlineBtnText}>Members</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={styles.inlineBtn} onPress={() => openFeatureFlags(item)}>
+                <Text style={styles.inlineBtnText}>Features</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.inlineBtn, item.is_held ? styles.inlineBtnSuccess : styles.inlineBtnDanger]}
                 onPress={() => {
@@ -284,6 +350,61 @@ export function GlobalAdminScreen() {
                 <Text style={[styles.inlineBtnText, styles.inlineBtnDangerText]}>Delete</Text>
               </TouchableOpacity>
             </View>
+            {(() => {
+              const consent = consentForTrip(item.id);
+              if (!consent || consent.status === 'rejected' || consent.status === 'revoked') {
+                return (
+                  <View style={styles.consentRow}>
+                    <TouchableOpacity
+                      style={[styles.inlineBtn, styles.inlineBtnPrimary]}
+                      onPress={() => { setConsentModal(item); setConsentReason(''); setConsentAgreed(false); }}
+                    >
+                      <Text style={[styles.inlineBtnText, styles.inlineBtnPrimaryText]}>Request Access</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }
+              if (consent.status === 'pending') {
+                return (
+                  <View style={styles.consentRow}>
+                    <View style={[styles.inlineBtn, styles.inlineBtnDisabled]}>
+                      <Text style={[styles.inlineBtnText, styles.inlineBtnDisabledText]}>Pending Approval</Text>
+                    </View>
+                  </View>
+                );
+              }
+              const isExpired = consent.expires_at ? new Date(consent.expires_at) <= new Date() : false;
+              if (isExpired) {
+                return (
+                  <View style={styles.consentRow}>
+                    <View style={[styles.inlineBtn, styles.inlineBtnDisabled]}>
+                      <Text style={[styles.inlineBtnText, styles.inlineBtnDisabledText]}>Access Expired</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.inlineBtn, styles.inlineBtnPrimary]}
+                      onPress={() => { setConsentModal(item); setConsentReason(''); setConsentAgreed(false); }}
+                    >
+                      <Text style={[styles.inlineBtnText, styles.inlineBtnPrimaryText]}>Request Access</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }
+              const expiryStr = consent.expires_at
+                ? new Date(consent.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : 'no expiry';
+              return (
+                <View style={styles.consentRow}>
+                  <TouchableOpacity
+                    style={[styles.inlineBtn, styles.inlineBtnSuccess]}
+                    onPress={() => openTrip(item)}
+                  >
+                    <Text style={[styles.inlineBtnText, styles.inlineBtnSuccessText]}>
+                      Access Active · expires {expiryStr}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
           </TouchableOpacity>
         )}
       />
@@ -339,6 +460,123 @@ export function GlobalAdminScreen() {
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      <Modal visible={!!featureModalTrip} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, styles.membersModalBox]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderText}>
+                <Text style={styles.modalTitle}>{featureModalTrip?.name} Features</Text>
+                <Text style={styles.modalSubtitle}>
+                  Disabled features are hidden for that trip. Existing data stays saved.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closeBtn}
+                onPress={() => {
+                  setFeatureModalTrip(null);
+                  setFeatureFlagsModal(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Close feature flags"
+              >
+                <Text style={styles.closeBtnText}>×</Text>
+              </TouchableOpacity>
+            </View>
+            {featureLoading || !featureFlagsModal ? (
+              <Text style={styles.emptyMembers}>Loading feature flags...</Text>
+            ) : (
+              <ScrollView contentContainerStyle={styles.featureList}>
+                {TRIP_FEATURES.map((feature) => {
+                  const enabled = featureFlagsModal[feature.key] !== false;
+                  const isSaving = featureSaving === feature.key;
+                  return (
+                    <View key={feature.key} style={[styles.featureRow, !enabled && styles.featureRowOff]}>
+                      <View style={styles.featureInfo}>
+                        <View style={styles.featureHeaderRow}>
+                          <Text style={styles.featureName}>{feature.label}</Text>
+                          <View style={[styles.featureStatusBadge, enabled ? styles.featureStatusEnabled : styles.featureStatusDisabled]}>
+                            <Text style={[styles.featureStatusText, enabled ? styles.featureStatusTextEnabled : styles.featureStatusTextDisabled]}>
+                              {enabled ? 'Enabled' : 'Disabled'}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.featureDescription}>{feature.description}</Text>
+                      </View>
+                      <View style={styles.featureSwitchGroup}>
+                        <Text style={[styles.featureSwitchLabel, enabled ? styles.featureSwitchLabelEnabled : styles.featureSwitchLabelDisabled]}>
+                          {enabled ? 'Disable' : 'Enable'}
+                        </Text>
+                        <Switch
+                          value={enabled}
+                          disabled={!!featureSaving}
+                          onValueChange={(next) => toggleFeature(feature.key, next)}
+                          trackColor={{ false: Colors.border, true: Colors.primaryLight }}
+                          thumbColor={enabled ? Colors.primary : Colors.textSecondary}
+                          accessibilityLabel={`${feature.label} is ${enabled ? 'enabled' : 'disabled'}. ${enabled ? 'Disable' : 'Enable'} feature.`}
+                        />
+                      </View>
+                      {isSaving ? <Text style={styles.featureSaving}>Saving</Text> : null}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Consent request modal */}
+      <Modal visible={!!consentModal} transparent animationType="slide">
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView contentContainerStyle={styles.modalBox} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitle}>Request Access to "{consentModal?.name}"</Text>
+
+            <View style={styles.agreementBox}>
+              <Text style={styles.agreementTitle}>Data Access Agreement</Text>
+              <Text style={styles.agreementText}>
+                By requesting access to this trip's private data, I confirm that:{'\n\n'}
+                {'• '}This access is for a legitimate audit, safety investigation, or platform integrity purpose only.{'\n\n'}
+                {'• '}I will not use, share, or disclose any personal data, messages, photos, or financial information to any third party.{'\n\n'}
+                {'• '}Access is temporary and limited to the duration approved by the trip organizer.{'\n\n'}
+                {'• '}All access is logged and may be reviewed for compliance.{'\n\n'}
+                {'• '}Misuse of this access may result in removal of global admin privileges.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.agreementCheckRow}
+              onPress={() => setConsentAgreed((v) => !v)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.checkbox, consentAgreed && styles.checkboxChecked]}>
+                {consentAgreed && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.agreementCheckLabel}>I have read and agree to the terms above</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.modalSubtitle}>Reason for access request</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={consentReason}
+              onChangeText={setConsentReason}
+              placeholder="e.g. Investigating a reported content issue..."
+              placeholderTextColor={Colors.textSecondary}
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.modalConfirm, styles.modalConfirmPrimary, (!consentReason.trim() || !consentAgreed || submittingConsent) && styles.modalConfirmDisabled]}
+              onPress={handleConsentSubmit}
+              disabled={!consentReason.trim() || !consentAgreed || submittingConsent}
+            >
+              <Text style={styles.modalConfirmText}>{submittingConsent ? 'Submitting...' : 'Submit Request'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalCancel} onPress={() => { setConsentModal(null); setConsentAgreed(false); setConsentReason(''); }}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Hold reason modal */}
@@ -493,6 +731,41 @@ const styles = StyleSheet.create({
   },
   memberActionText: { color: Colors.primary, fontSize: FontSize.xs, fontWeight: FontWeight.semiBold },
   emptyMembers: { color: Colors.textSecondary, textAlign: 'center', paddingVertical: Spacing.lg },
+  featureList: { paddingBottom: Spacing.md },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  featureRowOff: { opacity: 0.72 },
+  featureInfo: { flex: 1 },
+  featureHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
+  featureName: { fontSize: FontSize.md, color: Colors.text, fontWeight: FontWeight.semiBold },
+  featureStatusBadge: {
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+  },
+  featureStatusEnabled: { backgroundColor: Colors.success + '20' },
+  featureStatusDisabled: { backgroundColor: Colors.textSecondary + '20' },
+  featureStatusText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold },
+  featureStatusTextEnabled: { color: Colors.success },
+  featureStatusTextDisabled: { color: Colors.textSecondary },
+  featureDescription: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 3, lineHeight: 17 },
+  featureSwitchGroup: { alignItems: 'center', minWidth: 76 },
+  featureSwitchLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, marginBottom: 2 },
+  featureSwitchLabelEnabled: { color: Colors.danger },
+  featureSwitchLabelDisabled: { color: Colors.primary },
+  featureSaving: {
+    position: 'absolute',
+    right: 0,
+    bottom: 4,
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+  },
   modalInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.md,
     padding: Spacing.md, fontSize: FontSize.md, color: Colors.text,
@@ -506,4 +779,64 @@ const styles = StyleSheet.create({
   modalConfirmText: { color: '#fff', fontWeight: FontWeight.bold, fontSize: FontSize.md },
   modalCancel: { alignItems: 'center', padding: Spacing.sm },
   modalCancelText: { color: Colors.textSecondary, fontSize: FontSize.md },
+  consentRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
+  },
+  inlineBtnPrimary: { borderColor: Colors.primary, backgroundColor: Colors.primary },
+  inlineBtnPrimaryText: { color: '#fff' },
+  inlineBtnDisabled: { borderColor: Colors.border, backgroundColor: Colors.background },
+  inlineBtnDisabledText: { color: Colors.textSecondary },
+  modalConfirmPrimary: { backgroundColor: Colors.primary },
+  agreementBox: {
+    backgroundColor: Colors.background,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  agreementTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+  },
+  agreementText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  agreementCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  checkboxChecked: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: FontWeight.bold,
+  },
+  agreementCheckLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    flex: 1,
+  },
 });

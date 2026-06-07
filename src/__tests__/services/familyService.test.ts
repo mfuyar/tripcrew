@@ -13,26 +13,60 @@ const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
 const mockRpc = jest.fn();
+const mockCapacityFamilySingle = jest.fn();
+const mockCapacityMembersEq = jest.fn();
 
-const mockFrom = jest.fn(() => ({
-  select: mockSelect.mockReturnThis(),
-  insert: mockInsert.mockReturnThis(),
-  update: mockUpdate.mockReturnThis(),
-  delete: mockDelete.mockReturnThis(),
-  eq: mockEq.mockReturnThis(),
-  order: mockOrder.mockReturnThis(),
-  single: mockSingle,
-}));
+const createQueryMock = (table: string) => {
+  const query: Record<string, jest.Mock> = {
+    select: jest.fn((columns?: string) => {
+      mockSelect(columns);
+      if (table === 'families' && columns === 'adults_count,children_count') {
+        return {
+          eq: jest.fn(() => ({ single: mockCapacityFamilySingle })),
+        };
+      }
+      if (table === 'family_members' && columns === 'user_id') {
+        return {
+          eq: mockCapacityMembersEq,
+        };
+      }
+      return query;
+    }),
+    insert: jest.fn((...args: unknown[]) => {
+      mockInsert(...args);
+      return query;
+    }),
+    update: jest.fn((...args: unknown[]) => {
+      mockUpdate(...args);
+      return query;
+    }),
+    delete: jest.fn((...args: unknown[]) => {
+      mockDelete(...args);
+      return query;
+    }),
+    eq: jest.fn((...args: unknown[]) => mockEq(...args) ?? query),
+    order: jest.fn((...args: unknown[]) => mockOrder(...args) ?? query),
+    single: jest.fn((...args: unknown[]) => mockSingle(...args)),
+  };
+  return query;
+};
+
+const mockFrom = jest.fn((table: string) => createQueryMock(table));
 
 jest.mock('../../lib/supabaseClient', () => ({
   supabase: { from: mockFrom, rpc: mockRpc },
 }));
 
-import { familyService } from '../../services/familyService';
+import { FAMILY_FULL_ERROR, familyService } from '../../services/familyService';
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'missing function' } });
+  mockCapacityFamilySingle.mockResolvedValue({
+    data: { adults_count: 2, children_count: 1 },
+    error: null,
+  });
+  mockCapacityMembersEq.mockResolvedValue({ data: [], error: null });
 });
 
 const tripId = 'trip-1';
@@ -173,6 +207,22 @@ describe('SPEC §3 — updateFamily', () => {
     expect(data).toBeNull();
     expect(error).toBeTruthy();
   });
+
+  it('prevents reducing head count below current member count', async () => {
+    mockCapacityMembersEq.mockResolvedValueOnce({
+      data: [{ user_id: 'user-1' }, { user_id: 'user-2' }],
+      error: null,
+    });
+
+    const { data, error } = await familyService.updateFamily(familyId, {
+      adults_count: 1,
+      children_count: 0,
+    });
+
+    expect(data).toBeNull();
+    expect(error).toBe('This family already has more members than the new head count. Remove members or increase the head count first.');
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
 });
 
 // ─── deleteFamily ─────────────────────────────────────────────────────────────
@@ -230,6 +280,19 @@ describe('SPEC §3.2 — Family Members', () => {
     // Should also update trip_members
     const fromCalls = (mockFrom as jest.Mock).mock.calls.map(([t]) => t);
     expect(fromCalls).toContain('trip_members');
+  });
+
+  it('returns a head count error when the family is full', async () => {
+    mockCapacityMembersEq.mockResolvedValueOnce({
+      data: [{ user_id: 'user-1' }, { user_id: 'user-2' }, { user_id: 'user-3' }],
+      error: null,
+    });
+
+    const { data, error } = await familyService.addFamilyMember(familyId, tripId, 'user-4');
+
+    expect(data).toBeNull();
+    expect(error).toBe(FAMILY_FULL_ERROR);
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
   it('switches family membership through the RPC when available', async () => {

@@ -45,17 +45,31 @@ const SPOT_TAGS = [
   { id: 'religious', label: '🕌 Religious' },
 ];
 
-export function CreateCommunitySpotScreen({ navigation }: Props) {
+function cleanText(value: string): string {
+  return value.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+}
+
+function isValidLatitude(value: number): boolean {
+  return Number.isFinite(value) && value >= -90 && value <= 90;
+}
+
+function isValidLongitude(value: number): boolean {
+  return Number.isFinite(value) && value >= -180 && value <= 180;
+}
+
+export function CreateCommunitySpotScreen({ navigation, route }: Props) {
   const { user } = useAuth();
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState<CommunitySpotCategory>('hidden_gem');
-  const [description, setDescription] = useState('');
-  const [address, setAddress] = useState('');
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
+  const editSpot = route.params?.editSpot;
+  const isEditing = Boolean(editSpot);
+  const [name, setName] = useState(editSpot?.name ?? '');
+  const [category, setCategory] = useState<CommunitySpotCategory>(editSpot?.category ?? 'hidden_gem');
+  const [description, setDescription] = useState(editSpot?.description ?? '');
+  const [address, setAddress] = useState(editSpot?.address ?? '');
+  const [latitude, setLatitude] = useState(editSpot ? String(editSpot.latitude) : '');
+  const [longitude, setLongitude] = useState(editSpot ? String(editSpot.longitude) : '');
   const [photoUri, setPhotoUri] = useState<string | undefined>();
-  const [website, setWebsite] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [website, setWebsite] = useState(editSpot?.website ?? '');
+  const [selectedTags, setSelectedTags] = useState<string[]>(editSpot?.tags ?? []);
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -117,23 +131,37 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
 
   async function handleSave() {
     if (!user) return;
+    const spotName = cleanText(name);
+    const spotDescription = cleanText(description);
+    const spotAddress = cleanText(address);
+    const spotWebsite = cleanText(website);
     const lat = Number(latitude);
     const lng = Number(longitude);
-    if (!name.trim() || !description.trim()) {
-      Alert.alert('Missing info', 'Add a spot name and description.');
+    if (!spotName) {
+      Alert.alert('Spot name needed', 'Add the name of the place you want to post.');
       return;
     }
+    if (!spotDescription) {
+      Alert.alert('Description needed', 'Add a short description so trip members know why this spot is useful.');
+      return;
+    }
+
     let finalLat = lat;
     let finalLng = lng;
-    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
-    const hasAddress = address.trim().length > 0;
+    const hasAnyCoordinateText = cleanText(latitude).length > 0 || cleanText(longitude).length > 0;
+    const hasCoords = isValidLatitude(lat) && isValidLongitude(lng);
+    const hasAddress = spotAddress.length > 0;
+    if (hasAnyCoordinateText && !hasCoords) {
+      Alert.alert('Location needs fixing', 'Enter a valid latitude and longitude, or clear them and use an address instead.');
+      return;
+    }
     if (!hasCoords && !hasAddress) {
       Alert.alert('Location required', 'Enter an address or use your current location so others can get directions.');
       return;
     }
     // If address provided but no pin set, geocode address to get coordinates
     if (!hasCoords && hasAddress) {
-      const { data: geo } = await addressSearchService.search(address.trim(), 1);
+      const { data: geo } = await addressSearchService.search(spotAddress, 1);
       if (geo?.[0]) {
         finalLat = geo[0].latitude;
         finalLng = geo[0].longitude;
@@ -144,19 +172,43 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
     }
 
     setSaving(true);
+    if (editSpot) {
+      const { data, error } = await communitySpotService.updateSpot(editSpot.id, {
+        name: spotName,
+        category,
+        description: spotDescription,
+        address: spotAddress || undefined,
+      });
+      setSaving(false);
+      if (error) {
+        Alert.alert('Unable to update spot', error);
+        return;
+      }
+      if (data?.moderation_status === 'pending_review') {
+        Alert.alert(
+          'Sent for review',
+          'This edit is waiting for moderator approval before everyone can see it.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+        return;
+      }
+      navigation.goBack();
+      return;
+    }
+
     const { data, error } = await communitySpotService.create(user.id, {
-      name: name.trim(),
+      name: spotName,
       category,
-      description: description.trim(),
-      address: address.trim() || undefined,
+      description: spotDescription,
+      address: spotAddress || undefined,
       latitude: finalLat,
       longitude: finalLng,
       photoUri,
-      website: website.trim() || undefined,
+      website: spotWebsite || undefined,
       tags: selectedTags,
       source_type: 'member',
       source_name: 'Member Suggested',
-    } as any);
+    });
     setSaving(false);
     if (error) {
       Alert.alert('Unable to post spot', error);
@@ -259,7 +311,7 @@ export function CreateCommunitySpotScreen({ navigation }: Props) {
         </Text>
       )}
 
-      <AppButton title="Post Spot" onPress={handleSave} loading={saving} fullWidth style={styles.saveButton} />
+      <AppButton title={isEditing ? 'Save Spot' : 'Post Spot'} onPress={handleSave} loading={saving} fullWidth style={styles.saveButton} />
     </FormKeyboardView>
   );
 }

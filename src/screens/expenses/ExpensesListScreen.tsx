@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -37,7 +38,7 @@ const FILTERS: { label: string; value: ExpenseCategory | 'all' }[] = [
 export function ExpensesListScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { currentTrip, canManageTrip } = useTripContext();
+  const { currentTrip, canManageTrip, isTripOrganizer } = useTripContext();
   const { isDemoMode } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +81,11 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
       let cmp = 0;
       if (sortBy === 'date')   cmp = a.date.localeCompare(b.date);
       if (sortBy === 'amount') cmp = a.amount - b.amount;
-      if (sortBy === 'family') cmp = (a.paid_by_family?.name ?? '').localeCompare(b.paid_by_family?.name ?? '');
+      if (sortBy === 'family') {
+        const payerA = a.paid_by_family?.name ?? a.paid_by_profile?.full_name ?? '';
+        const payerB = b.paid_by_family?.name ?? b.paid_by_profile?.full_name ?? '';
+        cmp = payerA.localeCompare(payerB);
+      }
       return sortDir === 'asc' ? cmp : -cmp;
     });
   const total = filtered.reduce((s, e) => s + e.amount, 0);
@@ -97,6 +102,7 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
   const familyTotals = Object.values(
     expenses.reduce<Record<string, { name: string; color?: string; total: number; count: number }>>((acc, e) => {
       const id = e.paid_by_family_id;
+      if (!id) return acc;
       const name = e.paid_by_family?.name ?? 'Unknown';
       const color = e.paid_by_family?.color;
       if (!acc[id]) acc[id] = { name, color, total: 0, count: 0 };
@@ -199,15 +205,16 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
         <Text style={styles.sortCount}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}</Text>
       </View>
 
-      {/* Deleted expenses — admin only */}
-      {canManageTrip && (
+      {/* Deleted expenses — organizer only */}
+      {isTripOrganizer && (
         <View style={styles.deletedSection}>
           <TouchableOpacity
             style={styles.deletedHeader}
             onPress={async () => {
               if (!showDeleted && deletedExpenses.length === 0) {
                 setLoadingDeleted(true);
-                const { data } = await expenseService.getDeletedExpenses(tripId);
+                const { data, error: e } = await expenseService.getDeletedExpenses(tripId);
+                if (e) Alert.alert('Error', e);
                 setDeletedExpenses(data ?? []);
                 setLoadingDeleted(false);
               }
@@ -230,7 +237,28 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
                 style={styles.historyBtn}
                 onPress={() => navigation.navigate('ExpenseHistory', { expenseId: e.id, tripId })}
               >
-                <Text style={styles.historyBtnText}>↩ History</Text>
+                <Text style={styles.historyBtnText}>History</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.historyBtn, styles.permDeleteBtn]}
+                onPress={() =>
+                  Alert.alert(
+                    'Permanently Delete',
+                    `Erase "${e.title}" and all its history forever?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete Forever', style: 'destructive',
+                        onPress: async () => {
+                          await expenseService.deleteExpense(e.id);
+                          setDeletedExpenses((prev) => prev.filter((x) => x.id !== e.id));
+                        },
+                      },
+                    ]
+                  )
+                }
+              >
+                <Text style={styles.permDeleteText}>Delete Forever</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -392,8 +420,10 @@ const styles = StyleSheet.create({
   deletedName: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.medium, textDecorationLine: 'line-through' },
   deletedMeta: { fontSize: FontSize.xs, color: Colors.textSecondary },
   deletedEmpty: { padding: Spacing.md, color: Colors.textSecondary, fontSize: FontSize.sm },
-  historyBtn: { borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 4 },
+  historyBtn: { borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 4, marginLeft: Spacing.xs },
   historyBtnText: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.semiBold },
+  permDeleteBtn: { borderColor: Colors.danger },
+  permDeleteText: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: FontWeight.semiBold },
   // Version indicator
   versionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.md, paddingBottom: Spacing.xs, gap: Spacing.sm },
   versionIndicator: { fontSize: FontSize.xs, color: Colors.primary, fontWeight: FontWeight.bold },

@@ -8,8 +8,10 @@ const mockInsert = jest.fn();
 const mockRpc = jest.fn();
 const mockGetSession = jest.fn();
 const mockGetPublicUrl = jest.fn();
+const mockCreateSignedUrl = jest.fn();
 const mockStorageFrom = jest.fn(() => ({
   getPublicUrl: mockGetPublicUrl,
+  createSignedUrl: mockCreateSignedUrl,
 }));
 const mockExpoFetch = jest.fn();
 const mockRenderAsync = jest.fn();
@@ -64,6 +66,7 @@ import { communitySpotService } from '../../services/communitySpotService';
 
 const originalFetch = global.fetch;
 const originalGeminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+const originalOpenTripMapKey = process.env.EXPO_PUBLIC_OPENTRIPMAP_KEY;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -71,6 +74,7 @@ beforeEach(() => {
   process.env.EXPO_PUBLIC_GEMINI_API_KEY = originalGeminiKey;
   mockGetSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
   mockGetPublicUrl.mockReturnValue({ data: { publicUrl: 'https://storage.example.com/community.jpg' } });
+  mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://storage.example.com/community.jpg' }, error: null });
   mockExpoFetch.mockResolvedValue({ ok: true });
   mockRenderAsync
     .mockResolvedValueOnce({ width: 1200, height: 800 })
@@ -81,6 +85,7 @@ beforeEach(() => {
 afterAll(() => {
   global.fetch = originalFetch;
   process.env.EXPO_PUBLIC_GEMINI_API_KEY = originalGeminiKey;
+  process.env.EXPO_PUBLIC_OPENTRIPMAP_KEY = originalOpenTripMapKey;
 });
 
 const spot = {
@@ -158,9 +163,8 @@ describe('communitySpotService moderation helpers', () => {
           content: {
             parts: [{
               text: JSON.stringify({
-                adult: true,
-                unsafe: false,
-                uncertain: false,
+                reject: true,
+                flag: false,
                 reason: 'Photo contains content that cannot be posted.',
               }),
             }],
@@ -205,40 +209,31 @@ describe('communitySpotService AI helpers', () => {
   });
 
   it('loads Gemini favorite places as spot-shaped suggestions', async () => {
-    process.env.EXPO_PUBLIC_GEMINI_API_KEY = 'gemini-key';
+    process.env.EXPO_PUBLIC_OPENTRIPMAP_KEY = 'otm-key';
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
-      json: async () => ({
-        candidates: [{
-          content: {
-            parts: [{
-              text: JSON.stringify([{
-                name: 'Rosemary Beach Town Center',
-                category: 'food',
-                description: 'A walkable spot with cafes and shops near the beach.',
-                address: 'Rosemary Beach, FL',
-                latitude: 30.2791,
-                longitude: -86.0163,
-              }]),
-            }],
-          },
-        }],
-      }),
+      json: async () => ([{
+        xid: 'rose-town',
+        name: 'Rosemary Beach Town Center',
+        kinds: 'foods,shops',
+        point: { lat: 30.2791, lon: -86.0163 },
+      }]),
     });
 
     const { data, error } = await communitySpotService.getGeminiFavorites(30.28, -86.02, 10);
 
     expect(error).toBeNull();
     expect(data?.[0]).toMatchObject({
-      source: 'gemini',
+      source: 'api',
+      source_name: 'OpenTripMap',
       name: 'Rosemary Beach Town Center',
       category: 'food',
       latitude: 30.2791,
       longitude: -86.0163,
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('generativelanguage.googleapis.com'),
-      expect.objectContaining({ method: 'POST' })
+      expect.stringContaining('api.opentripmap.com')
     );
+    process.env.EXPO_PUBLIC_OPENTRIPMAP_KEY = originalOpenTripMapKey;
   });
 });

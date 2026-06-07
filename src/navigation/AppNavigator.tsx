@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -83,6 +83,10 @@ import {
   TripTabParamList,
 } from '../types';
 import { useNotifications } from '../contexts/NotificationsContext';
+import { useTripContext } from '../contexts/TripContext';
+import { tripService } from '../services/tripService';
+import { familyService } from '../services/familyService';
+import { featureFlagService } from '../services/featureFlagService';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -171,26 +175,70 @@ function MainTabs() {
 
 function TripTabs({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
+  const {
+    currentTrip,
+    setCurrentTrip,
+    setFamilies,
+    setMembers,
+    setFeatureFlags,
+    canViewExpenses,
+    isFeatureEnabled,
+  } = useTripContext();
+  const [bootstrapping, setBootstrapping] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTripContext() {
+      setBootstrapping(true);
+      const [trip, families, members, flags] = await Promise.all([
+        currentTrip?.id === tripId
+          ? Promise.resolve({ data: currentTrip, error: null })
+          : tripService.getTripById(tripId),
+        familyService.getFamilies(tripId),
+        tripService.getTripMembers(tripId),
+        featureFlagService.getTripFlags(tripId),
+      ]);
+
+      if (cancelled) return;
+      if (trip.data) setCurrentTrip(trip.data);
+      setFamilies(families.data ?? []);
+      setMembers(members.data ?? []);
+      if (flags.data) setFeatureFlags(flags.data);
+      setBootstrapping(false);
+    }
+
+    loadTripContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId, currentTrip, setCurrentTrip, setFamilies, setMembers, setFeatureFlags]);
+
+  if (bootstrapping) return <LoadingView />;
+
   return (
     <TripTab.Navigator
-      screenOptions={({ navigation }) => ({
+      screenOptions={({ navigation, route }) => ({
         headerShown: true,
         headerTintColor: Colors.primary,
         headerTitleStyle: { fontWeight: '700', color: Colors.text },
         headerStyle: { backgroundColor: Colors.surface },
         headerShadowVisible: false,
-        headerLeft: () => (
-          <TouchableOpacity
-            onPress={() => navigation.getParent()?.goBack()}
-            accessibilityRole="button"
-            accessibilityLabel="Back to trips"
-            style={{ paddingVertical: 8, paddingRight: 12 }}
-          >
-            <Text style={{ color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' }}>
-              ‹ Trips
-            </Text>
-          </TouchableOpacity>
-        ),
+        headerLeft: route.name === 'Dashboard'
+          ? undefined
+          : () => (
+              <TouchableOpacity
+                onPress={() => navigation.navigate('Dashboard', { tripId })}
+                accessibilityRole="button"
+                accessibilityLabel="Back to trip home"
+                style={{ paddingVertical: 8, paddingRight: 12 }}
+              >
+                <Text style={{ color: Colors.primary, fontSize: FontSize.md, fontWeight: '700' }}>
+                  ‹ Home
+                </Text>
+              </TouchableOpacity>
+            ),
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textSecondary,
         tabBarStyle: { borderTopColor: Colors.border },
@@ -207,36 +255,42 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
           tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} />,
         }}
       />
-      <TripTab.Screen
-        name="Expenses"
-        component={ExpensesListScreen}
-        initialParams={{ tripId }}
-        options={{
-          title: 'Expenses',
-          tabBarLabel: 'Expenses',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="💰" focused={focused} />,
-        }}
-      />
-      <TripTab.Screen
-        name="Chat"
-        component={TripChatScreen}
-        initialParams={{ tripId }}
-        options={{
-          title: 'Chat',
-          tabBarLabel: 'Chat',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="💬" focused={focused} />,
-        }}
-      />
-      <TripTab.Screen
-        name="Album"
-        component={TripAlbumScreen}
-        initialParams={{ tripId }}
-        options={{
-          title: 'Album',
-          tabBarLabel: 'Album',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="📷" focused={focused} />,
-        }}
-      />
+      {canViewExpenses && isFeatureEnabled('expenses') && (
+        <TripTab.Screen
+          name="Expenses"
+          component={ExpensesListScreen}
+          initialParams={{ tripId }}
+          options={{
+            title: 'Expenses',
+            tabBarLabel: 'Expenses',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="💰" focused={focused} />,
+          }}
+        />
+      )}
+      {isFeatureEnabled('chat') && (
+        <TripTab.Screen
+          name="Chat"
+          component={TripChatScreen}
+          initialParams={{ tripId }}
+          options={{
+            title: 'Chat',
+            tabBarLabel: 'Chat',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="💬" focused={focused} />,
+          }}
+        />
+      )}
+      {isFeatureEnabled('album') && (
+        <TripTab.Screen
+          name="Album"
+          component={TripAlbumScreen}
+          initialParams={{ tripId }}
+          options={{
+            title: 'Album',
+            tabBarLabel: 'Album',
+            tabBarIcon: ({ focused }) => <TabIcon emoji="📷" focused={focused} />,
+          }}
+        />
+      )}
       <TripTab.Screen
         name="More"
         component={MoreScreen}
@@ -256,6 +310,7 @@ function MainNavigator() {
     <MainStack.Navigator
       screenOptions={{
         headerTintColor: Colors.primary,
+        headerBackTitle: 'Back',
         headerTitleStyle: { fontWeight: '600' },
         headerStyle: { backgroundColor: Colors.surface },
       }}
@@ -264,7 +319,7 @@ function MainNavigator() {
       <MainStack.Screen
         name="TripStack"
         component={TripTabs}
-        options={{ headerShown: false }}
+        options={{ headerShown: false, gestureEnabled: false }}
       />
       <MainStack.Screen name="CreateTrip" component={CreateTripScreen} options={{ title: 'New Trip' }} />
       <MainStack.Screen name="TripSettings" component={TripSettingsScreen} options={{ title: 'Trip Settings' }} />
@@ -296,7 +351,13 @@ function MainNavigator() {
       <MainStack.Screen name="CreateCommunitySpot" component={CreateCommunitySpotScreen} options={{ title: 'Post Spot' }} />
       <MainStack.Screen name="CommunitySpotReview" component={CommunitySpotReviewScreen} options={{ title: 'Spot Review' }} />
       <MainStack.Screen name="GlobalAdmin" component={GlobalAdminScreen} options={{ title: '🛡 Admin — All Trips' }} />
-      <MainStack.Screen name="LiveLocation" component={LiveLocationScreen} options={{ title: 'Live Location' }} />
+      <MainStack.Screen
+        name="LiveLocation"
+        component={LiveLocationScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
       <MainStack.Screen name="Notifications" component={NotificationCenterScreen} options={{ title: 'Notifications' }} />
     </MainStack.Navigator>
   );
@@ -309,14 +370,45 @@ function handleNotificationNavigation(data: Record<string, unknown>) {
   const tripId = data?.trip_id as string | undefined;
   if (!tripId) return;
   const type = data?.type as string | undefined;
+
   try {
-    (navigationRef as any).navigate('Main', {
-      screen: 'TripStack',
-      params: {
-        tripId,
-        screen: type === 'message' || type === 'push_talk' ? 'Chat' : 'Dashboard',
-      },
-    });
+    if (type === 'message' || type === 'push_talk') {
+      (navigationRef as any).navigate('Main', {
+        screen: 'TripStack',
+        params: { tripId, screen: 'Chat' },
+      });
+      return;
+    }
+
+    // Join request notifications carry a request_id in data
+    if (data?.request_id) {
+      (navigationRef as any).navigate('Main', {
+        screen: 'TripSettings',
+        params: { tripId },
+      });
+      return;
+    }
+
+    const MODAL_SCREEN: Record<string, string> = {
+      expense_added: 'Settlements',
+      settlement_request: 'Settlements',
+      payment_confirmed: 'PaymentTracking',
+      announcement: 'Announcements',
+      poll: 'Polls',
+    };
+
+    const modal = type ? MODAL_SCREEN[type] : undefined;
+    if (modal) {
+      (navigationRef as any).navigate('Main', {
+        screen: modal,
+        params: { tripId },
+      });
+    } else {
+      (navigationRef as any).navigate('Main', {
+        screen: 'TripStack',
+        params: { tripId, screen: 'Dashboard' },
+      });
+    }
   } catch { /* navigation may fail if screen isn't mounted yet */ }
 }
 

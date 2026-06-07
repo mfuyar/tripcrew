@@ -23,19 +23,25 @@ function publicName(fullName?: string): string {
 }
 
 export function CommunitySpotReviewScreen() {
-  const { user } = useAuth();
+  const { user, isGlobalAdmin } = useAuth();
   const [spots, setSpots] = useState<CommunitySpot[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!isGlobalAdmin) {
+      setSpots([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     const { data, error } = await communitySpotService.getPendingReview();
     if (error) Alert.alert('Unable to load review queue', error);
     setSpots(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [isGlobalAdmin]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -52,6 +58,15 @@ export function CommunitySpotReviewScreen() {
   }
 
   if (loading) return <LoadingView />;
+
+  if (!isGlobalAdmin) {
+    return (
+      <View style={styles.locked}>
+        <Text style={styles.lockedTitle}>Global admin only</Text>
+        <Text style={styles.lockedText}>Only global admins can review community spots.</Text>
+      </View>
+    );
+  }
 
   return (
     <FlatList
@@ -124,4 +139,22 @@ const styles = StyleSheet.create({
   description: { fontSize: FontSize.sm, color: Colors.text, lineHeight: 20, marginTop: Spacing.sm },
   actions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
   action: { flex: 1 },
+  locked: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.lg,
+    backgroundColor: Colors.background,
+  },
+  lockedTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.bold,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+  },
+  lockedText: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
 });

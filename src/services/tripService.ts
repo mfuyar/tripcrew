@@ -141,34 +141,9 @@ export const tripService = {
       p_user_id: userId,
     });
     if (error) return { data: null, error: friendlyTripJoinError(error.message) };
-    const request = data as TripJoinRequest;
-
-    // Notify all organizers and admins of the trip so they know to review the request
-    try {
-      const [tripResult, profileResult, managersResult] = await Promise.all([
-        supabase.from('trips').select('id, name').eq('id', request.trip_id).single(),
-        supabase.from('profiles').select('full_name').eq('id', userId).single(),
-        supabase.from('trip_members').select('user_id').eq('trip_id', request.trip_id)
-          .in('role', ['trip_organizer', 'trip_admin']),
-      ]);
-      const tripName = (tripResult.data as any)?.name ?? 'your trip';
-      const requesterName = (profileResult.data as any)?.full_name ?? 'Someone';
-      const managerIds: string[] = (managersResult.data ?? []).map((m: any) => m.user_id);
-      if (managerIds.length > 0) {
-        const rows = managerIds.map((managerId) => ({
-          user_id: managerId,
-          trip_id: request.trip_id,
-          type: 'other',
-          title: '🙋 New Join Request',
-          body: `${requesterName} wants to join "${tripName}". Open Trip Settings to review.`,
-          data: { trip_id: request.trip_id, request_id: request.id },
-          is_read: false,
-        }));
-        await supabase.from('notifications').insert(rows);
-      }
-    } catch { /* notification failure should not block the join request */ }
-
-    return { data: request, error: null };
+    // Notifications are sent inside the SECURITY DEFINER DB function,
+    // which can query trip_members even though the requester is not yet a member.
+    return { data: data as TripJoinRequest, error: null };
   },
 
   async joinTrip(userId: string, inviteCode: string): Promise<ServiceResult<TripJoinRequest>> {
@@ -228,6 +203,18 @@ export const tripService = {
   },
 
   async getMyJoinRequests(userId: string): Promise<ServiceResult<TripJoinRequest[]>> {
+    const rpcResult = await supabase.rpc('get_my_join_requests', {
+      p_user_id: userId,
+    });
+    if (!rpcResult.error) {
+      return { data: (rpcResult.data ?? []) as TripJoinRequest[], error: null };
+    }
+
+    const missingRpc = friendlyTripJoinError(rpcResult.error.message);
+    if (missingRpc !== rpcResult.error.message) {
+      return { data: null, error: missingRpc };
+    }
+
     const { data, error } = await supabase
       .from('trip_join_requests')
       .select('*, trip:trips(id, name, destination, start_date, end_date)')
@@ -248,6 +235,18 @@ export const tripService = {
   },
 
   async getPendingJoinRequests(tripId: string): Promise<ServiceResult<TripJoinRequest[]>> {
+    const rpcResult = await supabase.rpc('get_pending_join_requests_for_trip', {
+      p_trip_id: tripId,
+    });
+    if (!rpcResult.error) {
+      return { data: (rpcResult.data ?? []) as TripJoinRequest[], error: null };
+    }
+
+    const missingRpc = friendlyTripJoinError(rpcResult.error.message);
+    if (missingRpc !== rpcResult.error.message) {
+      return { data: null, error: missingRpc };
+    }
+
     const { data, error } = await supabase
       .from('trip_join_requests')
       .select('*, profile:profiles!user_id(*)')

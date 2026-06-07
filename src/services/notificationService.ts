@@ -8,7 +8,6 @@ import { Notification, ServiceResult } from '../types';
 import { NOTIFICATION_SOUND } from '../constants/notifications';
 
 const NOTIFY_CHANNEL = (userId: string) => `user-notifications:${userId}`;
-const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 
 type PushPayload = {
   userIds: string[];
@@ -42,33 +41,15 @@ async function sendExpoPushNotifications({ userIds, title, body, data }: PushPay
   if (userIds.length === 0) return;
 
   try {
-    const { data: tokens } = await supabase
-      .from('push_tokens')
-      .select('token')
-      .in('user_id', userIds)
-      .eq('is_active', true);
-
-    const uniqueTokens = Array.from(new Set((tokens ?? []).map((row: { token: string }) => row.token)));
-    if (uniqueTokens.length === 0) return;
-
-    const messages = uniqueTokens.map((to) => ({
-      to,
-      title,
-      body,
-      data: data ?? {},
-      sound: NOTIFICATION_SOUND,
-      channelId: 'default',
-    }));
-
-    await fetch(EXPO_PUSH_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
+    const { error } = await supabase.functions.invoke('send-push', {
+      body: {
+        userIds: Array.from(new Set(userIds)),
+        title,
+        body,
+        data: data ?? {},
       },
-      body: JSON.stringify(messages),
     });
+    if (error) throw error;
   } catch {
     // In-app notification rows and realtime broadcasts remain the source of truth.
   }
@@ -149,6 +130,14 @@ export const notificationService = {
     return { data: null, error: error?.message ?? null };
   },
 
+  async deleteAll(userId: string): Promise<ServiceResult<null>> {
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('user_id', userId);
+    return { data: null, error: error?.message ?? null };
+  },
+
   async createNotification(
     input: Omit<Notification, 'id' | 'created_at'>
   ): Promise<ServiceResult<Notification>> {
@@ -158,7 +147,12 @@ export const notificationService = {
       .select()
       .single();
     if (error) return { data: null, error: error.message };
-    await notificationService.sendPushToUsers([input.user_id], input.title, input.body, input.data);
+    await notificationService.sendPushToUsers(
+      [input.user_id],
+      input.title,
+      input.body,
+      { ...((input.data as Record<string, unknown> | null) ?? {}), type: input.type }
+    );
     const notification = data as Notification;
     broadcastNotification(notification);
     return { data: notification, error: null };
@@ -192,7 +186,7 @@ export const notificationService = {
 
     if (error) return { data: null, error: error.message };
 
-    await notificationService.sendPushToUsers(uniqueUserIds, title, body, data);
+    await notificationService.sendPushToUsers(uniqueUserIds, title, body, { ...(data ?? {}), type });
     (inserted ?? []).forEach((n) => broadcastNotification(n as Notification));
 
     return { data: (inserted ?? []) as Notification[], error: null };

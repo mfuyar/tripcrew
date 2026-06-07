@@ -32,9 +32,10 @@ ALTER TABLE public.community_spots
   ADD COLUMN IF NOT EXISTS saves_count INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS matched_preferences TEXT[] DEFAULT '{}';
 
--- Prevent duplicate OSM places per trip
-CREATE UNIQUE INDEX IF NOT EXISTS community_spots_osm_trip_idx
-  ON public.community_spots(trip_id, osm_id)
+-- Prevent duplicate imported OSM places globally; community spots are public,
+-- not trip-scoped.
+CREATE UNIQUE INDEX IF NOT EXISTS community_spots_osm_idx
+  ON public.community_spots(osm_id)
   WHERE osm_id IS NOT NULL;
 
 -- Likes table

@@ -11,6 +11,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { TripFeatureKey } from '../../constants/features';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -20,39 +21,47 @@ interface FeatureItem {
   title: string;
   subtitle: string;
   screen: keyof MainStackParamList;
+  feature?: TripFeatureKey;
   adminOnly?: boolean;
+  globalOnly?: boolean;
+  expenseOnly?: boolean;
 }
 
 const FEATURES: FeatureItem[] = [
-  { emoji: '🧭', title: 'Community Spots', subtitle: 'Discover & share local finds', screen: 'CommunitySpots' },
-  { emoji: '👨‍👩‍👧‍👦', title: 'Families', subtitle: 'Manage families & members', screen: 'Families' },
-  { emoji: '🤝', title: 'Join a Family', subtitle: 'Select which family you belong to', screen: 'JoinFamily' },
-  { emoji: '⚖️', title: 'Balances', subtitle: 'See who owes what', screen: 'Balances', adminOnly: true },
-  { emoji: '💸', title: 'Settlements', subtitle: 'Settle up easily', screen: 'Settlements', adminOnly: true },
-  { emoji: '📊', title: 'Fairness', subtitle: 'Expense fairness metrics', screen: 'Fairness' },
-  { emoji: '🗓️', title: 'Itinerary', subtitle: 'Day-by-day plan', screen: 'Itinerary' },
-  { emoji: '🛒', title: 'Grocery List', subtitle: 'Shared shopping list', screen: 'GroceryList' },
-  { emoji: '🎒', title: 'Packing List', subtitle: 'Don\'t forget anything', screen: 'PackingList' },
-  { emoji: '🚗', title: 'Car Planning', subtitle: 'Coordinate who rides where', screen: 'CarPlanning' },
-  { emoji: '🗳️', title: 'Polls', subtitle: 'Group decision making', screen: 'Polls' },
-  { emoji: '🚨', title: 'Emergency Info', subtitle: 'Medical & contacts', screen: 'EmergencyInfo' },
-  { emoji: '📢', title: 'Announcements', subtitle: 'Trip-wide messages', screen: 'Announcements' },
-  { emoji: '🛡️', title: 'Spot Review', subtitle: 'Approve flagged community spots', screen: 'CommunitySpotReview' },
-  { emoji: '📷', title: 'Scan Receipt', subtitle: 'AI receipt parsing', screen: 'ReceiptScanner', adminOnly: true },
-  { emoji: '📍', title: 'Live Location', subtitle: 'See where everyone is', screen: 'LiveLocation' },
+  { emoji: '🧭', title: 'Community Spots', subtitle: 'Discover & share local finds', screen: 'CommunitySpots', feature: 'community_spots' },
+  { emoji: '👨‍👩‍👧‍👦', title: 'Families', subtitle: 'Manage families & members', screen: 'Families', feature: 'families' },
+  { emoji: '🤝', title: 'Join a Family', subtitle: 'Select which family you belong to', screen: 'JoinFamily', feature: 'families' },
+  { emoji: '⚖️', title: 'Balances', subtitle: 'See who owes what', screen: 'Balances', feature: 'expenses', expenseOnly: true },
+  { emoji: '💸', title: 'Settlements', subtitle: 'Settle up easily', screen: 'Settlements', feature: 'expenses', expenseOnly: true },
+  { emoji: '📊', title: 'Fairness', subtitle: 'Expense fairness metrics', screen: 'Fairness', feature: 'expenses', expenseOnly: true },
+  { emoji: '🗓️', title: 'Itinerary', subtitle: 'Day-by-day plan', screen: 'Itinerary', feature: 'itinerary' },
+  { emoji: '🛒', title: 'Grocery List', subtitle: 'Shared shopping list', screen: 'GroceryList', feature: 'grocery' },
+  { emoji: '🎒', title: 'Packing List', subtitle: 'Don\'t forget anything', screen: 'PackingList', feature: 'packing' },
+  { emoji: '🚗', title: 'Car Planning', subtitle: 'Coordinate who rides where', screen: 'CarPlanning', feature: 'cars' },
+  { emoji: '🗳️', title: 'Polls', subtitle: 'Group decision making', screen: 'Polls', feature: 'polls' },
+  { emoji: '🚨', title: 'Emergency Info', subtitle: 'Medical & contacts', screen: 'EmergencyInfo', feature: 'emergency' },
+  { emoji: '📢', title: 'Announcements', subtitle: 'Trip-wide messages', screen: 'Announcements', feature: 'announcements' },
+  { emoji: '🛡️', title: 'Spot Review', subtitle: 'Approve flagged community spots', screen: 'CommunitySpotReview', feature: 'community_spots', globalOnly: true },
+  { emoji: '📷', title: 'Scan Receipt', subtitle: 'AI receipt parsing', screen: 'ReceiptScanner', feature: 'receipt_scan', adminOnly: true, expenseOnly: true },
+  { emoji: '📍', title: 'Live Location', subtitle: 'See where everyone is', screen: 'LiveLocation', feature: 'live_location' },
   { emoji: '⚙️', title: 'Trip Settings', subtitle: 'Invite code, members, danger zone', screen: 'TripSettings' },
 ];
 
 export function MoreScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { canManageTrip } = useTripContext();
+  const { canManageTrip, canViewExpenses, isFeatureEnabled } = useTripContext();
   const { isGlobalAdmin } = useAuth();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.header}>All Features</Text>
-      {FEATURES.filter((f) => !f.adminOnly || canManageTrip || isGlobalAdmin).map((item) => (
+      {FEATURES.filter((f) =>
+        (!f.globalOnly || isGlobalAdmin) &&
+        (!f.feature || isFeatureEnabled(f.feature)) &&
+        (!f.adminOnly || canManageTrip || isGlobalAdmin) &&
+        (!f.expenseOnly || canViewExpenses)
+      ).map((item) => (
         <TouchableOpacity
           key={item.title}
           style={styles.row}

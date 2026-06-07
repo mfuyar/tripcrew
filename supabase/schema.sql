@@ -191,18 +191,23 @@ $$ LANGUAGE plpgsql;
 
 -- ─── Settlements ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS settlements (
-  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  trip_id         UUID NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
-  from_family_id  UUID NOT NULL REFERENCES families(id),
-  to_family_id    UUID NOT NULL REFERENCES families(id),
-  amount          NUMERIC(12,2) NOT NULL CHECK (amount > 0),
-  currency        TEXT NOT NULL DEFAULT 'USD',
-  status          TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','paid','confirmed','disputed')),
-  notes           TEXT,
-  confirmed_at    TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  trip_id                      UUID NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  from_family_id               UUID NOT NULL REFERENCES families(id),
+  to_family_id                 UUID NOT NULL REFERENCES families(id),
+  amount                       NUMERIC(12,2) NOT NULL CHECK (amount > 0),
+  currency                     TEXT NOT NULL DEFAULT 'USD',
+  status                       TEXT NOT NULL DEFAULT 'proposed'
+    CHECK (status IN ('proposed','payer_approved','receiver_approved','completed','disputed','cancelled')),
+  notes                        TEXT,
+  confirmed_at                 TIMESTAMPTZ,
+  payer_family_approved_at     TIMESTAMPTZ,
+  receiver_family_approved_at  TIMESTAMPTZ,
+  dispute_reason               TEXT,
+  cancel_reason                TEXT,
+  deleted_at                   TIMESTAMPTZ,
+  created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 DO $$
 BEGIN
@@ -233,15 +238,13 @@ BEGIN
   END IF;
 
   IF NOT (
-    (OLD.status = 'pending' AND NEW.status = 'paid')
-    OR (OLD.status = 'paid' AND NEW.status IN ('confirmed', 'disputed'))
-    OR (OLD.status = 'disputed' AND NEW.status = 'paid')
+    (OLD.status = 'proposed'           AND NEW.status IN ('payer_approved','receiver_approved','disputed','cancelled'))
+    OR (OLD.status = 'payer_approved'  AND NEW.status IN ('completed','disputed','cancelled'))
+    OR (OLD.status = 'receiver_approved' AND NEW.status IN ('completed','disputed','cancelled'))
+    OR (OLD.status = 'completed'       AND NEW.status = 'disputed')
+    OR (OLD.status = 'disputed'        AND NEW.status IN ('payer_approved','receiver_approved','proposed','cancelled'))
   ) THEN
-    RAISE EXCEPTION 'Invalid payment status transition: % to %', OLD.status, NEW.status;
-  END IF;
-
-  IF NEW.status = 'confirmed' AND NEW.confirmed_at IS NULL THEN
-    NEW.confirmed_at = NOW();
+    RAISE EXCEPTION 'Invalid settlement status transition: % to %', OLD.status, NEW.status;
   END IF;
 
   RETURN NEW;

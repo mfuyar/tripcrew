@@ -107,7 +107,7 @@ export function SignUpScreen({ navigation }: Props) {
             label="Password"
             value={password}
             onChangeText={setPassword}
-            placeholder="At least 6 characters"
+            placeholder="At least 8 characters"
             secureTextEntry
             autoComplete="new-password"
           />

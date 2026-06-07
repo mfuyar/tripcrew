@@ -13,12 +13,14 @@ const mockFrom = jest.fn((table: string) => {
 });
 const mockChannel = jest.fn((name: string) => ({ name }));
 const mockRemoveChannel = jest.fn();
+const mockFunctionsInvoke = jest.fn();
 
 jest.mock('../../lib/supabaseClient', () => ({
   supabase: {
     from: mockFrom,
     channel: mockChannel,
     removeChannel: mockRemoveChannel,
+    functions: { invoke: mockFunctionsInvoke },
   },
 }));
 
@@ -33,6 +35,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockPushTokenEq.mockResolvedValue({ data: [], error: null });
   mockNotificationSelect.mockResolvedValue({ data: [], error: null });
+  mockFunctionsInvoke.mockResolvedValue({ data: { sent: 0 }, error: null });
 });
 
 describe('notificationService.notifyUsers', () => {
@@ -62,6 +65,14 @@ describe('notificationService.notifyUsers', () => {
     expect(mockChannel).toHaveBeenCalledWith('user-notifications:user-2');
     expect(mockChannel).toHaveBeenCalledWith('user-notifications:user-3');
     expect(mockSendBroadcast).toHaveBeenCalledTimes(2);
+    expect(mockFunctionsInvoke).toHaveBeenCalledWith('send-push', {
+      body: {
+        userIds: ['user-2', 'user-3'],
+        title: 'Push talk ping',
+        body: 'Ping',
+        data: { family_id: 'family-1', family_only: true, type: 'push_talk' },
+      },
+    });
   });
 
   it('returns the insert error instead of pretending the ping was sent', async () => {

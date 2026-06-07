@@ -24,7 +24,7 @@ CREATE POLICY "Trip members can view their trips"
 DROP POLICY IF EXISTS "Trip organizers can update trips" ON public.trips;
 CREATE POLICY "Trip organizers can update trips"
   ON public.trips FOR UPDATE
-  USING (is_trip_organizer(id, auth.uid()) OR is_global_admin(auth.uid()));
+  USING (can_manage_trip(id, auth.uid()) OR is_global_admin(auth.uid()));
 
 -- ─── Receipt image on expenses ─────────────────────────────────────────────────
 ALTER TABLE public.expenses

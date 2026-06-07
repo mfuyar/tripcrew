@@ -1,4 +1,15 @@
-import { Family, FamilyBalance, FamilySplitShare, SettlementCalculation, FairnessMetrics, SplitMethod, Expense } from '../types';
+import {
+  Family,
+  FamilyBalance,
+  FamilySplitShare,
+  PersonBalance,
+  PersonSettlementCalculation,
+  SettlementCalculation,
+  FairnessMetrics,
+  SplitMethod,
+  Expense,
+  TripMember,
+} from '../types';
 
 // ─── Split Calculation Options ────────────────────────────────────────────────
 
@@ -7,6 +18,8 @@ export interface SplitOptions {
   amounts?: Record<string, number>;      // familyId -> fixed amount
   selectedFamilyIds?: string[];
 }
+
+const SETTLEMENT_EPSILON = 0.021;
 
 // ─── calculateExpenseSplits ────────────────────────────────────────────────────
 
@@ -141,7 +154,7 @@ export function calculateFamilyBalances(
 
   for (const expense of expenses) {
     // What this family paid for the whole expense
-    if (paid[expense.paid_by_family_id] !== undefined) {
+    if (expense.paid_by_family_id && paid[expense.paid_by_family_id] !== undefined) {
       paid[expense.paid_by_family_id] += expense.amount;
     }
     // What each family owes based on splits
@@ -157,7 +170,7 @@ export function calculateFamilyBalances(
     familyName: f.name,
     totalPaid: round2(paid[f.id] ?? 0),
     totalOwed: round2(owed[f.id] ?? 0),
-    balance: round2((paid[f.id] ?? 0) - (owed[f.id] ?? 0)),
+    balance: normalizeSettlementBalance((paid[f.id] ?? 0) - (owed[f.id] ?? 0)),
   }));
 }
 
@@ -206,6 +219,80 @@ export function calculateSettlements(
     credit.balance = round2(credit.balance - payAmount);
     debt.balance = round2(debt.balance + payAmount);
 
+    if (Math.abs(credit.balance) < 0.01) ci++;
+    if (Math.abs(debt.balance) < 0.01) di++;
+  }
+
+  return settlements;
+}
+
+export function calculatePersonBalances(
+  expenses: Expense[],
+  members: TripMember[]
+): PersonBalance[] {
+  const paid: Record<string, number> = {};
+  const owed: Record<string, number> = {};
+  const names: Record<string, string> = {};
+
+  for (const member of members) {
+    paid[member.user_id] = 0;
+    owed[member.user_id] = 0;
+    names[member.user_id] = member.profile?.full_name ?? member.profile?.email ?? 'Member';
+  }
+
+  for (const expense of expenses) {
+    if (expense.paid_by_family_id) continue;
+    if (paid[expense.paid_by_user_id] !== undefined) {
+      paid[expense.paid_by_user_id] += expense.amount;
+    }
+    for (const split of expense.expense_person_splits ?? []) {
+      if (owed[split.user_id] !== undefined) {
+        owed[split.user_id] += split.share_amount;
+      }
+    }
+  }
+
+  return members.map((member) => ({
+    userId: member.user_id,
+    userName: names[member.user_id],
+    totalPaid: round2(paid[member.user_id] ?? 0),
+    totalOwed: round2(owed[member.user_id] ?? 0),
+    balance: normalizeSettlementBalance((paid[member.user_id] ?? 0) - (owed[member.user_id] ?? 0)),
+  }));
+}
+
+export function calculatePersonSettlements(
+  balances: PersonBalance[]
+): PersonSettlementCalculation[] {
+  const settlements: PersonSettlementCalculation[] = [];
+  const creditors = balances
+    .filter((b) => b.balance > 0.01)
+    .map((b) => ({ ...b }))
+    .sort((a, b) => b.balance - a.balance);
+  const debtors = balances
+    .filter((b) => b.balance < -0.01)
+    .map((b) => ({ ...b }))
+    .sort((a, b) => a.balance - b.balance);
+
+  let ci = 0;
+  let di = 0;
+  while (ci < creditors.length && di < debtors.length) {
+    const credit = creditors[ci];
+    const debt = debtors[di];
+    const payAmount = round2(Math.min(credit.balance, -debt.balance));
+
+    if (payAmount > 0.01) {
+      settlements.push({
+        fromUserId: debt.userId,
+        fromUserName: debt.userName,
+        toUserId: credit.userId,
+        toUserName: credit.userName,
+        amount: payAmount,
+      });
+    }
+
+    credit.balance = round2(credit.balance - payAmount);
+    debt.balance = round2(debt.balance + payAmount);
     if (Math.abs(credit.balance) < 0.01) ci++;
     if (Math.abs(debt.balance) < 0.01) di++;
   }
@@ -276,6 +363,11 @@ export function calculateFairnessMetrics(
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function normalizeSettlementBalance(n: number): number {
+  const rounded = round2(n);
+  return Math.abs(rounded) < SETTLEMENT_EPSILON ? 0 : rounded;
 }
 
 function equalByFamily(amount: number, families: Family[]): FamilySplitShare[] {

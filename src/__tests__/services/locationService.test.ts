@@ -9,6 +9,22 @@
 
 import * as Location from 'expo-location';
 
+const mockStorage = new Map<string, string>();
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: {
+    getItem: jest.fn((key: string) => Promise.resolve(mockStorage.get(key) ?? null)),
+    setItem: jest.fn((key: string, value: string) => {
+      mockStorage.set(key, value);
+      return Promise.resolve();
+    }),
+    removeItem: jest.fn((key: string) => {
+      mockStorage.delete(key);
+      return Promise.resolve();
+    }),
+  },
+}));
+
 // ── Supabase mock ─────────────────────────────────────────────────────────────
 
 const mockSend = jest.fn().mockResolvedValue({});
@@ -34,18 +50,28 @@ const mockEq = jest.fn();
 const mockDeleteEq = jest.fn();
 const mockDelete = jest.fn();
 const mockFrom = jest.fn();
+const mockTripMaybeSingle = jest.fn().mockResolvedValue({
+  data: { is_active: true, status: 'active' },
+  error: null,
+});
 
 const mockSelectBuilder = { eq: mockEq };
 const mockDeleteBuilder = { eq: mockDeleteEq };
+const mockTripsSelectBuilder = {
+  eq: jest.fn(() => ({ maybeSingle: mockTripMaybeSingle })),
+};
 
 mockSelect.mockReturnValue(mockSelectBuilder);
 mockEq.mockResolvedValue({ data: [], error: null });
 mockDelete.mockReturnValue(mockDeleteBuilder);
 mockDeleteEq.mockReturnValue(mockDeleteBuilder);
-mockFrom.mockReturnValue({
-  upsert: mockUpsert,
-  select: mockSelect,
-  delete: mockDelete,
+mockFrom.mockImplementation((table: string) => {
+  if (table === 'trips') return { select: jest.fn(() => mockTripsSelectBuilder) };
+  return {
+    upsert: mockUpsert,
+    select: mockSelect,
+    delete: mockDelete,
+  };
 });
 
 jest.mock('../../lib/supabaseClient', () => ({
@@ -60,14 +86,22 @@ import { isFreshLiveLocation, locationService } from '../../services/locationSer
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockStorage.clear();
   mockSelect.mockReturnValue(mockSelectBuilder);
   mockEq.mockResolvedValue({ data: [], error: null });
   mockDelete.mockReturnValue(mockDeleteBuilder);
   mockDeleteEq.mockReturnValue(mockDeleteBuilder);
-  mockFrom.mockReturnValue({
-    upsert: mockUpsert,
-    select: mockSelect,
-    delete: mockDelete,
+  mockTripMaybeSingle.mockResolvedValue({
+    data: { is_active: true, status: 'active' },
+    error: null,
+  });
+  mockFrom.mockImplementation((table: string) => {
+    if (table === 'trips') return { select: jest.fn(() => mockTripsSelectBuilder) };
+    return {
+      upsert: mockUpsert,
+      select: mockSelect,
+      delete: mockDelete,
+    };
   });
 });
 
@@ -232,18 +266,22 @@ describe('SPEC §13 — startSharing', () => {
     });
 
     await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(mockFrom).toHaveBeenCalledWith('live_locations');
-    expect(mockUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        trip_id: tripId,
-        user_id: userId,
-        family_id: familyId,
-        latitude: 40.7128,
-        longitude: -74.006,
-      }),
-      { onConflict: 'trip_id,user_id' }
-    );
+    expect(mockUpsert.mock.calls).toEqual(expect.arrayContaining([
+      [
+        expect.objectContaining({
+          trip_id: tripId,
+          user_id: userId,
+          family_id: familyId,
+          latitude: 40.7128,
+          longitude: -74.006,
+        }),
+        { onConflict: 'trip_id,user_id' },
+      ],
+    ]));
   });
 });
 
