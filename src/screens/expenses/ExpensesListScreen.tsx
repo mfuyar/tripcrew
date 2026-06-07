@@ -1,13 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   ScrollView,
   TouchableOpacity,
   RefreshControl,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,15 +15,18 @@ import { MainStackParamList, Expense, ExpenseCategory } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { expenseService } from '../../services/expenseService';
 import { useAuth } from '../../contexts/AuthContext';
+import { currencySymbol } from '../../utils/currency';
+import { canViewSelfOnlyExpense, isSelfOnlyExpense } from '../../utils/expenseVisibility';
 import { demoExpenses } from '../../lib/mockData';
 import { ExpenseCard } from '../../components/ExpenseCard';
 import { LoadingView } from '../../components/LoadingView';
+import { supabase } from '../../lib/supabaseClient';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { Colors, FontSize, FontWeight, Spacing, Radius, CATEGORY_ICONS, Shadow } from '../../constants/theme';
-import { currencySymbol } from '../../utils/currency';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
+type ExpenseViewFilter = 'all' | 'family' | 'private' | 'person';
 
 const FILTERS: { label: string; value: ExpenseCategory | 'all' }[] = [
   { label: 'All', value: 'all' },
@@ -35,16 +38,42 @@ const FILTERS: { label: string; value: ExpenseCategory | 'all' }[] = [
   { label: '💸 Other', value: 'other' },
 ];
 
+const VIEW_FILTERS: { label: string; value: ExpenseViewFilter }[] = [
+  { label: 'All', value: 'all' },
+  { label: 'Family', value: 'family' },
+  { label: 'Personal', value: 'private' },
+  { label: 'Person split', value: 'person' },
+];
+
+function expenseShareForViewer(
+  expense: Expense,
+  userId: string | undefined,
+  userFamilyId: string | undefined,
+  canSeeAllExpenses: boolean
+): number {
+  if (canSeeAllExpenses) return expense.amount;
+
+  if (expense.paid_by_family_id) {
+    const familyShare = expense.expense_splits?.find((split) => split.family_id === userFamilyId);
+    return familyShare?.share_amount ?? 0;
+  }
+
+  const personShare = expense.expense_person_splits?.find((split) => split.user_id === userId);
+  return personShare?.share_amount ?? 0;
+}
+
 export function ExpensesListScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
+  const { width } = useWindowDimensions();
   const { tripId } = route.params;
-  const { currentTrip, canManageTrip, isTripOrganizer } = useTripContext();
-  const { isDemoMode } = useAuth();
+  const { currentTrip, canManageTrip, isTripOrganizer, userFamily } = useTripContext();
+  const { isDemoMode, user, isGlobalAdmin } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<ExpenseCategory | 'all'>('all');
+  const [viewFilter, setViewFilter] = useState<ExpenseViewFilter>('all');
   const [sortBy, setSortBy] = useState<'date' | 'family' | 'amount'>('date');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [showFamilyTotals, setShowFamilyTotals] = useState(false);
@@ -72,12 +101,42 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
     }, [loadExpenses])
   );
 
+  useEffect(() => {
+    if (isDemoMode) return undefined;
+
+    const channel = supabase
+      .channel(`expenses-trip-${tripId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'expenses', filter: `trip_id=eq.${tripId}` },
+        () => {
+          void loadExpenses();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tripId, isDemoMode, loadExpenses]);
+
   if (loading) return <LoadingView />;
   if (error) return <ErrorState message={error} onRetry={loadExpenses} />;
 
-  const filtered = (filter === 'all' ? expenses : expenses.filter((e) => e.category === filter))
-    .slice()
-    .sort((a, b) => {
+  const tripExpenses = expenses.filter((e) => !isSelfOnlyExpense(e));
+  const privateSelfExpenses = expenses.filter((e) =>
+    isSelfOnlyExpense(e) &&
+    canViewSelfOnlyExpense(e, user?.id, userFamily?.id, isTripOrganizer || isGlobalAdmin)
+  );
+  const familyExpenses = tripExpenses.filter((e) => e.paid_by_family_id);
+  const visiblePersonExpenses = expenses.filter((e) =>
+    !e.paid_by_family_id &&
+    !isSelfOnlyExpense(e) &&
+    (isTripOrganizer || isGlobalAdmin || e.paid_by_user_id === user?.id || e.expense_person_splits?.some((split) => split.user_id === user?.id))
+  );
+  const matchesCategory = (expense: Expense) => filter === 'all' || expense.category === filter;
+  const sortExpenses = (items: Expense[]) =>
+    items.slice().sort((a, b) => {
       let cmp = 0;
       if (sortBy === 'date')   cmp = a.date.localeCompare(b.date);
       if (sortBy === 'amount') cmp = a.amount - b.amount;
@@ -88,7 +147,35 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  const total = filtered.reduce((s, e) => s + e.amount, 0);
+  const filteredFamilyExpenses = sortExpenses(familyExpenses.filter(matchesCategory));
+  const filteredPrivateExpenses = sortExpenses(privateSelfExpenses.filter(matchesCategory));
+  const filteredPersonExpenses = sortExpenses(visiblePersonExpenses.filter(matchesCategory));
+  const showFamilyExpenses = viewFilter === 'all' || viewFilter === 'family';
+  const showPrivateExpenses = viewFilter === 'all' || viewFilter === 'private';
+  const showPersonExpenses = viewFilter === 'all' || viewFilter === 'person';
+  const visibleExpenseCount =
+    (showFamilyExpenses ? filteredFamilyExpenses.length : 0) +
+    (showPrivateExpenses ? filteredPrivateExpenses.length : 0) +
+    (showPersonExpenses ? filteredPersonExpenses.length : 0);
+  const canSeeAllExpenseTotals = isTripOrganizer || isGlobalAdmin;
+  const relatedExpenses = expenses.filter((e) => {
+    if (canSeeAllExpenseTotals) return !isSelfOnlyExpense(e);
+    if (isSelfOnlyExpense(e)) return canViewSelfOnlyExpense(e, user?.id, userFamily?.id, false);
+    if (e.paid_by_family_id) {
+      return e.paid_by_family_id === userFamily?.id
+        || e.expense_splits?.some((split) => split.family_id === userFamily?.id && split.share_amount > 0) === true;
+    }
+    return e.paid_by_user_id === user?.id
+      || e.expense_person_splits?.some((split) => split.user_id === user?.id && split.share_amount > 0) === true;
+  });
+  const total = relatedExpenses.reduce(
+    (sum, expense) => sum + expenseShareForViewer(expense, user?.id, userFamily?.id, canSeeAllExpenseTotals),
+    0
+  );
+  const horizontalPadding = Spacing.md * 2;
+  const categoryGap = Spacing.xs;
+  const categoryChipMinWidth = Math.floor((width - horizontalPadding - categoryGap * 2) / 3);
+  const hasVisibleExpenses = visibleExpenseCount > 0;
 
   function handleSort(by: 'date' | 'family' | 'amount') {
     if (sortBy === by) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -100,7 +187,7 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
 
   // Family totals — group ALL expenses (not just filtered) by paying family
   const familyTotals = Object.values(
-    expenses.reduce<Record<string, { name: string; color?: string; total: number; count: number }>>((acc, e) => {
+    familyExpenses.reduce<Record<string, { name: string; color?: string; total: number; count: number }>>((acc, e) => {
       const id = e.paid_by_family_id;
       if (!id) return acc;
       const name = e.paid_by_family?.name ?? 'Unknown';
@@ -117,7 +204,7 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
       {/* Summary header */}
       <View style={styles.header}>
         <View style={styles.totalBlock}>
-          <Text style={styles.totalLabel}>Total Expenses</Text>
+          <Text style={styles.totalLabel}>{canSeeAllExpenseTotals ? 'Total Expenses' : 'Your Expenses'}</Text>
           <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>
             {currencySymbol(currentTrip?.currency)}{total.toFixed(2)}
           </Text>
@@ -141,27 +228,32 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
       </View>
 
       {/* Category filters */}
-      <FlatList
+      <ScrollView
         horizontal
-        data={FILTERS}
-        keyExtractor={(item) => item.value}
-        renderItem={({ item }) => (
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
+        contentContainerStyle={styles.filterContent}
+      >
+        {FILTERS.map((item) => (
           <TouchableOpacity
-            style={[styles.filterChip, filter === item.value && styles.filterChipActive]}
+            key={item.value}
+            style={[
+              styles.filterChip,
+              { minWidth: categoryChipMinWidth },
+              filter === item.value && styles.filterChipActive,
+            ]}
             onPress={() => setFilter(item.value)}
+            activeOpacity={0.8}
           >
             <Text style={[styles.filterText, filter === item.value && styles.filterTextActive]}>
               {item.label}
             </Text>
           </TouchableOpacity>
-        )}
-        contentContainerStyle={styles.filterList}
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBar}
-      />
+        ))}
+      </ScrollView>
 
       {/* Family Totals */}
-      {expenses.length > 0 && (
+      {familyExpenses.length > 0 && (
         <View style={styles.familyTotalsSection}>
           <TouchableOpacity style={styles.familyTotalsHeader} onPress={() => setShowFamilyTotals(v => !v)}>
             <Text style={styles.familyTotalsTitle}>👨‍👩‍👧 Family Totals</Text>
@@ -189,20 +281,36 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
       )}
 
       {/* Sort bar */}
-      <View style={styles.sortBar}>
-        <Text style={styles.sortLabel}>Sort:</Text>
-        {(['date', 'family', 'amount'] as const).map(by => (
-          <TouchableOpacity
-            key={by}
-            style={[styles.sortChip, sortBy === by && styles.sortChipActive]}
-            onPress={() => handleSort(by)}
-          >
-            <Text style={[styles.sortChipText, sortBy === by && styles.sortChipTextActive]}>
-              {by.charAt(0).toUpperCase() + by.slice(1)}{sortArrow(by)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        <Text style={styles.sortCount}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}</Text>
+      <View style={styles.controlsBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.viewFilterContent}>
+          {VIEW_FILTERS.map((item) => (
+            <TouchableOpacity
+              key={item.value}
+              style={[styles.viewChip, viewFilter === item.value && styles.viewChipActive]}
+              onPress={() => setViewFilter(item.value)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.viewChipText, viewFilter === item.value && styles.viewChipTextActive]}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+        <View style={styles.sortBar}>
+          <Text style={styles.sortLabel}>Sort:</Text>
+          {(['date', 'family', 'amount'] as const).map(by => (
+            <TouchableOpacity
+              key={by}
+              style={[styles.sortChip, sortBy === by && styles.sortChipActive]}
+              onPress={() => handleSort(by)}
+            >
+              <Text style={[styles.sortChipText, sortBy === by && styles.sortChipTextActive]}>
+                {by.charAt(0).toUpperCase() + by.slice(1)}{sortArrow(by)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          <Text style={styles.sortCount}>{visibleExpenseCount} item{visibleExpenseCount !== 1 ? 's' : ''}</Text>
+        </View>
       </View>
 
       {/* Deleted expenses — organizer only */}
@@ -268,37 +376,8 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
         </View>
       )}
 
-      {/* Expense list */}
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View>
-            <ExpenseCard
-              expense={item}
-              onPress={() => navigation.navigate('AddEditExpense', { tripId, expenseId: item.id })}
-            />
-            {/* Version indicator + history link */}
-            <View style={styles.versionRow}>
-              {(item.current_version ?? 1) > 1 && (
-                <Text style={styles.versionIndicator}>v{item.current_version}</Text>
-              )}
-              {item.last_edited_at && (
-                <Text style={styles.lastEdited}>
-                  Edited {new Date(item.last_edited_at).toLocaleDateString()}
-                </Text>
-              )}
-              {canManageTrip && (item.current_version ?? 1) > 1 && (
-                <TouchableOpacity
-                  style={styles.historyInlineBtn}
-                  onPress={() => navigation.navigate('ExpenseHistory', { expenseId: item.id, tripId })}
-                >
-                  <Text style={styles.historyInlineBtnText}>🕐 History</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        )}
+      <ScrollView
+        style={styles.expenseScroll}
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
@@ -307,16 +386,90 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
             tintColor={Colors.primary}
           />
         }
-        ListEmptyComponent={
+      >
+        {showFamilyExpenses && filteredFamilyExpenses.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Family expenses</Text>
+              <Text style={styles.sectionSubtitle}>Group and family-paid expenses only.</Text>
+            </View>
+            {filteredFamilyExpenses.map((item) => (
+              <View key={item.id}>
+                <ExpenseCard
+                  expense={item}
+                  currency={currencySymbol(currentTrip?.currency)}
+                  onPress={() => navigation.navigate('AddEditExpense', { tripId, expenseId: item.id })}
+                />
+                <View style={styles.versionRow}>
+                  {(item.current_version ?? 1) > 1 && (
+                    <Text style={styles.versionIndicator}>v{item.current_version}</Text>
+                  )}
+                  {item.last_edited_at && (
+                    <Text style={styles.lastEdited}>
+                      Edited {new Date(item.last_edited_at).toLocaleDateString()}
+                    </Text>
+                  )}
+                  {canManageTrip && (item.current_version ?? 1) > 1 && (
+                    <TouchableOpacity
+                      style={styles.historyInlineBtn}
+                      onPress={() => navigation.navigate('ExpenseHistory', { expenseId: item.id, tripId })}
+                    >
+                      <Text style={styles.historyInlineBtnText}>🕐 History</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
+        {!hasVisibleExpenses && (
           <EmptyState
             icon="💰"
             title="No expenses yet"
-            subtitle={canManageTrip ? 'Add your first expense to start tracking costs fairly.' : 'Expenses added by admins will appear here.'}
+            subtitle={canManageTrip ? 'Add your first family expense to start tracking costs fairly.' : 'Family expenses added by admins will appear here.'}
             actionLabel={canManageTrip ? 'Add Expense' : undefined}
             onAction={canManageTrip ? () => navigation.navigate('AddEditExpense', { tripId }) : undefined}
           />
-        }
-      />
+        )}
+
+        {showPrivateExpenses && filteredPrivateExpenses.length > 0 && (
+          <View style={styles.personSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Private spending</Text>
+              <Text style={styles.sectionSubtitle}>Only visible to the payer/family and the organizer. Not included in trip totals or settlements.</Text>
+            </View>
+            {filteredPrivateExpenses.map((item) => (
+              <View key={item.id} style={styles.personExpenseCard}>
+                <ExpenseCard
+                  expense={item}
+                  currency={currencySymbol(currentTrip?.currency)}
+                  onPress={() => navigation.navigate('AddEditExpense', { tripId, expenseId: item.id })}
+                />
+              </View>
+            ))}
+          </View>
+        )}
+
+        {showPersonExpenses && filteredPersonExpenses.length > 0 && (
+          <View style={styles.personSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Personal expenses</Text>
+              <Text style={styles.sectionSubtitle}>Visible only to the people involved and the organizer.</Text>
+            </View>
+            {filteredPersonExpenses.map((item) => (
+              <View key={item.id} style={styles.personExpenseCard}>
+                <ExpenseCard
+                  expense={item}
+                  currency={currencySymbol(currentTrip?.currency)}
+                  onPress={() => navigation.navigate('AddEditExpense', { tripId, expenseId: item.id })}
+                />
+              </View>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+
     </View>
   );
 }
@@ -348,16 +501,28 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   addBtnText: { color: Colors.primary, fontWeight: FontWeight.semiBold, fontSize: FontSize.sm },
-  filterBar: { maxHeight: 50, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  filterList: { paddingHorizontal: Spacing.md, alignItems: 'center' },
-  filterChip: {
+  filterBar: {
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    maxHeight: 46,
+  },
+  filterContent: {
     paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  filterChip: {
+    paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.sm,
     borderRadius: Radius.full,
-    marginRight: Spacing.sm,
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filterChipActive: { backgroundColor: Colors.primaryLight },
-  filterText: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  filterText: { fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center' },
   filterTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
   familyTotalsSection: {
     backgroundColor: Colors.surface,
@@ -387,14 +552,35 @@ const styles = StyleSheet.create({
   familyTotalName: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
   familyTotalAmount: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.primary, marginTop: 2 },
   familyTotalCount: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  controlsBar: {
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  viewFilterContent: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xs,
+    gap: Spacing.xs,
+  },
+  viewChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  viewChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  viewChipText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
+  viewChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
   sortBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.sm,
     backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
     gap: Spacing.xs,
   },
   sortLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginRight: 2 },
@@ -410,7 +596,13 @@ const styles = StyleSheet.create({
   sortChipText: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: FontWeight.medium },
   sortChipTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
   sortCount: { marginLeft: 'auto', fontSize: FontSize.xs, color: Colors.textSecondary },
-  list: { padding: Spacing.md, flexGrow: 1 },
+  expenseScroll: { flex: 1 },
+  list: { paddingBottom: Spacing.md, flexGrow: 1 },
+  sectionHeader: { paddingHorizontal: Spacing.md, paddingTop: Spacing.sm, paddingBottom: Spacing.xs, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  sectionTitle: { fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text },
+  sectionSubtitle: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  personSection: { backgroundColor: Colors.surface, paddingBottom: Spacing.md },
+  personExpenseCard: { paddingHorizontal: Spacing.md },
   // Deleted expenses
   deletedSection: { backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border },
   deletedHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },

@@ -213,9 +213,9 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
 
   async function handleSendPushTalk() {
     if (!user || !family) return;
-    const recipients = familyMembers.filter((m) => m.push_talk_enabled && m.user_id !== user.id);
+    const recipients = familyMembers.filter((m) => m.user_id !== user.id);
     if (recipients.length === 0) {
-      return Alert.alert('No recipients', 'No other family members have turned on family pings yet.');
+      return Alert.alert('No recipients', 'No other family members are in this family yet.');
     }
 
     setSendingPush(true);
@@ -242,7 +242,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
       Alert.alert('Family ping failed', error);
       return;
     }
-    Alert.alert('Family ping sent', `Sent to ${recipients.length} opted-in member${recipients.length === 1 ? '' : 's'}.`);
+    Alert.alert('Family ping sent', `Sent to ${recipients.length} family member${recipients.length === 1 ? '' : 's'}.`);
   }
 
   async function handleDeleteFamily() {
@@ -323,7 +323,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         style={styles.pushTalkBtn}
       />
       <Text style={styles.pushTalkLabel}>
-        Sends a notification to opted-in family members and opens trip chat when they tap it.
+        Sends a notification to other family members and opens trip chat when they tap it.
       </Text>
 
       {/* Current Members */}
@@ -373,12 +373,12 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                       onPress={() => handleTogglePushTalk(m, !m.push_talk_enabled)}
                     >
                       <Text style={[styles.pushTalkBtnText, m.push_talk_enabled && styles.pushTalkBtnTextOn]}>
-                        {m.push_talk_enabled ? '🔔 Pings On' : '🔕 Pings Off'}
+                        {m.push_talk_enabled ? '🔔 Live Audio On' : '▶ Manual'}
                       </Text>
                     </TouchableOpacity>
                   ) : (
                     <Text style={styles.pushTalkStatus}>
-                      {m.push_talk_enabled ? '🔔' : '🔕'}
+                      {m.push_talk_enabled ? '🔔' : '▶'}
                     </Text>
                   )}
                 </View>

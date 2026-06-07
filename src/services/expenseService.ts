@@ -40,6 +40,7 @@ export const expenseService = {
       .from('expenses')
       .select('*, paid_by_family:families(*), paid_by_profile:profiles!paid_by_user_id(*), expense_splits(*, family:families(*)), expense_person_splits(*, profile:profiles!user_id(*))')
       .eq('trip_id', tripId)
+      .or('is_deleted.is.null,is_deleted.eq.false')
       .order('date', { ascending: false });
     if (error) return { data: null, error: error.message };
     return { data: data as Expense[], error: null };
@@ -117,9 +118,8 @@ export const expenseService = {
     deletedByUserId: string,
     deletedByName: string
   ): Promise<ServiceResult<null>> {
-    await expenseService.saveVersion(expense, 'delete', deletedByName, 'Expense deleted');
     const nextVersion = (expense.current_version ?? 1) + 1;
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('expenses')
       .update({
         is_deleted: true,
@@ -129,8 +129,14 @@ export const expenseService = {
         last_edited_by: deletedByUserId,
         last_edited_at: new Date().toISOString(),
       })
-      .eq('id', expense.id);
-    return { data: null, error: error?.message ?? null };
+      .eq('id', expense.id)
+      .select('id');
+    if (error) return { data: null, error: error.message };
+    if (!data || data.length === 0) {
+      return { data: null, error: 'You do not have permission to delete this expense.' };
+    }
+    await expenseService.saveVersion(expense, 'delete', deletedByName, 'Expense deleted');
+    return { data: null, error: null };
   },
 
   // Restore from a specific version snapshot

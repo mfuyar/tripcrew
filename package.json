@@ -22,6 +22,7 @@
     "expo-image-manipulator": "~56.0.17",
     "expo-image-picker": "~56.0.16",
     "expo-location": "~56.0.16",
+    "expo-media-library": "~56.0.6",
     "expo-notifications": "~56.0.16",
     "expo-status-bar": "~56.0.4",
     "expo-system-ui": "~56.0.5",
@@ -51,6 +52,8 @@
     "build:preview:android": "npx eas-cli build --platform android --profile preview",
     "build:preview:ios": "npx eas-cli build --platform ios --profile preview",
     "build:preview": "npx eas-cli build --platform all --profile preview",
+    "build:testflight": "npx eas-cli build --platform ios --profile production",
+    "submit:testflight": "npx eas-cli submit --platform ios --profile production",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"

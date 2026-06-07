@@ -11,6 +11,7 @@ const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
 const mockEq = jest.fn();
+const mockOr = jest.fn();
 const mockOrder = jest.fn();
 const mockSingle = jest.fn();
 
@@ -20,6 +21,7 @@ const mockFrom = jest.fn(() => ({
   update: mockUpdate.mockReturnThis(),
   delete: mockDelete.mockReturnThis(),
   eq: mockEq.mockReturnThis(),
+  or: mockOr.mockReturnThis(),
   order: mockOrder.mockReturnThis(),
   single: mockSingle,
 }));
@@ -50,6 +52,7 @@ describe('expenseService', () => {
       const { data, error } = await expenseService.getExpenses(tripId);
 
       expect(mockFrom).toHaveBeenCalledWith('expenses');
+      expect(mockOr).toHaveBeenCalledWith('is_deleted.is.null,is_deleted.eq.false');
       expect(error).toBeNull();
       expect(data).toHaveLength(2);
       expect(data?.[0].title).toBe('Lunch');

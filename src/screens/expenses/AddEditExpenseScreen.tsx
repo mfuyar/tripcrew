@@ -9,6 +9,7 @@ import {
   Image,
   Modal,
   SafeAreaView,
+  useWindowDimensions,
 } from 'react-native';
 import { mediaService } from '../../services/mediaService';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -24,6 +25,7 @@ import { CurrencyAmount } from '../../components/CurrencyAmount';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { DatePickerField } from '../../components/DatePickerField';
 import { parseDate } from '../../utils/dateUtils';
+import { currencySymbol } from '../../utils/currency';
 import {
   Colors, FontSize, FontWeight, Spacing, Radius,
   CATEGORY_ICONS, CATEGORY_COLORS,
@@ -54,10 +56,28 @@ function buildChangeSummary(prev: any, next: any, currency: string): string {
   return parts.length > 0 ? parts.join(', ') : 'Expense updated';
 }
 
+function isPersonExpenseParticipant(expense: {
+  paid_by_family_id?: string | null;
+  paid_by_user_id?: string | null;
+  expense_person_splits?: { user_id: string }[] | null;
+}, userId?: string): boolean {
+  if (!userId || expense.paid_by_family_id) return false;
+  return (
+    expense.paid_by_user_id === userId ||
+    expense.expense_person_splits?.some((split) => split.user_id === userId) === true
+  );
+}
+
 export function AddEditExpenseScreen({ navigation, route }: Props) {
   const { tripId, expenseId, scannedExpense } = route.params;
+  const { width } = useWindowDimensions();
   const { families, members, currentTrip, userFamily, canManageTrip, isTripOrganizer } = useTripContext();
   const { user, profile, isDemoMode, isGlobalAdmin } = useAuth();
+  const displayCurrency = currencySymbol(currentTrip?.currency);
+  const horizontalPadding = Spacing.lg * 2;
+  const categoryGap = Spacing.xs;
+  const categoryColumns = width >= 430 ? 4 : 3;
+  const categoryChipWidth = Math.floor((width - horizontalPadding - categoryGap * (categoryColumns - 1)) / categoryColumns);
   const isEdit = !!expenseId;
 
   const [title, setTitle] = useState('');
@@ -171,9 +191,14 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
         setBaseSplitMethod(data.split_method as SplitMethod);
       }
 
-      // Only the trip organizer (or global admin) and the expense's own
-      // payer/creator can edit or delete it — other trip admins cannot.
-      let baseCanEdit = isTripOrganizer || isGlobalAdmin || data.paid_by_user_id === user?.id;
+      // Family expenses: payer/creator or organizer/global admin.
+      // Person expenses: payer or any selected person in the split, plus organizer/global admin.
+      // Other trip admins cannot edit/delete someone else's expense.
+      let baseCanEdit =
+        isTripOrganizer ||
+        isGlobalAdmin ||
+        data.paid_by_user_id === user?.id ||
+        isPersonExpenseParticipant(data, user?.id);
       if (baseCanEdit && data.paid_by_family_id) {
         const locked = await settlementService.isExpenseEditLocked(tripId, data.paid_by_family_id);
         if (locked) baseCanEdit = false;
@@ -222,6 +247,10 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   }, [amount, splitMethod, families, selectedFamilies, usePersonExpense, personSplitMode, selectedPersonIds, tripMembers]);
 
   async function handleSave() {
+    if (isEdit && !canEdit) {
+      Alert.alert('View only', 'Only involved people or the trip organizer can edit this expense.');
+      return;
+    }
     if (!title.trim()) { Alert.alert('Error', 'Please enter a title.'); return; }
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) { Alert.alert('Error', 'Please enter a valid amount.'); return; }
@@ -261,7 +290,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       // Save current state as a version before overwriting
       const { data: existing } = await expenseService.getExpenseById(expenseId!);
       if (existing) {
-        const summary = buildChangeSummary(existing, payload, currentTrip?.currency ?? '');
+        const summary = buildChangeSummary(existing, payload, displayCurrency);
         await expenseService.saveVersion(existing, 'update', editorName, summary);
       }
       const { error } = await expenseService.updateExpense(expenseId!, {
@@ -302,6 +331,10 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
 
   async function handleDelete() {
     if (!expenseId || !user) return;
+    if (!canEdit) {
+      Alert.alert('View only', 'Only involved people or the trip organizer can delete this expense.');
+      return;
+    }
     Alert.alert(
       'Delete Expense',
       'This expense will be hidden from the list. The organizer can see and restore it.',
@@ -419,11 +452,15 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
 
         {/* Category picker */}
         <Text style={styles.label}>Category</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+        <View style={styles.categoryGrid}>
           {CATEGORIES.map((cat) => (
             <TouchableOpacity
               key={cat}
-              style={[styles.catChip, category === cat && { backgroundColor: CATEGORY_COLORS[cat] + '30', borderColor: CATEGORY_COLORS[cat] }]}
+              style={[
+                styles.catChip,
+                { width: categoryChipWidth },
+                category === cat && { backgroundColor: CATEGORY_COLORS[cat] + '30', borderColor: CATEGORY_COLORS[cat] },
+              ]}
               onPress={() => setCategory(cat)}
             >
               <Text style={styles.catIcon}>{CATEGORY_ICONS[cat]}</Text>
@@ -432,7 +469,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
               </Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </View>
 
         {hasFamilies && (
           <>
@@ -486,7 +523,12 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
             </View>
 
             <Text style={styles.label}>Paid by person</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipScroller}
+              contentContainerStyle={styles.chipRow}
+            >
               {tripMembers.map((m) => (
                 <TouchableOpacity
                   key={m.user_id}
@@ -516,7 +558,12 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
                 </TouchableOpacity>
               )}
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipScroller}
+              contentContainerStyle={styles.chipRow}
+            >
               {tripMembers.map((m) => {
                 const included = personSplitMode === 'everyone' || selectedPersonIds.includes(m.user_id);
                 const label = m.profile?.full_name ?? m.profile?.email ?? 'Member';
@@ -545,7 +592,12 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           <>
             {/* Paid by */}
             <Text style={styles.label}>Paid by family</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipScroller}
+              contentContainerStyle={styles.chipRow}
+            >
               {families.map((f) => (
                 <TouchableOpacity
                   key={f.id}
@@ -583,7 +635,12 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
                   )}
                 </View>
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.chipScroller}
+                contentContainerStyle={styles.chipRow}
+              >
                 {families.map((f) => {
                   const included = selectedFamilies.includes(f.id);
                   return (
@@ -649,13 +706,13 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
                 {singleOther ? (
                   <View style={styles.previewRow}>
                     <Text style={styles.previewFamily}>{singleOther.userName} owes</Text>
-                    <CurrencyAmount amount={amt} currency={currentTrip?.currency ?? '$'} />
+                    <CurrencyAmount amount={amt} currency={displayCurrency} />
                   </View>
                 ) : (
                   personSplits.map((s) => (
                     <View key={s.userId} style={styles.previewRow}>
                       <Text style={styles.previewFamily}>{s.userName}</Text>
-                      <CurrencyAmount amount={s.shareAmount} currency={currentTrip?.currency ?? '$'} />
+                      <CurrencyAmount amount={s.shareAmount} currency={displayCurrency} />
                     </View>
                   ))
                 )}
@@ -697,7 +754,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
                     {soloFamily.name} will owe {paidByFamily.name}
                   </Text>
                   <Text style={styles.previewOwesSub}>
-                    Full amount: {currentTrip?.currency} {amt.toFixed(2)}
+                    Full amount: {displayCurrency}{amt.toFixed(2)}
                   </Text>
                 </View>
               </View>
@@ -711,7 +768,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
                 {splits.filter((s) => s.shareAmount > 0).map((s) => (
                   <View key={s.familyId} style={styles.previewRow}>
                     <Text style={styles.previewFamily}>{s.familyName}</Text>
-                    <CurrencyAmount amount={s.shareAmount} currency={currentTrip?.currency ?? '$'} />
+                    <CurrencyAmount amount={s.shareAmount} currency={displayCurrency} />
                   </View>
                 ))}
               </View>
@@ -753,10 +810,12 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           </>
         ) : (
           <View style={styles.readOnlyBanner}>
-            <Text style={styles.readOnlyText}>View only — only the expense creator or an admin can edit this.</Text>
-            {isEdit && (
+            <Text style={styles.readOnlyText}>
+              View only — only involved people or the trip organizer can edit this.
+            </Text>
+            {isEdit && expenseIsDeleted && (
               <Text style={[styles.readOnlyText, { marginTop: 4 }]}>
-                This expense may be part of an active settlement and cannot be edited.
+                This expense has been deleted and can only be restored by the organizer.
               </Text>
             )}
           </View>
@@ -806,32 +865,49 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: Spacing.sm,
   },
-  chipRow: { flexDirection: 'row', marginBottom: Spacing.md },
+  chipScroller: {
+    flexGrow: 0,
+    marginBottom: Spacing.md,
+  },
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  chipRow: {
+    minHeight: 58,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+  },
   catChip: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.md,
     borderRadius: Radius.full,
     borderWidth: 1,
     borderColor: Colors.border,
     marginRight: Spacing.sm,
     backgroundColor: Colors.surface,
     gap: Spacing.xs,
+    minHeight: 48,
+    justifyContent: 'center',
   },
-  catIcon: { fontSize: 14 },
-  catLabel: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  catIcon: { fontSize: 16 },
+  catLabel: { fontSize: FontSize.sm, color: Colors.textSecondary, textAlign: 'center' },
   famChip: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.md,
     borderRadius: Radius.full,
     borderWidth: 1,
     borderColor: Colors.border,
     marginRight: Spacing.sm,
     backgroundColor: Colors.surface,
     gap: Spacing.xs,
+    minHeight: 48,
   },
   famChipIncluded: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   famChipExcluded: { borderColor: Colors.border, backgroundColor: Colors.background, opacity: 0.6 },

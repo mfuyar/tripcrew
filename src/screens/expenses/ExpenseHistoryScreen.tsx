@@ -8,6 +8,7 @@ import { MainStackParamList, ExpenseVersion } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { expenseService } from '../../services/expenseService';
+import { currencySymbol } from '../../utils/currency';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ExpenseHistory'>;
@@ -42,7 +43,7 @@ export function ExpenseHistoryScreen({ navigation, route }: Props) {
     });
   }, [expenseId]);
 
-  const currency = currentTrip?.currency ?? '$';
+  const currency = currencySymbol(currentTrip?.currency);
   // Current version is the highest version_number
   const currentVersionNum = versions.length > 0 ? versions[0].version_number : 1;
 

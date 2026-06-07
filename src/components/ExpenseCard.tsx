@@ -8,9 +8,10 @@ import { CurrencyAmount } from './CurrencyAmount';
 interface Props {
   expense: Expense;
   onPress?: () => void;
+  currency?: string;
 }
 
-export function ExpenseCard({ expense, onPress }: Props) {
+export function ExpenseCard({ expense, onPress, currency }: Props) {
   const icon = CATEGORY_ICONS[expense.category] ?? '💸';
   const catColor = CATEGORY_COLORS[expense.category] ?? Colors.textSecondary;
   const dateStr = new Date(expense.date).toLocaleDateString('en-US', {
@@ -37,7 +38,7 @@ export function ExpenseCard({ expense, onPress }: Props) {
           {payerName} • {dateStr}
         </Text>
       </View>
-      <CurrencyAmount amount={expense.amount} size="md" />
+      <CurrencyAmount amount={expense.amount} currency={currency ?? '$'} size="md" />
     </TouchableOpacity>
   );
 }

@@ -2,7 +2,6 @@ import { supabase } from '../lib/supabaseClient';
 import { Message, ServiceResult } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { notificationService } from './notificationService';
-import { sendBroadcast } from '../lib/realtimeBroadcast';
 import { mediaService } from './mediaService';
 
 // Keyed by tripId — reused for both receiving and sending so we never
@@ -14,6 +13,15 @@ const activeChannels = new Map<string, RealtimeChannel>();
 let _activeChatTripId: string | null = null;
 export function setActiveChatTrip(id: string | null) { _activeChatTripId = id; }
 export function getActiveChatTrip() { return _activeChatTripId; }
+
+function isMissingPushTalkRpc(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === 'PGRST202' ||
+    error.message?.includes('create_push_talk_notifications') === true ||
+    error.message?.includes('schema cache') === true
+  );
+}
 
 export const chatService = {
   async getMessages(
@@ -73,17 +81,20 @@ export const chatService = {
     chatService.broadcastMessage(tripId, data as Message);
 
     if (isPushTalk) {
-      // Push talk: notify only opted-in family members
-      chatService.notifyPushTalkReceivers(tripId, userId, familyId, mediaUrl);
+      // Push talk: always notify family members. Their Live Audio setting only
+      // controls auto-play, not whether they receive the background alert.
+      const notify = await chatService.notifyPushTalkReceivers(tripId, userId, familyId, mediaUrl);
+      if (notify?.error) return { data: data as Message, error: notify.error };
     } else {
       // Regular message: notify all other trip members
       const preview = content.length > 60 ? content.slice(0, 57) + '…' : content;
-      notificationService.notifyTripMembers(
+      const notify = await notificationService.notifyTripMembers(
         tripId, userId, 'message',
         '💬 New Message',
         preview || 'Sent a photo or audio',
         { trip_id: tripId }
       );
+      if (notify?.error) return { data: data as Message, error: notify.error };
     }
 
     return { data: data as Message, error: null };
@@ -146,47 +157,63 @@ export const chatService = {
     senderId: string,
     familyId?: string,
     mediaUrl?: string
-  ): Promise<void> {
-    // Get family members who have push_talk_enabled
-    if (!familyId) return;
-    const { data: members } = await supabase
-      .from('family_members')
-      .select('user_id')
-      .eq('family_id', familyId)
-      .eq('push_talk_enabled', true)
-      .neq('user_id', senderId);
-
-    if (!members?.length) return;
-
-    const userIds = members.map((m: { user_id: string }) => m.user_id);
-    const rows = userIds.map((userId) => ({
-      user_id: userId,
-      trip_id: tripId,
-      type: 'push_talk',
-      title: '🎙️ Push Talk',
-      body: 'A voice message was sent to your family',
-      data: { trip_id: tripId, family_id: familyId, media_url: mediaUrl ?? null },
-      is_read: false,
-    }));
-
-    const { data: inserted } = await supabase
-      .from('notifications')
-      .insert(rows)
-      .select();
-
-    await notificationService.sendPushToUsers(
-      userIds,
-      '🎙️ Push Talk',
-      'A voice message was sent to your family',
-      { trip_id: tripId, family_id: familyId, type: 'push_talk', media_url: mediaUrl ?? null }
-    );
-
-    // Broadcast real-time to each recipient
-    (inserted ?? []).forEach((n: any) => {
-      const channel = supabase.channel(`user-notifications:${n.user_id}`);
-      void sendBroadcast(channel, 'notification', n)
-        .finally(() => supabase.removeChannel(channel));
+  ): Promise<ServiceResult<number>> {
+    let usedRpc = true;
+    let { data: recipients, error } = await supabase.rpc('create_push_talk_notifications', {
+      p_trip_id: tripId,
+      p_sender_id: senderId,
+      p_family_id: familyId ?? null,
+      p_media_url: mediaUrl ?? null,
     });
+
+    if (error && isMissingPushTalkRpc(error)) {
+      usedRpc = false;
+      const fallback = await supabase
+        .from('trip_members')
+        .select('user_id')
+        .eq('trip_id', tripId)
+        .neq('user_id', senderId);
+      recipients = fallback.data?.map((m) => ({ user_id: m.user_id }));
+      error = fallback.error;
+    }
+
+    if (error) return { data: null, error: error.message };
+
+    let rows = (recipients ?? []) as { user_id: string; auto_play?: boolean | null }[];
+    const missingAutoPlayPrefs = rows.some((r) => r.auto_play === undefined || r.auto_play === null);
+    if (missingAutoPlayPrefs && rows.length > 0) {
+      const { data: prefs } = await supabase
+        .from('family_members')
+        .select('user_id, push_talk_enabled')
+        .eq('trip_id', tripId)
+        .in('user_id', rows.map((r) => r.user_id));
+      const autoPlayByUser = new Map(
+        (prefs ?? []).map((m: { user_id: string; push_talk_enabled: boolean }) => [m.user_id, m.push_talk_enabled])
+      );
+      rows = rows.map((r) => ({ ...r, auto_play: autoPlayByUser.get(r.user_id) ?? false }));
+    }
+
+    // Each recipient's own Live Audio setting decides whether their push payload
+    // tells their device to auto-play — embed it per group since it can differ.
+    const autoPlayIds = Array.from(new Set(rows.filter((r) => r.auto_play).map((r) => r.user_id)));
+    const silentIds = Array.from(new Set(rows.filter((r) => !r.auto_play).map((r) => r.user_id)));
+    if (autoPlayIds.length === 0 && silentIds.length === 0) return { data: 0, error: null };
+
+    const basePayload = { trip_id: tripId, family_id: familyId, type: 'push_talk', media_url: mediaUrl ?? null };
+    const [autoPlayPush, silentPush] = await Promise.all([
+      autoPlayIds.length > 0
+        ? usedRpc
+          ? notificationService.sendPushToUsers(autoPlayIds, '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: true })
+          : notificationService.notifyUsers(autoPlayIds, tripId, 'push_talk', '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: true })
+        : { error: null },
+      silentIds.length > 0
+        ? usedRpc
+          ? notificationService.sendPushToUsers(silentIds, '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: false })
+          : notificationService.notifyUsers(silentIds, tripId, 'push_talk', '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: false })
+        : { error: null },
+    ]);
+
+    return { data: autoPlayIds.length + silentIds.length, error: autoPlayPush.error ?? silentPush.error };
   },
 
   broadcastMessage(tripId: string, message: Message): void {

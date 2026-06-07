@@ -25,12 +25,13 @@ type Props = NativeStackScreenProps<MainStackParamList, 'MediaDetail'>;
 
 export function MediaDetailScreen({ navigation, route }: Props) {
   const { tripId, mediaId } = route.params;
-  const { user, isDemoMode } = useAuth();
-  const { canManageTrip } = useTripContext();
+  const { user, isDemoMode, isGlobalAdmin } = useAuth();
+  const { isTripOrganizer } = useTripContext();
   const [media, setMedia] = useState<TripMedia | null>(null);
   const [loading, setLoading] = useState(true);
   const [caption, setCaption] = useState('');
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     // We'll load the full media list and find the one we need
@@ -65,14 +66,30 @@ export function MediaDetailScreen({ navigation, route }: Props) {
           ])
         );
     if (!confirmed) return;
-    await mediaService.deleteMedia(media);
-    navigation.goBack();
+    const { error } = await mediaService.deleteMedia(media);
+    if (error) {
+      Alert.alert('Unable to delete photo', error);
+    } else {
+      navigation.goBack();
+    }
+  }
+
+  async function handleDownload() {
+    if (!media) return;
+    setDownloading(true);
+    const { error } = await mediaService.saveMediaToLibrary(media);
+    setDownloading(false);
+    if (error) {
+      Alert.alert('Download failed', error);
+    } else if (Platform.OS !== 'web') {
+      Alert.alert('Saved', 'Photo saved to your library.');
+    }
   }
 
   if (loading) return <LoadingView />;
   if (!media) return null;
 
-  const canModify = media.uploaded_by === user?.id || canManageTrip;
+  const canModify = media.uploaded_by === user?.id || isTripOrganizer || isGlobalAdmin;
   const { width } = Dimensions.get('window');
 
   return (
@@ -94,6 +111,15 @@ export function MediaDetailScreen({ navigation, route }: Props) {
           })}
         </Text>
       </View>
+
+      {media.media_type === 'photo' ? (
+        <View style={styles.actionSection}>
+          <AppButton title="Download Photo" onPress={handleDownload} loading={downloading} fullWidth />
+          <Text style={styles.downloadWarning}>
+            ⚠️ Trip photos are deleted 7 days after the trip closes — download anything you want to keep.
+          </Text>
+        </View>
+      ) : null}
 
       {canModify && (
         <View style={styles.captionSection}>
@@ -129,12 +155,19 @@ export function MediaDetailScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.text },
+  container: { flex: 1, backgroundColor: Colors.background },
   content: { paddingBottom: Spacing.xl },
   image: { backgroundColor: Colors.border },
   meta: { backgroundColor: Colors.surface, padding: Spacing.md },
   uploader: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text },
   date: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  actionSection: { padding: Spacing.md, paddingBottom: 0, backgroundColor: Colors.surface },
+  downloadWarning: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
   captionSection: { padding: Spacing.md, backgroundColor: Colors.surface },
   label: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text, marginBottom: Spacing.sm },
   captionInput: {

@@ -10,6 +10,7 @@ import {
   Expense,
   TripMember,
 } from '../types';
+import { isSelfOnlyExpense } from './expenseVisibility';
 
 // ─── Split Calculation Options ────────────────────────────────────────────────
 
@@ -153,6 +154,7 @@ export function calculateFamilyBalances(
   }
 
   for (const expense of expenses) {
+    if (isSelfOnlyExpense(expense)) continue;
     // What this family paid for the whole expense
     if (expense.paid_by_family_id && paid[expense.paid_by_family_id] !== undefined) {
       paid[expense.paid_by_family_id] += expense.amount;
@@ -242,6 +244,7 @@ export function calculatePersonBalances(
 
   for (const expense of expenses) {
     if (expense.paid_by_family_id) continue;
+    if (isSelfOnlyExpense(expense)) continue;
     if (paid[expense.paid_by_user_id] !== undefined) {
       paid[expense.paid_by_user_id] += expense.amount;
     }
@@ -310,7 +313,8 @@ export interface TripDataForFairness {
 export function calculateFairnessMetrics(
   tripData: TripDataForFairness
 ): FairnessMetrics {
-  const { expenses, families } = tripData;
+  const { families } = tripData;
+  const expenses = tripData.expenses.filter((expense) => !isSelfOnlyExpense(expense));
   const balances = calculateFamilyBalances(expenses, families);
   const totalPaid = balances.reduce((sum, b) => sum + b.totalPaid, 0);
 

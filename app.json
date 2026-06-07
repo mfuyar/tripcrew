@@ -12,11 +12,19 @@
       "bundleIdentifier": "com.muhemmet.travelcrew",
       "appleTeamId": "B6N8Y2FHV5",
       "deploymentTarget": "16.4",
-      "buildNumber": "3",
+      "buildNumber": "4",
+      "entitlements": {
+        "aps-environment": "production"
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "Travel Crew needs camera access to scan receipts and take trip photos.",
         "NSLocationWhenInUseUsageDescription": "Travel Crew needs location access to share your live position with trip members and find community spots around you.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Travel Crew needs Always location access only when you choose to share live location with a trip until that trip ends.",
+        "UIBackgroundModes": [
+          "location",
+          "remote-notification",
+          "audio"
+        ],
         "NSPhotoLibraryUsageDescription": "Travel Crew needs photo library access to upload trip photos and scan receipts.",
         "NSPhotoLibraryAddUsageDescription": "Travel Crew saves photos to your photo library.",
         "ITSAppUsesNonExemptEncryption": false
@@ -54,6 +62,14 @@
         }
       ],
       [
+        "expo-media-library",
+        {
+          "photosPermission": "Travel Crew needs access to your photos so you can upload trip memories.",
+          "savePhotosPermission": "Travel Crew saves trip photos to your photo library when you choose to download them.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Travel Crew needs camera access to scan receipts."
@@ -74,6 +90,7 @@
         "expo-notifications",
         {
           "defaultChannel": "default",
+          "enableBackgroundRemoteNotifications": true,
           "sounds": [
             "./assets/tripcrew_alert.wav"
           ]
@@ -82,7 +99,8 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Travel Crew needs microphone access to send voice messages."
+          "microphonePermission": "Travel Crew needs microphone access to send voice messages.",
+          "enableBackgroundPlayback": true
         }
       ],
       "expo-asset",

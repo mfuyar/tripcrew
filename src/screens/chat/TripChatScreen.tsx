@@ -37,7 +37,7 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 export function TripChatScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const { user, profile, isDemoMode } = useAuth();
-  const { userFamily, isTripClosed } = useTripContext();
+  const { currentTrip, userFamily, isTripClosed } = useTripContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
@@ -65,6 +65,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   const queuedPushTalkIdsRef = useRef<Set<string>>(new Set());
   const pendingPushTalksRef = useRef<{ id: string; url: string }[]>([]);
   const playingPushTalkRef = useRef<{ id: string; url: string } | null>(null);
+  const pushTalkPlayRequestedRef = useRef(false);
+  const pushTalkRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pushTalkRetryCountRef = useRef(0);
   // Ref-backed upload guard so startPushTalk never reads a stale closure value
   const uploadingRef = useRef(false);
   // Tracks whether the push-talk player has actually started playing (isPlaying went true)
@@ -76,6 +79,29 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
 
   function wait(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function clearPushTalkRetry() {
+    if (pushTalkRetryTimerRef.current) {
+      clearTimeout(pushTalkRetryTimerRef.current);
+      pushTalkRetryTimerRef.current = null;
+    }
+    pushTalkRetryCountRef.current = 0;
+  }
+
+  function tryStartPushTalkPlayback() {
+    if (!playingPushTalkRef.current || !pushTalkPlayRequestedRef.current || pushTalkStatus.playing) return;
+    try {
+      pushTalkPlayer.seekTo(0);
+      pushTalkPlayer.play();
+    } catch {
+      // A later retry can still succeed after the native player finishes loading.
+    }
+
+    if (pushTalkRetryCountRef.current >= 12) return;
+    pushTalkRetryCountRef.current += 1;
+    if (pushTalkRetryTimerRef.current) clearTimeout(pushTalkRetryTimerRef.current);
+    pushTalkRetryTimerRef.current = setTimeout(tryStartPushTalkPlayback, 250);
   }
 
   function resetRecordingState() {
@@ -100,16 +126,34 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
   async function playPushTalkNow(pushTalk: { id: string; url: string }) {
     playingPushTalkRef.current = pushTalk;
     pushTalkHasPlayedRef.current = false;
+    pushTalkPlayRequestedRef.current = true;
+    clearPushTalkRetry();
     setPlayingPushTalk(pushTalk);
     try {
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'doNotMix',
+      });
       if (playingPushTalkRef.current?.id !== pushTalk.id) return;
-      pushTalkPlayer.replace(pushTalk.url);
-      pushTalkPlayer.seekTo(0);
-      pushTalkPlayer.play();
+      pushTalkPlayer.replace({ uri: pushTalk.url, name: 'Push Talk' });
+      tryStartPushTalkPlayback();
+      // Lock screen controls are best-effort — a native throw here (known to
+      // happen on stale/rapid metadata updates) must never block playback.
+      try {
+        pushTalkPlayer.setActiveForLockScreen(true, {
+          title: 'Push Talk',
+          artist: currentTrip?.name ?? 'TripCrew',
+        });
+      } catch {
+        // Ignore — audio keeps playing without lock screen controls.
+      }
     } catch {
       if (playingPushTalkRef.current?.id === pushTalk.id) {
         playingPushTalkRef.current = null;
+        pushTalkPlayRequestedRef.current = false;
+        clearPushTalkRetry();
         setPlayingPushTalk(null);
         playNextQueuedPushTalk();
       }
@@ -132,15 +176,36 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     pendingPushTalksRef.current.push(pushTalk);
   }
 
+  function markPushTalksSeen(messagesToMark: Message[]) {
+    messagesToMark.forEach((message) => {
+      if (message.is_push_talk) {
+        queuedPushTalkIdsRef.current.add(message.id);
+      }
+    });
+  }
+
+  function shouldAutoPlayPushTalk(message: Message): boolean {
+    return Boolean(
+      liveAudioEnabled &&
+      message.is_push_talk &&
+      message.media_url &&
+      message.user_id !== user?.id
+    );
+  }
+
   const loadMessages = useCallback(async () => {
     if (isDemoMode) {
+      markPushTalksSeen(demoMessages);
       setMessages(demoMessages);
       setLoading(false);
       return;
     }
     await mediaService.deleteExpiredChatMedia(tripId);
+    await mediaService.purgeClosedTripMessages(tripId, currentTrip?.closed_at);
     const { data } = await chatService.getMessages(tripId);
-    setMessages(data ?? []);
+    const loadedMessages = data ?? [];
+    markPushTalksSeen(loadedMessages);
+    setMessages(loadedMessages);
     setLoading(false);
 
     // Load the current user's push-talk opt-in status so we know whether
@@ -158,7 +223,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       pushTalkEnabledRef.current = false;
       setLiveAudioEnabled(false);
     }
-  }, [tripId, isDemoMode, user?.id, userFamily?.id]);
+  }, [tripId, isDemoMode, user?.id, userFamily?.id, currentTrip?.closed_at]);
 
   // Tell background player the chat screen is active so it skips auto-play
   useEffect(() => {
@@ -180,11 +245,14 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       });
 
       const shouldLivePlay =
-        msg.is_push_talk &&
-        msg.media_url &&
-        msg.user_id !== user?.id &&
-        (!msg.family_id || !userFamily?.id || msg.family_id === userFamily.id) &&
-        (pushTalkEnabledRef.current || liveAudioEnabled);
+        shouldAutoPlayPushTalk(msg) || (
+          pushTalkEnabledRef.current &&
+          Boolean(
+            msg.is_push_talk &&
+            msg.media_url &&
+            msg.user_id !== user?.id
+          )
+        );
 
       if (shouldLivePlay) {
         enqueueIncomingPushTalk({ id: msg.id, url: msg.media_url! });
@@ -221,19 +289,44 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     if (!recordingInProgress) playNextQueuedPushTalk();
   }, [recordingInProgress]);
 
+  useEffect(() => {
+    if (!liveAudioEnabled) return;
+    messages.forEach((message) => {
+      if (shouldAutoPlayPushTalk(message)) {
+        enqueueIncomingPushTalk({ id: message.id, url: message.media_url! });
+      }
+    });
+  }, [messages, liveAudioEnabled, user?.id, userFamily?.id]);
+
   // Detect finish via isPlaying transition (true→false) rather than the transient
   // didJustFinish flag which can be missed if React doesn't flush in the same 250ms poll.
   useEffect(() => {
     if (!playingPushTalk) { pushTalkHasPlayedRef.current = false; return; }
     if (pushTalkStatus.playing) {
       pushTalkHasPlayedRef.current = true;
+      pushTalkPlayRequestedRef.current = false;
+      clearPushTalkRetry();
     } else if (pushTalkHasPlayedRef.current) {
       pushTalkHasPlayedRef.current = false;
       playingPushTalkRef.current = null;
+      pushTalkPlayRequestedRef.current = false;
+      clearPushTalkRetry();
+      pushTalkPlayer.setActiveForLockScreen(false);
       setPlayingPushTalk(null);
       playNextQueuedPushTalk();
     }
   }, [playingPushTalk, pushTalkStatus.playing]);
+
+  useEffect(() => {
+    if (
+      !playingPushTalk ||
+      !pushTalkPlayRequestedRef.current ||
+      pushTalkStatus.playing ||
+      !pushTalkStatus.isLoaded
+    ) return;
+
+    tryStartPushTalkPlayback();
+  }, [playingPushTalk, pushTalkStatus.isLoaded, pushTalkStatus.playing]);
 
   // Safety timeout: clear stuck playingPushTalk after 30s (e.g. URL load error)
   useEffect(() => {
@@ -241,6 +334,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     const t = setTimeout(() => {
       pushTalkHasPlayedRef.current = false;
       playingPushTalkRef.current = null;
+      pushTalkPlayRequestedRef.current = false;
+      clearPushTalkRetry();
+      pushTalkPlayer.setActiveForLockScreen(false);
       setPlayingPushTalk(null);
       playNextQueuedPushTalk();
     }, 30000);
@@ -253,12 +349,13 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     setText('');
     setSending(true);
     const { data, error } = await chatService.sendMessage(tripId, user.id, content, userFamily?.id, 'text');
-    if (error || !data) {
+    if (!data) {
       setText(content);
       Alert.alert('Message failed', error ?? 'Unable to send this message.');
     } else {
       // Optimistic: add sender's own message immediately (realtime echo handles other users)
       setMessages((prev) => prev.some((m) => m.id === data.id) ? prev : [...prev, data]);
+      if (error) Alert.alert('Notification failed', error);
     }
     setSending(false);
   }
@@ -355,11 +452,12 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       data.url,
       data.mime_type
     );
-    if (messageError || !message) {
-      Alert.alert('Message failed', messageError ?? 'Unable to send photo message.');
-    } else {
-      setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
-    }
+      if (!message) {
+        Alert.alert('Message failed', messageError ?? 'Unable to send photo message.');
+      } else {
+        setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
+        if (messageError) Alert.alert('Notification failed', messageError);
+      }
     uploadingRef.current = false; setUploadingMedia(false);
   }
 
@@ -384,6 +482,9 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       if (pushTalkStatus.playing || playingPushTalk) {
         pushTalkPlayer.pause();   // don't call replace(null) — expo-audio rejects null AudioSource
         pushTalkHasPlayedRef.current = false;
+        pushTalkPlayRequestedRef.current = false;
+        clearPushTalkRetry();
+        pushTalkPlayer.setActiveForLockScreen(false);
         playingPushTalkRef.current = null;
         setPlayingPushTalk(null);
         await wait(150);
@@ -409,7 +510,12 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     } catch (e: any) {
       resetRecordingState();
       showRecordingError(e?.message);
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'doNotMix',
+      }).catch(() => {});
     } finally {
       startingRecordingRef.current = false;
     }
@@ -462,11 +568,12 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         tripId, user.id, 'Push talk', userFamily?.id,
         'audio', data.url, data.mime_type ?? 'audio/mp4', duration > 0 ? duration : undefined, true
       );
-      if (messageError || !message) {
+      if (!message) {
         Alert.alert('Message failed', messageError ?? 'Unable to send audio message.');
         return;
       }
       setMessages((prev) => prev.some((m) => m.id === message.id) ? prev : [...prev, message]);
+      if (messageError) Alert.alert('Notification failed', messageError);
     } catch (e: any) {
       resetRecordingState();
       showRecordingError(e?.message ?? 'Could not stop or upload the recording.');
@@ -474,7 +581,12 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       pendingStopRef.current = false;
       uploadingRef.current = false; setUploadingMedia(false);
       stoppingRecordingRef.current = false;
-      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'doNotMix',
+      }).catch(() => {});
     }
   }
 

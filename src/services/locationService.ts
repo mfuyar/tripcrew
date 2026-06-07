@@ -10,6 +10,8 @@ const STOP_EVENT = 'location-stop';
 const LIVE_LOCATION_FRESH_MS = 5 * 60 * 1000;
 const BACKGROUND_LOCATION_TASK = 'tripcrew-background-live-location';
 const ACTIVE_BACKGROUND_SESSION_KEY = 'tripcrew.activeLiveLocationSession';
+const BACKGROUND_LOCATION_BUILD_ERROR =
+  'Background live location is not configured in this build. Rebuild the app with iOS UIBackgroundModes location enabled, then try again.';
 
 const TaskManager = (() => {
   try {
@@ -147,18 +149,26 @@ async function startBackgroundLocationTask(): Promise<void> {
   const hasStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
   if (hasStarted) return;
 
-  await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: 60_000,
-    distanceInterval: 50,
-    pausesUpdatesAutomatically: false,
-    showsBackgroundLocationIndicator: true,
-    foregroundService: {
-      notificationTitle: 'TripCrew live location',
-      notificationBody: 'Sharing your location with this trip until the trip is closed or you turn it off.',
-      notificationColor: '#4F7FFF',
-    },
-  });
+  try {
+    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: 60_000,
+      distanceInterval: 50,
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: 'TripCrew live location',
+        notificationBody: 'Sharing your location with this trip until the trip is closed or you turn it off.',
+        notificationColor: '#4F7FFF',
+      },
+    });
+  } catch (error: any) {
+    const message = String(error?.message ?? error);
+    if (message.includes('UIBackgroundModes') || message.includes('Background location has not been configured')) {
+      throw new Error(BACKGROUND_LOCATION_BUILD_ERROR);
+    }
+    throw error;
+  }
 }
 
 if (isBackgroundTaskDefined) {
@@ -276,9 +286,6 @@ export const locationService = {
       broadcast
     );
 
-    void writeBackgroundSession(session);
-    void startBackgroundLocationTask();
-
     const stop = () => {
       locationSub.remove();
       channel.send({ type: 'broadcast', event: STOP_EVENT, payload: { userId } });
@@ -295,6 +302,14 @@ export const locationService = {
       }
     };
     stopSharingNow = stop;
+
+    try {
+      await writeBackgroundSession(session);
+      await startBackgroundLocationTask();
+    } catch (error) {
+      stop();
+      throw error;
+    }
 
     activeSharingSession = { tripId, userId, listeners, stop };
     return stop;

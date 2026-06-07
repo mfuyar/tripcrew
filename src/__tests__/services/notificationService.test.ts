@@ -35,7 +35,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockPushTokenEq.mockResolvedValue({ data: [], error: null });
   mockNotificationSelect.mockResolvedValue({ data: [], error: null });
-  mockFunctionsInvoke.mockResolvedValue({ data: { sent: 0 }, error: null });
+  mockFunctionsInvoke.mockResolvedValue({ data: { sent: 2 }, error: null });
 });
 
 describe('notificationService.notifyUsers', () => {

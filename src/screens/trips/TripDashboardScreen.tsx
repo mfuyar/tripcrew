@@ -23,6 +23,8 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 import { LoadingView } from '../../components/LoadingView';
 import { TripClosedBanner } from '../../components/TripClosedBanner';
 import { isMappableDestination, openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
+import { currencySymbol } from '../../utils/currency';
+import { isSelfOnlyExpense } from '../../utils/expenseVisibility';
 import { TripFeatureKey } from '../../constants/features';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
@@ -55,7 +57,8 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
 
   const loadData = useCallback(async () => {
     if (isDemoMode) {
-      setTotalExpenses(demoExpenses.reduce((s, e) => s + e.amount, 0));
+      const familyExpenses = demoExpenses.filter((e) => e.paid_by_family_id && !isSelfOnlyExpense(e));
+      setTotalExpenses(familyExpenses.reduce((s, e) => s + e.amount, 0));
       setAnnouncements(demoAnnouncements.slice(0, 3));
       setLoading(false);
       setRefreshing(false);
@@ -66,8 +69,8 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
       isFeatureEnabled('announcements') ? announcementService.getLatest(tripId, 3) : Promise.resolve({ data: [], error: null }),
       isFeatureEnabled('polls') ? pollService.getActivePolls(tripId, 3) : Promise.resolve({ data: [], error: null }),
     ]);
-    const total = (expResult.data ?? []).reduce((s, e) => s + e.amount, 0);
-    setTotalExpenses(total);
+    const familyExpenses = (expResult.data ?? []).filter((e) => e.paid_by_family_id && !isSelfOnlyExpense(e));
+    setTotalExpenses(familyExpenses.reduce((s, e) => s + e.amount, 0));
     if (annResult.error) {
       Alert.alert('Unable to load announcements', annResult.error);
     }
@@ -321,7 +324,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
         </TouchableOpacity>
         {canViewExpenses && isFeatureEnabled('expenses') && (
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>{trip?.currency} {totalExpenses.toFixed(0)}</Text>
+            <Text style={styles.statValue}>{currencySymbol(trip?.currency)}{totalExpenses.toFixed(0)}</Text>
             <Text style={styles.statLabel}>Expenses</Text>
           </View>
         )}

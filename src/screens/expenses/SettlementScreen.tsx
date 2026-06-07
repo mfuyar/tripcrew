@@ -25,6 +25,7 @@ import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { AppButton } from '../../components/AppButton';
+import { currencySymbol } from '../../utils/currency';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Settlements'>;
@@ -40,8 +41,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function SettlementScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
-  const { families, members, currentTrip, canManageTrip, userFamily } = useTripContext();
-  const { isDemoMode } = useAuth();
+  const { families, members, currentTrip, canManageTrip, userFamily, isTripOrganizer } = useTripContext();
+  const { isDemoMode, user, isGlobalAdmin } = useAuth();
   const [settlements, setSettlements] = useState<SettlementCalculation[]>([]);
   const [personSettlements, setPersonSettlements] = useState<PersonSettlementCalculation[]>([]);
   const [existingSettlements, setExistingSettlements] = useState<Settlement[]>([]);
@@ -118,7 +119,10 @@ export function SettlementScreen({ navigation, route }: Props) {
 
   if (loading) return <LoadingView />;
 
-  const currency = currentTrip?.currency ?? '$';
+  const currency = currencySymbol(currentTrip?.currency);
+  const visiblePersonSettlements = personSettlements.filter((item) =>
+    isTripOrganizer || isGlobalAdmin || item.fromUserId === user?.id || item.toUserId === user?.id
+  );
 
   return (
     <FlatList
@@ -132,40 +136,42 @@ export function SettlementScreen({ navigation, route }: Props) {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Settlements</Text>
           <Text style={styles.headerSubtitle}>
-            {settlements.length === 0 && personSettlements.length === 0
+            {settlements.length === 0 && visiblePersonSettlements.length === 0
               ? 'All settled up!'
-              : `${settlements.length + personSettlements.length} payment${settlements.length + personSettlements.length !== 1 ? 's' : ''} needed`}
+              : `${settlements.length + visiblePersonSettlements.length} payment${settlements.length + visiblePersonSettlements.length !== 1 ? 's' : ''} needed`}
           </Text>
-          {personSettlements.length > 0 && (
-            <View style={styles.sectionBlock}>
-              <Text style={styles.sectionTitle}>Person Settlements</Text>
-              <Text style={styles.sectionSubtitle}>For equal-by-person and selected-person expenses.</Text>
-              {personSettlements.map((item) => (
-                <View key={`${item.fromUserId}-${item.toUserId}`} style={styles.personCard}>
-                  <View style={styles.personInitial}>
-                    <Text style={styles.personInitialText}>{item.fromUserName.charAt(0).toUpperCase()}</Text>
-                  </View>
-                  <View style={styles.personSettlementText}>
-                    <Text style={styles.personSettlementTitle}>
-                      <Text style={styles.bold}>{item.fromUserName}</Text>
-                      {' pays '}
-                      <Text style={styles.bold}>{item.toUserName}</Text>
-                    </Text>
-                    <Text style={styles.personSettlementSub}>Person balance, separate from family settlements</Text>
-                  </View>
-                  <Text style={styles.personAmount}>{currency} {item.amount.toFixed(2)}</Text>
-                </View>
-              ))}
-            </View>
-          )}
           <View style={styles.sectionBlock}>
             <Text style={styles.sectionTitle}>Family Settlements</Text>
             <Text style={styles.sectionSubtitle}>Based on family-paid expenses and family splits.</Text>
           </View>
         </View>
       }
+      ListFooterComponent={
+        visiblePersonSettlements.length > 0 ? (
+          <View style={styles.sectionBlock}>
+            <Text style={styles.sectionTitle}>Person Settlements</Text>
+            <Text style={styles.sectionSubtitle}>For equal-by-person and selected-person expenses.</Text>
+            {visiblePersonSettlements.map((item) => (
+              <View key={`${item.fromUserId}-${item.toUserId}`} style={styles.personCard}>
+                <View style={styles.personInitial}>
+                  <Text style={styles.personInitialText}>{item.fromUserName.charAt(0).toUpperCase()}</Text>
+                </View>
+                <View style={styles.personSettlementText}>
+                  <Text style={styles.personSettlementTitle}>
+                    <Text style={styles.bold}>{item.fromUserName}</Text>
+                    {' pays '}
+                    <Text style={styles.bold}>{item.toUserName}</Text>
+                  </Text>
+                  <Text style={styles.personSettlementSub}>Person balance, separate from family settlements</Text>
+                </View>
+                <Text style={styles.personAmount}>{currency}{item.amount.toFixed(2)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
-        personSettlements.length === 0 ? (
+        visiblePersonSettlements.length === 0 ? (
           <EmptyState
             icon="🎉"
             title="All settled up!"
@@ -198,7 +204,7 @@ export function SettlementScreen({ navigation, route }: Props) {
               <View style={styles.middle}>
                 <Text style={styles.arrow}>→</Text>
                 <Text style={styles.amount}>
-                  {currency} {item.amount.toFixed(2)}
+                  {currency}{item.amount.toFixed(2)}
                 </Text>
               </View>
               <View style={styles.familySide}>

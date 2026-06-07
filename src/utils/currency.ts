@@ -10,7 +10,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 /** Returns the symbol for a currency code, falling back to the code itself. */
 export function currencySymbol(code?: string): string {
   if (!code) return '$';
-  return CURRENCY_SYMBOLS[code.toUpperCase()] ?? code;
+  return CURRENCY_SYMBOLS[code.toUpperCase()] ?? '$';
 }
 
 /** Formats an amount with its currency symbol: "$1,234.56" */

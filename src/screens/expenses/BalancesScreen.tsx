@@ -14,9 +14,10 @@ import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
 import { demoExpenses } from '../../lib/mockData';
-import { calculateFamilyBalances, calculateSettlements } from '../../utils/calculations';
+import { calculateFamilyBalances, calculatePersonBalances } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
 import { currencySymbol } from '../../utils/currency';
+import { isSelfOnlyExpense } from '../../utils/expenseVisibility';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { CurrencyAmount } from '../../components/CurrencyAmount';
 import { AppButton } from '../../components/AppButton';
@@ -26,9 +27,10 @@ type Props = NativeStackScreenProps<MainStackParamList, 'Balances'>;
 
 export function BalancesScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
-  const { families, currentTrip, canManageTrip } = useTripContext();
-  const { isDemoMode } = useAuth();
+  const { families, members, currentTrip, canManageTrip, isTripOrganizer } = useTripContext();
+  const { isDemoMode, user, isGlobalAdmin } = useAuth();
   const [balances, setBalances] = useState<FamilyBalance[]>([]);
+  const [personBalances, setPersonBalances] = useState<ReturnType<typeof calculatePersonBalances>>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -41,16 +43,20 @@ export function BalancesScreen({ navigation, route }: Props) {
     setExpenses(allExpenses as Expense[]);
     const result = calculateFamilyBalances(allExpenses, families);
     setBalances(result);
+    setPersonBalances(calculatePersonBalances(allExpenses, members));
     setLoading(false);
     setRefreshing(false);
   }
 
-  useFocusEffect(useCallback(() => { loadBalances(); }, [tripId, families, isDemoMode]));
+  useFocusEffect(useCallback(() => { loadBalances(); }, [tripId, families, members, isDemoMode]));
 
   if (loading) return <LoadingView />;
 
   const totalExpenses = balances.reduce((s, b) => s + b.totalPaid, 0);
   const currency = currencySymbol(currentTrip?.currency);
+  const visiblePersonBalances = personBalances.filter((b) =>
+    isTripOrganizer || isGlobalAdmin || b.userId === user?.id
+  );
 
   return (
     <ScrollView
@@ -63,7 +69,7 @@ export function BalancesScreen({ navigation, route }: Props) {
       {/* Summary */}
       <View style={styles.summaryCard}>
         <Text style={styles.summaryLabel}>Total Trip Expenses</Text>
-        <Text style={styles.summaryAmount}>{currency} {totalExpenses.toFixed(2)}</Text>
+        <Text style={styles.summaryAmount}>{currency}{totalExpenses.toFixed(2)}</Text>
         <Text style={styles.summaryFamilies}>{families.length} families</Text>
       </View>
 
@@ -72,7 +78,7 @@ export function BalancesScreen({ navigation, route }: Props) {
       {balances.map((b) => {
         const family = families.find((f) => f.id === b.familyId);
         const isExpanded = expandedFamily === b.familyId;
-        const paidByFamily = expenses.filter((e) => e.paid_by_family_id === b.familyId);
+        const paidByFamily = expenses.filter((e) => e.paid_by_family_id === b.familyId && !isSelfOnlyExpense(e));
         return (
           <View key={b.familyId} style={styles.balanceCard}>
             <View style={styles.balanceTop}>
@@ -94,18 +100,18 @@ export function BalancesScreen({ navigation, route }: Props) {
             <View style={styles.balanceBreakdown}>
               <View style={styles.breakdownItem}>
                 <Text style={styles.breakdownLabel}>Paid</Text>
-                <Text style={styles.breakdownValue}>{currency} {b.totalPaid.toFixed(2)}</Text>
+                <Text style={styles.breakdownValue}>{currency}{b.totalPaid.toFixed(2)}</Text>
               </View>
               <View style={styles.breakdownDivider} />
               <View style={styles.breakdownItem}>
                 <Text style={styles.breakdownLabel}>Owed</Text>
-                <Text style={styles.breakdownValue}>{currency} {b.totalOwed.toFixed(2)}</Text>
+                <Text style={styles.breakdownValue}>{currency}{b.totalOwed.toFixed(2)}</Text>
               </View>
               <View style={styles.breakdownDivider} />
               <View style={styles.breakdownItem}>
                 <Text style={styles.breakdownLabel}>Balance</Text>
                 <Text style={[styles.breakdownValue, { color: b.balance >= 0 ? Colors.success : Colors.danger }]}>
-                  {b.balance >= 0 ? '+' : ''}{currency} {b.balance.toFixed(2)}
+                  {b.balance >= 0 ? '+' : ''}{currency}{b.balance.toFixed(2)}
                 </Text>
               </View>
             </View>
@@ -129,7 +135,7 @@ export function BalancesScreen({ navigation, route }: Props) {
                           <Text style={styles.expenseTitle} numberOfLines={1}>{exp.title}</Text>
                           <Text style={styles.expenseDate}>{exp.date}</Text>
                         </View>
-                        <Text style={styles.expenseAmount}>{currency} {exp.amount.toFixed(2)}</Text>
+                        <Text style={styles.expenseAmount}>{currency}{exp.amount.toFixed(2)}</Text>
                       </View>
                     ))}
                   </View>
@@ -139,6 +145,25 @@ export function BalancesScreen({ navigation, route }: Props) {
           </View>
         );
       })}
+
+      {visiblePersonBalances.length > 0 && (
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionTitle}>Person Balances</Text>
+          {visiblePersonBalances.map((b) => (
+            <View key={b.userId} style={styles.personCard}>
+              <View style={styles.personRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.personName}>{b.userName}</Text>
+                  <Text style={styles.personMeta}>Paid {currency}{b.totalPaid.toFixed(2)} · Owed {currency}{b.totalOwed.toFixed(2)}</Text>
+                </View>
+                <Text style={[styles.personBalance, b.balance >= 0 ? styles.positive : styles.negative]}>
+                  {b.balance >= 0 ? '+' : ''}{currency}{b.balance.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
 
       {canManageTrip && (
         <AppButton
@@ -165,6 +190,7 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: FontSize.sm, color: Colors.surface + 'CC' },
   summaryAmount: { fontSize: FontSize.xxxl, fontWeight: FontWeight.bold, color: Colors.surface, marginVertical: Spacing.xs },
   summaryFamilies: { fontSize: FontSize.sm, color: Colors.surface + 'CC' },
+  sectionBlock: { marginBottom: Spacing.lg },
   sectionTitle: {
     fontSize: FontSize.lg,
     fontWeight: FontWeight.semiBold,
@@ -196,6 +222,19 @@ const styles = StyleSheet.create({
   breakdownLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, marginBottom: 2 },
   breakdownValue: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
   breakdownDivider: { width: 1, backgroundColor: Colors.border },
+  personCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+    ...Shadow.sm,
+  },
+  personRow: { flexDirection: 'row', alignItems: 'center' },
+  personName: { fontSize: FontSize.md, fontWeight: FontWeight.semiBold, color: Colors.text },
+  personMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  personBalance: { fontSize: FontSize.md, fontWeight: FontWeight.bold },
+  positive: { color: Colors.success },
+  negative: { color: Colors.danger },
   settleBtn: { marginTop: Spacing.md },
   expandToggle: {
     marginTop: Spacing.sm,

@@ -71,6 +71,7 @@ serve(async (req) => {
       data: payload.data ?? {},
       sound: NOTIFICATION_SOUND,
       channelId: 'default',
+      priority: 'high',
     }));
 
     const expoResponse = await fetch(EXPO_PUSH_ENDPOINT, {

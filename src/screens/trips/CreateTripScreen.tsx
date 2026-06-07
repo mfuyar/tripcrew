@@ -14,6 +14,7 @@ import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { DatePickerField } from '../../components/DatePickerField';
 import { todayDate, todayStr, parseDate, isBefore } from '../../utils/dateUtils';
+import { currencySymbol } from '../../utils/currency';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateTrip'>;
@@ -116,9 +117,10 @@ export function CreateTripScreen({ navigation }: Props) {
               key={c}
               style={[styles.currencyChip, currency === c && styles.currencyChipActive]}
               onPress={() => setCurrency(c)}
+              accessibilityLabel={`Use ${c}`}
             >
               <Text style={[styles.currencyText, currency === c && styles.currencyTextActive]}>
-                {c}
+                {currencySymbol(c)}
               </Text>
             </TouchableOpacity>
           ))}

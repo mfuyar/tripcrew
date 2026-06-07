@@ -14,14 +14,18 @@ const mockLimit = jest.fn();
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
+const mockRpc = jest.fn();
+const mockFunctionsInvoke = jest.fn();
 
 const mockNeq = jest.fn();
+const mockIn = jest.fn();
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
   insert: mockInsert.mockReturnThis(),
   update: mockUpdate.mockReturnThis(),
   eq: mockEq.mockReturnThis(),
   neq: mockNeq.mockReturnThis(),
+  in: mockIn.mockReturnThis(),
   order: mockOrder.mockReturnThis(),
   limit: mockLimit.mockReturnThis(),
   single: mockSingle,
@@ -37,11 +41,13 @@ const mockChannel = {
 const mockRemoveChannel = jest.fn();
 
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: {
-    from: mockFrom,
-    channel: jest.fn(() => mockChannel),
-    removeChannel: mockRemoveChannel,
-  },
+	  supabase: {
+	    from: mockFrom,
+	    rpc: mockRpc,
+	    functions: { invoke: mockFunctionsInvoke },
+	    channel: jest.fn(() => mockChannel),
+	    removeChannel: mockRemoveChannel,
+	  },
 }));
 
 jest.mock('../../services/mediaService', () => ({
@@ -58,7 +64,11 @@ beforeAll(() => {
 
 import { chatService } from '../../services/chatService';
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockRpc.mockResolvedValue({ data: [], error: null });
+  mockFunctionsInvoke.mockResolvedValue({ data: { sent: 2 }, error: null });
+});
 
 const tripId = 'trip-1';
 const userId = 'user-1';
@@ -215,11 +225,11 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
     expect(insertCalls[0][0].is_push_talk).toBe(true);
   });
 
-  it('routes push talk notifications through opted-in family recipients', async () => {
+  it('routes push talk notifications through trip recipients', async () => {
     const msg = makeMessage({ message_type: 'audio', is_push_talk: true });
     const notifySpy = jest
       .spyOn(chatService, 'notifyPushTalkReceivers')
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ data: 0, error: null });
     mockSingle.mockResolvedValueOnce({ data: msg, error: null });
 
     await chatService.sendMessage(
@@ -231,31 +241,53 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
     notifySpy.mockRestore();
   });
 
-  it('creates push talk notifications only for opted-in family members', async () => {
+  it('creates push talk notifications through the database RPC and sends push to recipients', async () => {
     const members = [{ user_id: 'user-2' }, { user_id: 'user-3' }];
-    mockSelect
-      .mockImplementationOnce(function (this: unknown) { return this; })
-      .mockResolvedValueOnce({
-        data: members.map((m, index) => ({ id: `notif-${index}`, user_id: m.user_id })),
-        error: null,
-      });
-    mockNeq.mockResolvedValueOnce({ data: members, error: null });
+    mockRpc.mockResolvedValueOnce({ data: members, error: null });
+    mockIn.mockResolvedValueOnce({
+      data: [
+        { user_id: 'user-2', push_talk_enabled: true },
+        { user_id: 'user-3', push_talk_enabled: false },
+      ],
+      error: null,
+    });
 
-    await chatService.notifyPushTalkReceivers(tripId, userId, familyId);
+    const { data, error } = await chatService.notifyPushTalkReceivers(
+      tripId,
+      userId,
+      familyId,
+      'https://cdn.example.com/push.m4a'
+    );
 
-    expect(mockFrom).toHaveBeenCalledWith('family_members');
-    expect(mockEq).toHaveBeenCalledWith('family_id', familyId);
-    expect(mockEq).toHaveBeenCalledWith('push_talk_enabled', true);
+    expect(error).toBeNull();
+    expect(data).toBe(2);
+    expect(mockRpc).toHaveBeenCalledWith('create_push_talk_notifications', {
+      p_trip_id: tripId,
+      p_sender_id: userId,
+      p_family_id: familyId,
+      p_media_url: 'https://cdn.example.com/push.m4a',
+    });
+    expect(mockIn).toHaveBeenCalledWith('user_id', ['user-2', 'user-3']);
+  });
 
-    const insertCalls = (mockInsert as jest.Mock).mock.calls;
-    const notificationRows = insertCalls.find(([rows]) => Array.isArray(rows))?.[0];
-    expect(notificationRows).toHaveLength(2);
-    expect(notificationRows[0]).toEqual(expect.objectContaining({
-      type: 'push_talk',
-      title: '🎙️ Push Talk',
-      trip_id: tripId,
-      user_id: 'user-2',
-    }));
+  it('sends push talk notifications even without a family id', async () => {
+    mockRpc.mockResolvedValueOnce({ data: [{ user_id: 'user-2', auto_play: false }], error: null });
+
+    const { data, error } = await chatService.notifyPushTalkReceivers(
+      tripId,
+      userId,
+      undefined,
+      'https://cdn.example.com/push.m4a'
+    );
+
+    expect(error).toBeNull();
+    expect(data).toBe(1);
+    expect(mockRpc).toHaveBeenCalledWith('create_push_talk_notifications', {
+      p_trip_id: tripId,
+      p_sender_id: userId,
+      p_family_id: null,
+      p_media_url: 'https://cdn.example.com/push.m4a',
+    });
   });
 });
 

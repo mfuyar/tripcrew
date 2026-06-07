@@ -35,8 +35,8 @@ const MEDIA_ICON: Record<string, string> = {
 export function TripAlbumScreen({ route }: { route: { params: { tripId: string } } }) {
   const navigation = useNavigation<Nav>();
   const { tripId } = route.params;
-  const { user, isDemoMode } = useAuth();
-  const { userFamily, canManageTrip } = useTripContext();
+  const { user, isDemoMode, isGlobalAdmin } = useAuth();
+  const { currentTrip, userFamily, isTripOrganizer } = useTripContext();
   const [media, setMedia] = useState<TripMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,15 +44,18 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadingAll, setDownloadingAll] = useState(false);
   const webFileInputRef = useRef<any>(null);
 
   const loadMedia = useCallback(async () => {
     if (isDemoMode) { setMedia([]); setLoading(false); setRefreshing(false); return; }
+    await mediaService.purgeClosedTripMedia(tripId, currentTrip?.closed_at);
     const { data } = await mediaService.getMedia(tripId);
     setMedia(data ?? []);
     setLoading(false);
     setRefreshing(false);
-  }, [tripId, isDemoMode]);
+  }, [tripId, isDemoMode, currentTrip?.closed_at]);
 
   useFocusEffect(useCallback(() => { loadMedia(); }, [loadMedia]));
 
@@ -75,10 +78,11 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   }
 
   function handleSelectAll() {
-    if (selectedIds.size === media.length) {
+    const deletableIds = media.filter(canDelete).map((m) => m.id);
+    if (selectedIds.size === deletableIds.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(media.map((m) => m.id)));
+      setSelectedIds(new Set(deletableIds));
     }
   }
 
@@ -102,7 +106,7 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
     const toDelete = media.filter((m) => selectedIds.has(m.id) && canDelete(m));
     if (toDelete.length === 0) {
       setDeleting(false);
-      Alert.alert('No permission', 'You can delete your own uploads, or admins can delete any upload.');
+      Alert.alert('No permission', 'You can delete your own uploads, or the trip organizer can delete any upload.');
       return;
     }
     const { error } = await mediaService.deleteMultipleMedia(toDelete);
@@ -172,11 +176,54 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
   const handleUpload = Platform.OS === 'web' ? handleUploadWeb : handleUploadNative;
 
   const canDelete = (item: TripMedia) =>
-    item.uploaded_by === user?.id || canManageTrip;
+    item.uploaded_by === user?.id || isTripOrganizer || isGlobalAdmin;
+
+  async function handleDownload(item: TripMedia) {
+    setDownloadingId(item.id);
+    const { error } = await mediaService.saveMediaToLibrary(item);
+    setDownloadingId(null);
+    if (error) {
+      Alert.alert('Download failed', error);
+    } else if (Platform.OS !== 'web') {
+      Alert.alert('Saved', 'Photo saved to your library.');
+    }
+  }
+
+  async function handleDownloadAll() {
+    const photos = media.filter((m) => m.media_type === 'photo');
+    if (photos.length === 0) return;
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(`Download all ${photos.length} photo${photos.length > 1 ? 's' : ''} to your device?`)
+      : await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            'Download All Photos',
+            `Save all ${photos.length} photo${photos.length > 1 ? 's' : ''} to your library?`,
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Download', onPress: () => resolve(true) },
+            ]
+          )
+        );
+    if (!confirmed) return;
+    setDownloadingAll(true);
+    let failures = 0;
+    for (const photo of photos) {
+      const { error } = await mediaService.saveMediaToLibrary(photo);
+      if (error) failures += 1;
+    }
+    setDownloadingAll(false);
+    const succeeded = photos.length - failures;
+    if (failures === 0) {
+      Alert.alert('Done', `Saved ${succeeded} photo${succeeded > 1 ? 's' : ''} to your library.`);
+    } else {
+      Alert.alert('Done with errors', `Saved ${succeeded} of ${photos.length} photos. ${failures} failed.`);
+    }
+  }
 
   if (loading) return <LoadingView />;
 
-  const allSelected = media.length > 0 && selectedIds.size === media.length;
+  const deletableCount = media.filter(canDelete).length;
+  const allSelected = deletableCount > 0 && selectedIds.size === deletableCount;
 
   return (
     <View style={styles.container}>
@@ -206,7 +253,18 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
           <>
             <Text style={styles.count}>{media.length} photos</Text>
             <View style={styles.headerActions}>
-              {media.length > 0 && (
+              {media.some((m) => m.media_type === 'photo') && (
+                <TouchableOpacity
+                  onPress={handleDownloadAll}
+                  style={[styles.selectBtn, downloadingAll && styles.uploadBtnDisabled]}
+                  disabled={downloadingAll}
+                >
+                  <Text style={styles.selectBtnText}>
+                    {downloadingAll ? 'Downloading...' : 'Download All'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {deletableCount > 0 && (
                 <TouchableOpacity onPress={enterSelectMode} style={styles.selectBtn}>
                   <Text style={styles.selectBtnText}>Select</Text>
                 </TouchableOpacity>
@@ -283,13 +341,27 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
                 </View>
               )}
 
-              {item.caption && !selectMode ? (
+              {!selectMode ? (
                 <View style={styles.captionOverlay}>
-                  <Text style={styles.captionText} numberOfLines={1}>{item.caption}</Text>
+                  {item.caption ? <Text style={styles.captionText} numberOfLines={1}>{item.caption}</Text> : null}
+                  <Text style={styles.uploaderText} numberOfLines={1}>By {item.uploader?.full_name ?? 'Unknown'}</Text>
                 </View>
               ) : null}
 
-              {/* Delete button — normal mode, own items only */}
+              {/* Download button — normal mode */}
+              {!selectMode && isPhoto && (
+                <TouchableOpacity
+                  style={[styles.downloadBtn, downloadingId === item.id && styles.downloadBtnDisabled]}
+                  onPress={() => handleDownload(item)}
+                  disabled={downloadingId === item.id}
+                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                >
+                  <Text style={styles.downloadBtnText}>
+                    {downloadingId === item.id ? '…' : '↓'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
               {!selectMode && canDelete(item) && (
                 <TouchableOpacity
                   style={styles.deleteBtn}
@@ -303,8 +375,12 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
                           ])
                         );
                     if (!confirmed) return;
-                    await mediaService.deleteMedia(item);
-                    loadMedia();
+                    const { error } = await mediaService.deleteMedia(item);
+                    if (error) {
+                      Alert.alert('Unable to delete photo', error);
+                    } else {
+                      loadMedia();
+                    }
                   }}
                   hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                 >
@@ -423,6 +499,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   deleteBtnText: { fontSize: 11, color: '#fff', fontWeight: '700', lineHeight: 14 },
+  downloadBtn: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  downloadBtnDisabled: { opacity: 0.5 },
+  downloadBtnText: { fontSize: 14, color: '#fff', fontWeight: '700', lineHeight: 16 },
   captionOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -432,6 +521,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   captionText: { color: '#fff', fontSize: 10 },
+  uploaderText: { color: '#fff', fontSize: 9, opacity: 0.95, marginTop: 1 },
   checkCircle: {
     position: 'absolute',
     top: 4,

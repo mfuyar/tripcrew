@@ -9,6 +9,7 @@ import { calculateFairnessMetrics, calculateFamilyBalances } from '../../utils/c
 import { FairnessMetrics, FamilyBalance } from '../../types';
 import { LoadingView } from '../../components/LoadingView';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
+import { currencySymbol } from '../../utils/currency';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
 
 export function FairnessDashboardScreen({ route }: { route: { params: { tripId: string } } }) {
@@ -37,7 +38,7 @@ export function FairnessDashboardScreen({ route }: { route: { params: { tripId: 
   if (loading) return <LoadingView />;
 
   const totalPaid = balances.reduce((s, b) => s + b.totalPaid, 0);
-  const currency = currentTrip?.currency ?? '$';
+  const currency = currencySymbol(currentTrip?.currency);
 
   return (
     <ScrollView
@@ -71,7 +72,7 @@ export function FairnessDashboardScreen({ route }: { route: { params: { tripId: 
               <FamilyAvatar name={item.familyName} color={family?.color} size={36} />
               <View style={styles.shareInfo}>
                 <Text style={styles.shareName}>{item.familyName}</Text>
-                <Text style={styles.shareAmount}>{currency} {item.paid.toFixed(2)}</Text>
+                <Text style={styles.shareAmount}>{currency}{item.paid.toFixed(2)}</Text>
               </View>
               <Text style={styles.sharePct}>{item.percentage.toFixed(1)}%</Text>
             </View>
@@ -101,7 +102,7 @@ export function FairnessDashboardScreen({ route }: { route: { params: { tripId: 
             <FamilyAvatar name={b.familyName} color={family?.color} size={36} />
             <Text style={styles.balName}>{b.familyName}</Text>
             <Text style={[styles.balAmount, { color: isPositive ? Colors.success : Colors.danger }]}>
-              {isPositive ? '+' : ''}{currency} {b.balance.toFixed(2)}
+              {isPositive ? '+' : ''}{currency}{b.balance.toFixed(2)}
             </Text>
           </View>
         );

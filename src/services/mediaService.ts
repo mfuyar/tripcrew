@@ -1,14 +1,24 @@
 import { File } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import { fetch as expoFetch } from 'expo/fetch';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { Platform } from 'react-native';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabaseClient';
 import { moderatePhoto } from './moderationService';
+import { notificationService } from './notificationService';
 import { Message, TripMedia, MediaType, ServiceResult } from '../types';
 
 const MEDIA_BUCKET = 'trip-media';
 const MAX_IMAGE_DIMENSION = 1600;
 const IMAGE_COMPRESS_QUALITY = 0.78;
 const CHAT_MEDIA_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const TRIP_DATA_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // closed trips: purge media/messages after 7 days
+
+function isPastRetentionWindow(closedAt: string | null | undefined): boolean {
+  if (!closedAt) return false;
+  return new Date(closedAt).getTime() <= Date.now() - TRIP_DATA_RETENTION_MS;
+}
 
 function getExtension(uri: string, mediaType: MediaType): string {
   const cleanUri = uri.split('?')[0];
@@ -17,6 +27,11 @@ function getExtension(uri: string, mediaType: MediaType): string {
   if (mediaType === 'audio') return 'm4a';
   if (mediaType === 'video') return 'mp4';
   return 'jpg';
+}
+
+function getDownloadFileName(item: Pick<TripMedia, 'id' | 'url' | 'media_type' | 'mime_type'>): string {
+  const ext = getExtension(item.url, item.media_type);
+  return `tripcrew-${item.id}.${ext}`;
 }
 
 // Extract storage object path from a public or signed URL
@@ -113,6 +128,30 @@ async function uploadStorageObject(
 }
 
 export const mediaService = {
+  async saveMediaToLibrary(item: Pick<TripMedia, 'id' | 'url' | 'media_type' | 'mime_type'>): Promise<ServiceResult<string>> {
+    if (Platform.OS === 'web') {
+      const anchor = document.createElement('a');
+      anchor.href = item.url;
+      anchor.download = getDownloadFileName(item);
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      return { data: item.url, error: null };
+    }
+
+    const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo', 'video']);
+    if (permission.status !== 'granted') {
+      return { data: null, error: 'Please allow photo library access to download this photo.' };
+    }
+
+    const fileUri = `${FileSystem.cacheDirectory}${getDownloadFileName(item)}`;
+    const result = await FileSystem.downloadAsync(item.url, fileUri);
+    await MediaLibrary.saveToLibraryAsync(result.uri);
+    return { data: result.uri, error: null };
+  },
+
   async uploadMedia(
     tripId: string,
     userId: string,
@@ -154,6 +193,13 @@ export const mediaService = {
       .single();
 
     if (error) return { data: null, error: error.message };
+
+    notificationService.notifyTripMembers(
+      tripId, userId, 'other',
+      mediaType === 'video' ? '🎬 New Video' : '📸 New Photo',
+      mediaType === 'video' ? 'A new video was added to the trip album' : 'A new photo was added to the trip album',
+      { trip_id: tripId, media_type: mediaType }
+    );
 
     // DB stores the public URL (used as a path marker for signed-URL regeneration).
     // Return a signed URL to callers so the file is immediately accessible
@@ -202,21 +248,23 @@ export const mediaService = {
     const mediaId = typeof item === 'string' ? item : item.id;
     const mediaUrl = typeof item === 'string' ? undefined : item.url;
     const path = mediaUrl ? extractStoragePath(mediaUrl) : null;
+    const { error } = await supabase.from('trip_media').delete().eq('id', mediaId);
+    if (error) return { data: null, error: error.message };
     if (path) {
       await supabase.storage.from(MEDIA_BUCKET).remove([path]);
     }
-    const { error } = await supabase.from('trip_media').delete().eq('id', mediaId);
-    return { data: null, error: error?.message ?? null };
+    return { data: null, error: null };
   },
 
   async deleteMultipleMedia(items: Pick<TripMedia, 'id' | 'url'>[]): Promise<ServiceResult<null>> {
+    const ids = items.map((i) => i.id);
+    const { error } = await supabase.from('trip_media').delete().in('id', ids);
+    if (error) return { data: null, error: error.message };
     const paths = items.map((i) => extractStoragePath(i.url)).filter(Boolean) as string[];
     if (paths.length > 0) {
       await supabase.storage.from(MEDIA_BUCKET).remove(paths);
     }
-    const ids = items.map((i) => i.id);
-    const { error } = await supabase.from('trip_media').delete().in('id', ids);
-    return { data: null, error: error?.message ?? null };
+    return { data: null, error: null };
   },
 
   // Upload a file to storage only — no trip_media row. Used for ephemeral chat media.
@@ -315,6 +363,54 @@ export const mediaService = {
       .delete()
       .in('id', messages.map((message) => message.id));
 
+    if (deleteError) return { data: null, error: deleteError.message };
+    return { data: messages.length, error: null };
+  },
+
+  // Trip album photos/videos are purged 7 days after the trip closes
+  async purgeClosedTripMedia(tripId: string, closedAt: string | null | undefined): Promise<ServiceResult<number>> {
+    if (!isPastRetentionWindow(closedAt)) return { data: 0, error: null };
+
+    const { data: items, error: queryError } = await supabase
+      .from('trip_media')
+      .select('id, url')
+      .eq('trip_id', tripId);
+    if (queryError) return { data: null, error: queryError.message };
+    if (!items || items.length === 0) return { data: 0, error: null };
+
+    const paths = (items as { id: string; url: string }[])
+      .map((item) => extractStoragePath(item.url))
+      .filter(Boolean) as string[];
+    if (paths.length > 0) {
+      await supabase.storage.from(MEDIA_BUCKET).remove(paths);
+    }
+
+    const { error: deleteError } = await supabase.from('trip_media').delete().eq('trip_id', tripId);
+    if (deleteError) return { data: null, error: deleteError.message };
+    return { data: items.length, error: null };
+  },
+
+  // Chat messages (and their media) are purged 7 days after the trip closes
+  async purgeClosedTripMessages(tripId: string, closedAt: string | null | undefined): Promise<ServiceResult<number>> {
+    if (!isPastRetentionWindow(closedAt)) return { data: 0, error: null };
+
+    const { data: items, error: queryError } = await supabase
+      .from('messages')
+      .select('id, media_url, message_type')
+      .eq('trip_id', tripId);
+    if (queryError) return { data: null, error: queryError.message };
+    if (!items || items.length === 0) return { data: 0, error: null };
+
+    const messages = items as { id: string; media_url: string | null; message_type: string }[];
+    const paths = messages
+      .filter((message) => message.media_url && ['image', 'audio'].includes(message.message_type))
+      .map((message) => extractStoragePath(message.media_url as string))
+      .filter(Boolean) as string[];
+    if (paths.length > 0) {
+      await supabase.storage.from(MEDIA_BUCKET).remove(paths);
+    }
+
+    const { error: deleteError } = await supabase.from('messages').delete().eq('trip_id', tripId);
     if (deleteError) return { data: null, error: deleteError.message };
     return { data: messages.length, error: null };
   },

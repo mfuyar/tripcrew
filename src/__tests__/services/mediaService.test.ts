@@ -8,6 +8,7 @@
 
 const mockSingle = jest.fn();
 const mockEq = jest.fn();
+const mockNeq = jest.fn();
 const mockIn = jest.fn();
 const mockNot = jest.fn();
 const mockLt = jest.fn();
@@ -24,6 +25,7 @@ const mockFrom = jest.fn(() => ({
   update: mockUpdate.mockReturnThis(),
   delete: mockDelete.mockReturnThis(),
   eq: mockEq.mockReturnThis(),
+  neq: mockNeq.mockReturnThis(),
   in: mockIn.mockReturnThis(),
   not: mockNot.mockReturnThis(),
   lt: mockLt.mockReturnThis(),
