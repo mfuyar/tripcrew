@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import {
   calculatePersonBalances,
   calculatePersonSettlements,
   calculateSettlements,
+  applySettlementsToFamilyBalances,
 } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -31,17 +32,18 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 type Props = NativeStackScreenProps<MainStackParamList, 'Settlements'>;
 
 const STATUS_LABEL: Record<string, string> = {
-  proposed: 'Proposed — pending approvals',
-  payer_approved: 'Payer approved — awaiting receiver',
-  receiver_approved: 'Receiver approved — awaiting payer',
-  completed: 'Completed',
+  proposed: 'Pending confirmations',
+  payer_approved: 'Payer confirmed',
+  receiver_approved: 'Receiver confirmed',
+  confirmed: 'Ready to close',
+  completed: 'Closed',
   disputed: 'Disputed',
   cancelled: 'Cancelled',
 };
 
 export function SettlementScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
-  const { families, members, currentTrip, canManageTrip, userFamily, isTripOrganizer } = useTripContext();
+  const { families, members, currentTrip, isTripOrganizer } = useTripContext();
   const { isDemoMode, user, isGlobalAdmin } = useAuth();
   const [settlements, setSettlements] = useState<SettlementCalculation[]>([]);
   const [personSettlements, setPersonSettlements] = useState<PersonSettlementCalculation[]>([]);
@@ -62,17 +64,7 @@ export function SettlementScreen({ navigation, route }: Props) {
 
     const rawBalances = calculateFamilyBalances(expenses, families);
     const personBalances = calculatePersonBalances(expenses, members);
-    const activeSettlements = existing.filter(
-      (s) => !s.deleted_at && s.status !== 'cancelled',
-    );
-    const adjustedBalances = rawBalances.map((b) => {
-      let balance = b.balance;
-      for (const s of activeSettlements) {
-        if (s.from_family_id === b.familyId) balance = Math.round((balance + s.amount) * 100) / 100;
-        if (s.to_family_id === b.familyId) balance = Math.round((balance - s.amount) * 100) / 100;
-      }
-      return { ...b, balance };
-    });
+    const adjustedBalances = applySettlementsToFamilyBalances(rawBalances, existing);
 
     setSettlements(calculateSettlements(adjustedBalances));
     setPersonSettlements(calculatePersonSettlements(personBalances));
@@ -82,8 +74,24 @@ export function SettlementScreen({ navigation, route }: Props) {
 
   useFocusEffect(useCallback(() => { load(); }, [tripId, families, members]));
 
-  async function handleProposeSettlement(s: SettlementCalculation) {
-    if (isDemoMode) { Alert.alert('Demo Mode', 'Recording payments is disabled in demo.'); return; }
+  // Live-refresh balances/status badges when settlement records change
+  // elsewhere (e.g. someone confirms or the organizer records a payment).
+  // `load` is read via ref so the subscribed callback always recalculates
+  // with the latest families/members instead of a stale closure.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; });
+
+  useEffect(() => {
+    if (isDemoMode || !tripId) return;
+    return settlementService.subscribeToSettlements(tripId, () => loadRef.current());
+  }, [tripId, isDemoMode]);
+
+  async function handleCreateFamilyRequest(s: SettlementCalculation) {
+    if (isDemoMode) { Alert.alert('Demo Mode', 'Settlement requests are disabled in demo.'); return; }
+    if (!isTripOrganizer) {
+      Alert.alert('Organizer only', 'Only the trip organizer can send settlement requests.');
+      return;
+    }
 
     const duplicate = existingSettlements.find(
       (r) =>
@@ -99,20 +107,60 @@ export function SettlementScreen({ navigation, route }: Props) {
 
     const key = `${s.fromFamilyId}-${s.toFamilyId}`;
     setSaving(key);
-    const { error } = await settlementService.createProposal(
+    const { error } = await settlementService.createFamilySettlementRequest(
       tripId,
       s.fromFamilyId,
       s.toFamilyId,
       s.amount,
       currentTrip?.currency ?? 'USD',
       undefined,
-      userFamily?.id ?? '',
+      user?.id
     );
     setSaving(null);
     if (error) {
       Alert.alert('Error', error);
     } else {
-      Alert.alert('Proposed', 'Settlement proposal created. Go to Payment Tracking to manage approvals.');
+      Alert.alert('Request sent', 'The involved families were notified. Track confirmations in Payment Tracking.');
+      navigation.navigate('PaymentTracking', { tripId });
+    }
+  }
+
+  async function handleCreatePersonRequest(s: PersonSettlementCalculation) {
+    if (isDemoMode) { Alert.alert('Demo Mode', 'Settlement requests are disabled in demo.'); return; }
+    if (!isTripOrganizer) {
+      Alert.alert('Organizer only', 'Only the trip organizer can send settlement requests.');
+      return;
+    }
+
+    const duplicate = existingSettlements.find(
+      (r) =>
+        r.settlement_type === 'person' &&
+        r.from_user_id === s.fromUserId &&
+        r.to_user_id === s.toUserId &&
+        r.status !== 'cancelled' &&
+        !r.deleted_at,
+    );
+    if (duplicate) {
+      navigation.navigate('PaymentTracking', { tripId });
+      return;
+    }
+
+    const key = `${s.fromUserId}-${s.toUserId}`;
+    setSaving(key);
+    const { error } = await settlementService.createPersonSettlementRequest(
+      tripId,
+      s.fromUserId,
+      s.toUserId,
+      s.amount,
+      currentTrip?.currency ?? 'USD',
+      undefined,
+      user?.id
+    );
+    setSaving(null);
+    if (error) {
+      Alert.alert('Error', error);
+    } else {
+      Alert.alert('Request sent', 'The involved people were notified. Track confirmations in Payment Tracking.');
       navigation.navigate('PaymentTracking', { tripId });
     }
   }
@@ -151,22 +199,54 @@ export function SettlementScreen({ navigation, route }: Props) {
           <View style={styles.sectionBlock}>
             <Text style={styles.sectionTitle}>Person Settlements</Text>
             <Text style={styles.sectionSubtitle}>For equal-by-person and selected-person expenses.</Text>
-            {visiblePersonSettlements.map((item) => (
-              <View key={`${item.fromUserId}-${item.toUserId}`} style={styles.personCard}>
-                <View style={styles.personInitial}>
-                  <Text style={styles.personInitialText}>{item.fromUserName.charAt(0).toUpperCase()}</Text>
+            {visiblePersonSettlements.map((item) => {
+              const existing = existingSettlements.find(
+                (s) =>
+                  s.settlement_type === 'person' &&
+                  s.from_user_id === item.fromUserId &&
+                  s.to_user_id === item.toUserId &&
+                  !s.deleted_at &&
+                  s.status !== 'cancelled',
+              );
+              return (
+                <View key={`${item.fromUserId}-${item.toUserId}`} style={styles.personCard}>
+                  <View style={styles.personInitial}>
+                    <Text style={styles.personInitialText}>{item.fromUserName.charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.personSettlementText}>
+                    <Text style={styles.personSettlementTitle}>
+                      <Text style={styles.bold}>{item.fromUserName}</Text>
+                      {existing?.status === 'completed' ? ' paid ' : ' pays '}
+                      <Text style={styles.bold}>{item.toUserName}</Text>
+                    </Text>
+                    <Text style={styles.personSettlementSub}>Person balance, separate from family settlements</Text>
+                  </View>
+                  <Text style={styles.personAmount}>{currency}{item.amount.toFixed(2)}</Text>
+                  {(() => {
+                    const key = `${item.fromUserId}-${item.toUserId}`;
+                    if (existing) {
+                      return (
+                        <AppButton
+                          title={STATUS_LABEL[existing.status] ?? 'View'}
+                          onPress={() => navigation.navigate('PaymentTracking', { tripId })}
+                          variant="outline"
+                          style={styles.personActionBtn}
+                        />
+                      );
+                    }
+                    if (!isTripOrganizer) return null;
+                    return (
+                      <AppButton
+                        title="Send Request"
+                        onPress={() => handleCreatePersonRequest(item)}
+                        loading={saving === key}
+                        style={styles.personActionBtn}
+                      />
+                    );
+                  })()}
                 </View>
-                <View style={styles.personSettlementText}>
-                  <Text style={styles.personSettlementTitle}>
-                    <Text style={styles.bold}>{item.fromUserName}</Text>
-                    {' pays '}
-                    <Text style={styles.bold}>{item.toUserName}</Text>
-                  </Text>
-                  <Text style={styles.personSettlementSub}>Person balance, separate from family settlements</Text>
-                </View>
-                <Text style={styles.personAmount}>{currency}{item.amount.toFixed(2)}</Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ) : null
       }
@@ -191,8 +271,7 @@ export function SettlementScreen({ navigation, route }: Props) {
             s.status !== 'cancelled',
         );
 
-        // family_admin can only propose for rows where they are the payer
-        const canPropose = canManageTrip || userFamily?.id === item.fromFamilyId;
+        const canRecord = isTripOrganizer;
 
         return (
           <View style={styles.card}>
@@ -214,7 +293,7 @@ export function SettlementScreen({ navigation, route }: Props) {
             </View>
             <Text style={styles.desc}>
               <Text style={styles.bold}>{item.fromFamilyName}</Text>
-              {' pays '}
+              {existing?.status === 'completed' ? ' paid ' : ' pays '}
               <Text style={styles.bold}>{item.toFamilyName}</Text>
             </Text>
             {existing ? (
@@ -229,16 +308,16 @@ export function SettlementScreen({ navigation, route }: Props) {
                   style={styles.viewBtn}
                 />
               </View>
-            ) : canPropose ? (
+            ) : canRecord ? (
               <AppButton
-                title="Propose Settlement"
-                onPress={() => handleProposeSettlement(item)}
+                title="Send Request"
+                onPress={() => handleCreateFamilyRequest(item)}
                 loading={saving === key}
                 fullWidth
                 style={styles.payBtn}
               />
             ) : (
-              <Text style={styles.viewOnlyNote}>Only admins or the payer family can propose a settlement</Text>
+              <Text style={styles.viewOnlyNote}>Only the trip organizer can send settlement requests</Text>
             )}
           </View>
         );
@@ -278,6 +357,7 @@ const styles = StyleSheet.create({
   personSettlementTitle: { fontSize: FontSize.sm, color: Colors.text },
   personSettlementSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   personAmount: { fontSize: FontSize.md, color: Colors.primary, fontWeight: FontWeight.bold },
+  personActionBtn: { marginLeft: Spacing.sm, minWidth: 104 },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,

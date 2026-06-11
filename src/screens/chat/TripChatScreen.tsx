@@ -22,6 +22,7 @@ import {
   setAudioModeAsync,
   RecordingPresets,
 } from 'expo-audio';
+import { useFocusEffect } from '@react-navigation/native';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { Message } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
@@ -225,11 +226,11 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
     }
   }, [tripId, isDemoMode, user?.id, userFamily?.id, currentTrip?.closed_at]);
 
-  // Tell background player the chat screen is active so it skips auto-play
-  useEffect(() => {
+  // Tell notifications/background player only while the message screen is focused.
+  useFocusEffect(useCallback(() => {
     setActiveChatTrip(tripId);
     return () => setActiveChatTrip(null);
-  }, [tripId]);
+  }, [tripId]));
 
   useEffect(() => {
     loadMessages();

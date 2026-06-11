@@ -9,12 +9,13 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { MainStackParamList, FamilyBalance, Expense } from '../../types';
+import { MainStackParamList, FamilyBalance, Expense, Settlement } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
+import { settlementService } from '../../services/settlementService';
 import { demoExpenses } from '../../lib/mockData';
-import { calculateFamilyBalances, calculatePersonBalances } from '../../utils/calculations';
+import { applySettlementsToFamilyBalances, calculateFamilyBalances, calculatePersonBalances } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
 import { currencySymbol } from '../../utils/currency';
 import { isSelfOnlyExpense } from '../../utils/expenseVisibility';
@@ -37,11 +38,17 @@ export function BalancesScreen({ navigation, route }: Props) {
   const [expandedFamily, setExpandedFamily] = useState<string | null>(null);
 
   async function loadBalances() {
-    const allExpenses = isDemoMode
-      ? demoExpenses
-      : (await expenseService.getExpenses(tripId)).data ?? [];
+    const [expenseResult, settlementResult] = await Promise.all([
+      isDemoMode ? Promise.resolve({ data: demoExpenses }) : expenseService.getExpenses(tripId),
+      isDemoMode ? Promise.resolve({ data: [] as Settlement[] }) : settlementService.getSettlements(tripId),
+    ]);
+    const allExpenses = expenseResult.data ?? [];
+    const settlementRecords = settlementResult.data ?? [];
     setExpenses(allExpenses as Expense[]);
-    const result = calculateFamilyBalances(allExpenses, families);
+    const result = applySettlementsToFamilyBalances(
+      calculateFamilyBalances(allExpenses, families),
+      settlementRecords
+    );
     setBalances(result);
     setPersonBalances(calculatePersonBalances(allExpenses, members));
     setLoading(false);

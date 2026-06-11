@@ -1,18 +1,26 @@
 import { supabase } from '../lib/supabaseClient';
-import { Message, ServiceResult } from '../types';
+import { Message, Notification, ServiceResult } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { notificationService } from './notificationService';
 import { mediaService } from './mediaService';
+import { sendBroadcast } from '../lib/realtimeBroadcast';
 
 // Keyed by tripId — reused for both receiving and sending so we never
 // remove the subscriber's channel by accident.
 const activeChannels = new Map<string, RealtimeChannel>();
+const NOTIFY_CHANNEL = (userId: string) => `user-notifications:${userId}`;
 
 // Set by TripChatScreen on mount/unmount so background audio player
 // knows whether the chat screen is already handling push-talk playback.
 let _activeChatTripId: string | null = null;
 export function setActiveChatTrip(id: string | null) { _activeChatTripId = id; }
 export function getActiveChatTrip() { return _activeChatTripId; }
+
+function broadcastNotification(notification: Notification): void {
+  const channel = supabase.channel(NOTIFY_CHANNEL(notification.user_id));
+  void sendBroadcast(channel, 'notification', notification)
+    .finally(() => supabase.removeChannel(channel));
+}
 
 function isMissingPushTalkRpc(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -179,7 +187,14 @@ export const chatService = {
 
     if (error) return { data: null, error: error.message };
 
-    let rows = (recipients ?? []) as { user_id: string; auto_play?: boolean | null }[];
+    let rows = (recipients ?? []) as (Partial<Notification> & { user_id: string; auto_play?: boolean | null })[];
+    if (usedRpc) {
+      rows.forEach((row) => {
+        if (row.id && row.title && row.body && row.type && row.is_read !== undefined && row.created_at) {
+          broadcastNotification(row as Notification);
+        }
+      });
+    }
     const missingAutoPlayPrefs = rows.some((r) => r.auto_play === undefined || r.auto_play === null);
     if (missingAutoPlayPrefs && rows.length > 0) {
       const { data: prefs } = await supabase

@@ -23,7 +23,8 @@ export type ExpenseCategory =
 
 export type TripRole = 'trip_organizer' | 'trip_admin' | 'family_admin' | 'member' | 'viewer';
 
-export type PaymentStatus = 'proposed' | 'payer_approved' | 'receiver_approved' | 'completed' | 'disputed' | 'cancelled';
+export type PaymentStatus = 'proposed' | 'payer_approved' | 'receiver_approved' | 'confirmed' | 'completed' | 'disputed' | 'cancelled';
+export type SettlementType = 'family' | 'person';
 
 export type MediaType = 'photo' | 'video' | 'document' | 'audio';
 
@@ -219,8 +220,11 @@ export interface ExpensePersonSplit {
 export interface Settlement {
   id: string;
   trip_id: string;
-  from_family_id: string;
-  to_family_id: string;
+  settlement_type?: SettlementType;
+  from_family_id?: string | null;
+  to_family_id?: string | null;
+  from_user_id?: string | null;
+  to_user_id?: string | null;
   amount: number;
   currency: string;
   status: PaymentStatus;
@@ -228,6 +232,9 @@ export interface Settlement {
   confirmed_at?: string;
   payer_family_approved_at?: string;
   receiver_family_approved_at?: string;
+  closed_at?: string;
+  notified_at?: string;
+  emailed_at?: string;
   dispute_reason?: string;
   cancel_reason?: string;
   deleted_at?: string;
@@ -236,6 +243,8 @@ export interface Settlement {
   // Joined data
   from_family?: Family;
   to_family?: Family;
+  from_user?: Profile;
+  to_user?: Profile;
 }
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────

@@ -11,7 +11,18 @@ CREATE OR REPLACE FUNCTION public.create_push_talk_notifications(
   p_family_id UUID DEFAULT NULL,
   p_media_url TEXT DEFAULT NULL
 )
-RETURNS TABLE(user_id UUID, auto_play BOOLEAN) AS $$
+RETURNS TABLE(
+  id UUID,
+  user_id UUID,
+  trip_id UUID,
+  type TEXT,
+  title TEXT,
+  body TEXT,
+  data JSONB,
+  is_read BOOLEAN,
+  created_at TIMESTAMPTZ,
+  auto_play BOOLEAN
+) AS $$
 BEGIN
   IF p_sender_id <> auth.uid() THEN
     RAISE EXCEPTION 'Cannot send push talk for another user';
@@ -58,9 +69,30 @@ BEGIN
       ),
       false
     FROM recipients r
-    RETURNING notifications.user_id, (notifications.data->>'auto_play')::BOOLEAN AS auto_play
+    RETURNING
+      notifications.id,
+      notifications.user_id,
+      notifications.trip_id,
+      notifications.type,
+      notifications.title,
+      notifications.body,
+      notifications.data,
+      notifications.is_read,
+      notifications.created_at,
+      (notifications.data->>'auto_play')::BOOLEAN AS auto_play
   )
-  SELECT inserted.user_id, inserted.auto_play FROM inserted;
+  SELECT
+    inserted.id,
+    inserted.user_id,
+    inserted.trip_id,
+    inserted.type,
+    inserted.title,
+    inserted.body,
+    inserted.data,
+    inserted.is_read,
+    inserted.created_at,
+    inserted.auto_play
+  FROM inserted;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 

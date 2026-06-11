@@ -8,23 +8,26 @@ import { FamilyAvatar } from './FamilyAvatar';
 interface Props {
   settlement: Settlement;
   viewerFamilyId?: string;
+  viewerUserId?: string;
   canManageTrip: boolean;
   isTripOrganizer: boolean;
-  onApproveAsPayer?: () => void;
-  onApproveAsReceiver?: () => void;
-  onDispute?: () => void;
+  onNotify?: () => void;
+  onEmail?: () => void;
+  onConfirmAsPayer?: () => void;
+  onConfirmAsReceiver?: () => void;
+  onClose?: () => void;
   onCancel?: () => void;
-  onResolveDispute?: () => void;
   onSoftDelete?: () => void;
   onRestore?: () => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  proposed: 'Proposed — pending approvals',
-  payer_approved: 'Payer approved — awaiting receiver',
-  receiver_approved: 'Receiver approved — awaiting payer',
-  completed: 'Completed',
-  disputed: 'Disputed',
+  proposed: 'Legacy pending',
+  payer_approved: 'Payer confirmed',
+  receiver_approved: 'Receiver confirmed',
+  confirmed: 'Ready to close',
+  completed: 'Closed',
+  disputed: 'Needs review',
   cancelled: 'Cancelled',
 };
 
@@ -32,6 +35,7 @@ const STATUS_COLORS: Record<string, string> = {
   proposed: Colors.warning,
   payer_approved: Colors.primary,
   receiver_approved: Colors.primary,
+  confirmed: Colors.success,
   completed: Colors.success,
   disputed: Colors.danger,
   cancelled: Colors.textSecondary,
@@ -40,90 +44,94 @@ const STATUS_COLORS: Record<string, string> = {
 export function SettlementCard({
   settlement,
   viewerFamilyId,
+  viewerUserId,
   canManageTrip,
-  onApproveAsPayer,
-  onApproveAsReceiver,
-  onDispute,
+  onNotify,
+  onEmail,
+  onConfirmAsPayer,
+  onConfirmAsReceiver,
+  onClose,
   onCancel,
-  onResolveDispute,
   onSoftDelete,
   onRestore,
 }: Props) {
   const { status } = settlement;
-  const isPayer = viewerFamilyId === settlement.from_family_id;
-  const isReceiver = viewerFamilyId === settlement.to_family_id;
   const isDeleted = !!settlement.deleted_at;
-  const isActive = status !== 'completed' && status !== 'cancelled';
-
-  const payerApproved = !!settlement.payer_family_approved_at;
-  const receiverApproved = !!settlement.receiver_family_approved_at;
-
-  const showApproveAsPayer =
-    onApproveAsPayer &&
-    isPayer &&
-    !payerApproved &&
-    (status === 'proposed' || status === 'receiver_approved');
-
-  const showApproveAsReceiver =
-    onApproveAsReceiver &&
-    isReceiver &&
-    !receiverApproved &&
-    (status === 'proposed' || status === 'payer_approved');
-
-  const showDispute =
-    onDispute &&
-    (isPayer || isReceiver) &&
-    isActive;
-
-  const showCancel =
-    onCancel &&
-    canManageTrip &&
-    isActive;
-
-  const showResolveDispute =
-    onResolveDispute &&
-    canManageTrip &&
-    status === 'disputed';
+  const showNotify = onNotify && canManageTrip && !isDeleted;
+  const showEmail = onEmail && canManageTrip && !isDeleted;
+  const showClose = onClose && canManageTrip && status === 'confirmed';
+  const showCancel = onCancel && canManageTrip && status !== 'cancelled';
+  const isPerson = settlement.settlement_type === 'person';
+  const payerLabel = isPerson
+    ? settlement.from_user?.full_name ?? settlement.from_user?.email ?? 'Payer'
+    : settlement.from_family?.name ?? 'Payer family';
+  const receiverLabel = isPerson
+    ? settlement.to_user?.full_name ?? settlement.to_user?.email ?? 'Receiver'
+    : settlement.to_family?.name ?? 'Receiver family';
+  const payerConfirmed = !!settlement.payer_family_approved_at;
+  const receiverConfirmed = !!settlement.receiver_family_approved_at;
+  const viewerIsPayer = isPerson
+    ? viewerUserId === settlement.from_user_id
+    : viewerFamilyId === settlement.from_family_id;
+  const viewerIsReceiver = isPerson
+    ? viewerUserId === settlement.to_user_id
+    : viewerFamilyId === settlement.to_family_id;
+  const showConfirmAsPayer =
+    onConfirmAsPayer &&
+    viewerIsPayer &&
+    !payerConfirmed &&
+    !['completed', 'cancelled'].includes(status);
+  const showConfirmAsReceiver =
+    onConfirmAsReceiver &&
+    viewerIsReceiver &&
+    !receiverConfirmed &&
+    !['completed', 'cancelled'].includes(status);
 
   const badgeColor = STATUS_COLORS[status] ?? Colors.textSecondary;
   const badgeLabel = STATUS_LABELS[status] ?? status;
+  const actionVerb = status === 'completed' ? ' paid ' : ' should pay ';
 
   return (
     <View style={styles.card}>
       <View style={styles.row}>
         <View style={styles.families}>
           <FamilyAvatar
-            name={settlement.from_family?.name ?? '?'}
+            name={payerLabel}
             color={settlement.from_family?.color}
             size={36}
           />
           <Text style={styles.arrow}>→</Text>
           <FamilyAvatar
-            name={settlement.to_family?.name ?? '?'}
+            name={receiverLabel}
             color={settlement.to_family?.color}
             size={36}
           />
         </View>
-        <View style={styles.right}>
+        <View style={styles.amountBox}>
           <CurrencyAmount amount={settlement.amount} size="lg" />
-          <View style={[styles.badge, { backgroundColor: badgeColor + '22' }]}>
-            <Text style={[styles.badgeText, { color: badgeColor }]}>{badgeLabel}</Text>
-          </View>
         </View>
       </View>
 
-      <Text style={styles.desc}>
-        <Text style={styles.bold}>{settlement.from_family?.name}</Text>
-        {' owes '}
-        <Text style={styles.bold}>{settlement.to_family?.name}</Text>
+      <View style={styles.statusRow}>
+        <View style={[styles.badge, { backgroundColor: badgeColor + '22' }]}>
+          <Text style={[styles.badgeText, { color: badgeColor }]} numberOfLines={2}>
+            {badgeLabel}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={styles.desc} numberOfLines={2}>
+        <Text style={styles.bold}>{payerLabel}</Text>
+        {actionVerb}
+        <Text style={styles.bold}>{receiverLabel}</Text>
       </Text>
 
-      <View style={styles.approvalsRow}>
-        <Text style={[styles.approvalItem, payerApproved ? styles.approvalDone : styles.approvalPending]}>
-          {payerApproved ? '✓ Payer approved' : '⏳ Payer pending'}
+      <View style={styles.confirmRow}>
+        <Text style={[styles.confirmText, payerConfirmed && styles.confirmedText]}>
+          {payerConfirmed ? '✓ Payer confirmed' : 'Payer pending'}
         </Text>
-        <Text style={[styles.approvalItem, receiverApproved ? styles.approvalDone : styles.approvalPending]}>
-          {receiverApproved ? '✓ Receiver approved' : '⏳ Receiver pending'}
+        <Text style={[styles.confirmText, receiverConfirmed && styles.confirmedText]}>
+          {receiverConfirmed ? '✓ Receiver confirmed' : 'Receiver pending'}
         </Text>
       </View>
 
@@ -134,35 +142,38 @@ export function SettlementCard({
         <Text style={styles.reasonText}>Reason: {settlement.cancel_reason}</Text>
       ) : null}
 
-      {(showApproveAsPayer || showApproveAsReceiver || showDispute || showCancel || showResolveDispute) ? (
+      {(showConfirmAsPayer || showConfirmAsReceiver || showNotify || showEmail || showClose || showCancel) ? (
         <View style={styles.actionsContainer}>
-          {showApproveAsPayer ? (
-            <TouchableOpacity onPress={onApproveAsPayer} style={[styles.actionBtn, styles.approveBtn]}>
-              <Text style={styles.actionText}>Approve as Payer</Text>
+          {showConfirmAsPayer ? (
+            <TouchableOpacity onPress={onConfirmAsPayer} style={[styles.actionBtn, styles.confirmBtn]}>
+              <Text style={styles.actionText}>Confirm Paid</Text>
             </TouchableOpacity>
           ) : null}
-          {showApproveAsReceiver ? (
-            <TouchableOpacity onPress={onApproveAsReceiver} style={[styles.actionBtn, styles.approveBtn]}>
-              <Text style={styles.actionText}>Approve as Receiver</Text>
+          {showConfirmAsReceiver ? (
+            <TouchableOpacity onPress={onConfirmAsReceiver} style={[styles.actionBtn, styles.confirmBtn]}>
+              <Text style={styles.actionText}>Confirm Received</Text>
             </TouchableOpacity>
           ) : null}
-          {showResolveDispute ? (
-            <TouchableOpacity onPress={onResolveDispute} style={[styles.actionBtn, styles.resolveBtn]}>
-              <Text style={styles.actionText}>Resolve Dispute</Text>
+          {showNotify ? (
+            <TouchableOpacity onPress={onNotify} style={[styles.actionBtn, styles.notifyBtn]}>
+              <Text style={styles.actionText}>Send Notification</Text>
             </TouchableOpacity>
           ) : null}
-          <View style={styles.secondaryActions}>
-            {showDispute ? (
-              <TouchableOpacity onPress={onDispute} style={[styles.actionBtn, styles.disputeBtn, styles.actionHalf]}>
-                <Text style={styles.actionText}>Dispute</Text>
-              </TouchableOpacity>
-            ) : null}
-            {showCancel ? (
-              <TouchableOpacity onPress={onCancel} style={[styles.actionBtn, styles.cancelBtn, styles.actionHalf]}>
-                <Text style={styles.actionText}>Cancel</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
+          {showEmail ? (
+            <TouchableOpacity onPress={onEmail} style={[styles.actionBtn, styles.emailBtn]}>
+              <Text style={styles.actionText}>Email Parties</Text>
+            </TouchableOpacity>
+          ) : null}
+          {showClose ? (
+            <TouchableOpacity onPress={onClose} style={[styles.actionBtn, styles.closeBtn]}>
+              <Text style={styles.actionText}>Close Settlement</Text>
+            </TouchableOpacity>
+          ) : null}
+          {showCancel ? (
+            <TouchableOpacity onPress={onCancel} style={[styles.actionBtn, styles.cancelBtn]}>
+              <Text style={styles.actionText}>Cancel Record</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
 
@@ -197,55 +208,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: Spacing.xs,
+    gap: Spacing.sm,
   },
   families: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+    flexShrink: 1,
+    minWidth: 116,
   },
   arrow: {
     fontSize: FontSize.lg,
     color: Colors.textSecondary,
     marginHorizontal: Spacing.xs,
   },
-  right: {
+  amountBox: {
     alignItems: 'flex-end',
-    gap: Spacing.xs,
+    flexShrink: 0,
+    minWidth: 96,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: Spacing.xs,
   },
   badge: {
     paddingHorizontal: Spacing.sm,
     paddingVertical: 2,
-    borderRadius: Radius.full,
-    alignSelf: 'flex-start',
+    borderRadius: Radius.md,
+    maxWidth: '100%',
   },
   badgeText: {
     fontSize: FontSize.xs,
     fontWeight: FontWeight.semiBold,
+    textAlign: 'right',
   },
   desc: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     marginBottom: Spacing.xs,
+    flexShrink: 1,
   },
   bold: {
     fontWeight: FontWeight.semiBold,
     color: Colors.text,
-  },
-  approvalsRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginTop: Spacing.xs,
-    marginBottom: Spacing.xs,
-  },
-  approvalItem: {
-    fontSize: FontSize.xs,
-  },
-  approvalDone: {
-    color: Colors.success,
-    fontWeight: FontWeight.semiBold,
-  },
-  approvalPending: {
-    color: Colors.textSecondary,
   },
   reasonText: {
     fontSize: FontSize.xs,
@@ -257,29 +263,39 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     gap: Spacing.sm,
   },
-  secondaryActions: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
   actionBtn: {
     borderRadius: Radius.sm,
     paddingVertical: Spacing.sm,
     alignItems: 'center',
   },
-  approveBtn: {
-    backgroundColor: Colors.success,
-  },
-  disputeBtn: {
-    backgroundColor: Colors.danger,
-  },
   cancelBtn: {
     backgroundColor: Colors.textSecondary,
   },
-  resolveBtn: {
+  notifyBtn: {
     backgroundColor: Colors.primary,
   },
-  actionHalf: {
-    flex: 1,
+  emailBtn: {
+    backgroundColor: Colors.warning,
+  },
+  closeBtn: {
+    backgroundColor: Colors.success,
+  },
+  confirmBtn: {
+    backgroundColor: Colors.success,
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  confirmText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+  },
+  confirmedText: {
+    color: Colors.success,
+    fontWeight: FontWeight.semiBold,
   },
   actionText: {
     color: Colors.surface,

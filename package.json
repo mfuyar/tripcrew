@@ -53,6 +53,7 @@
     "build:preview:ios": "npx eas-cli build --platform ios --profile preview",
     "build:preview": "npx eas-cli build --platform all --profile preview",
     "build:testflight": "npx eas-cli build --platform ios --profile production",
+    "build:testflight:submit": "npx eas-cli build --platform ios --profile production --auto-submit",
     "submit:testflight": "npx eas-cli submit --platform ios --profile production",
     "test": "jest",
     "test:watch": "jest --watch",

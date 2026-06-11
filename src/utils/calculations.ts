@@ -8,6 +8,7 @@ import {
   FairnessMetrics,
   SplitMethod,
   Expense,
+  Settlement,
   TripMember,
 } from '../types';
 import { isSelfOnlyExpense } from './expenseVisibility';
@@ -226,6 +227,28 @@ export function calculateSettlements(
   }
 
   return settlements;
+}
+
+export function applySettlementsToFamilyBalances(
+  balances: FamilyBalance[],
+  settlements: Settlement[]
+): FamilyBalance[] {
+  const activeSettlements = settlements.filter(
+    (s) => !s.deleted_at && s.status === 'completed',
+  );
+
+  return balances.map((b) => {
+    let balance = b.balance;
+    for (const settlement of activeSettlements) {
+      if (settlement.from_family_id === b.familyId) {
+        balance = round2(balance + settlement.amount);
+      }
+      if (settlement.to_family_id === b.familyId) {
+        balance = round2(balance - settlement.amount);
+      }
+    }
+    return { ...b, balance: normalizeSettlementBalance(balance) };
+  });
 }
 
 export function calculatePersonBalances(

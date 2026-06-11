@@ -48,6 +48,7 @@ const mockResize = jest.fn().mockReturnThis();
 const mockReset = jest.fn().mockReturnThis();
 const mockRenderAsync = jest.fn();
 const mockSaveAsync = jest.fn();
+const mockManipulateAsync = jest.fn();
 
 jest.mock('../../lib/supabaseClient', () => ({
   supabaseUrl: 'https://project.supabase.co',
@@ -72,6 +73,7 @@ jest.mock('expo/fetch', () => ({
 }));
 
 jest.mock('expo-image-manipulator', () => ({
+  manipulateAsync: mockManipulateAsync,
   ImageManipulator: {
     manipulate: jest.fn(() => ({
       renderAsync: mockRenderAsync,
@@ -89,6 +91,7 @@ beforeEach(() => {
   mockGetSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
   mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://signed.example.com/object?token=abc' }, error: null });
   mockCreateSignedUrls.mockResolvedValue({ data: [] });
+  mockManipulateAsync.mockResolvedValue({ uri: 'file:///cache/compressed.jpg', width: 1200, height: 1600 });
   mockRenderAsync
     .mockResolvedValueOnce({ width: 3024, height: 4032 })
     .mockResolvedValueOnce({ saveAsync: mockSaveAsync });
@@ -230,8 +233,11 @@ describe('SPEC §9 — uploadMedia', () => {
     );
     expect(error).toBeNull();
     expect(data?.url).toContain('https://');
-    expect(mockResize).toHaveBeenCalledWith({ height: 1600 });
-    expect(mockSaveAsync).toHaveBeenCalledWith({ compress: 0.78, format: 'jpeg' });
+    expect(mockManipulateAsync).toHaveBeenCalledWith(
+      'file:///local/photo.jpg',
+      [{ resize: { width: 1600 } }],
+      { compress: 0.78, format: 'jpeg' }
+    );
   });
 
   it('normalizes iOS m4a audio to a supported MIME type', async () => {
@@ -306,7 +312,7 @@ describe('SPEC §9 — uploadMedia', () => {
     expect(error).toBe('Storage quota exceeded');
   });
 
-  it('uploads chat photos without inserting trip_media and signs them for 24 hours', async () => {
+  it('uploads chat photos without inserting trip_media and signs them for 7 days', async () => {
     mockExpoFetch.mockResolvedValueOnce({ ok: true });
 
     const { data, error } = await mediaService.uploadChatMedia(
@@ -318,7 +324,7 @@ describe('SPEC §9 — uploadMedia', () => {
     expect(mockFrom).not.toHaveBeenCalledWith('trip_media');
     expect(mockCreateSignedUrl).toHaveBeenCalledWith(
       expect.stringMatching(/^chat\/trip-1\/user-1\/\d+\.jpg$/),
-      60 * 60 * 24
+      60 * 60 * 24 * 7
     );
     expect(mockExpoFetch).toHaveBeenCalledWith(
       expect.stringMatching(/\/object\/trip-media\/chat\/trip-1\/user-1\/\d+\.jpg$/),

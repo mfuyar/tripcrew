@@ -30,6 +30,11 @@ function navigateForNotification(navigation: Nav, n: Notification) {
     return;
   }
 
+  if (n.data?.settlement_id) {
+    navigation.navigate('PaymentTracking' as any, { tripId });
+    return;
+  }
+
   const SCREEN_MAP: Partial<Record<Notification['type'], keyof MainStackParamList>> = {
     expense_added: 'Settlements',
     settlement_request: 'Settlements',

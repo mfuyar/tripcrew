@@ -7,6 +7,7 @@ const mockResize = jest.fn().mockReturnThis();
 const mockReset = jest.fn().mockReturnThis();
 const mockRenderAsync = jest.fn();
 const mockSaveAsync = jest.fn();
+const mockManipulateAsync = jest.fn();
 
 const mockFrom = jest.fn(() => ({
   insert: mockInsert.mockReturnThis(),
@@ -43,6 +44,10 @@ jest.mock('expo-file-system', () => ({
     constructor(uri: string) {
       this.uri = uri;
     }
+
+    base64() {
+      return Promise.resolve(`base64:${this.uri}`);
+    }
   },
 }));
 
@@ -51,6 +56,7 @@ jest.mock('expo/fetch', () => ({
 }));
 
 jest.mock('expo-image-manipulator', () => ({
+  manipulateAsync: mockManipulateAsync,
   ImageManipulator: {
     manipulate: jest.fn(() => ({
       renderAsync: mockRenderAsync,
@@ -65,7 +71,9 @@ import { receiptService } from '../../services/receiptService';
 
 beforeEach(() => {
   jest.clearAllMocks();
+  global.fetch = mockExpoFetch as unknown as typeof fetch;
   mockGetSession.mockResolvedValue({ data: { session: { access_token: 'user-token' } } });
+  mockManipulateAsync.mockResolvedValue({ uri: 'file:///cache/compressed-receipt.jpg' });
   mockRenderAsync
     .mockResolvedValueOnce({ width: 3024, height: 4032 })
     .mockResolvedValueOnce({ saveAsync: mockSaveAsync });
@@ -96,10 +104,11 @@ function makeReceipt(overrides: Record<string, unknown> = {}) {
 
 describe('receiptService', () => {
   describe('uploadReceipt', () => {
-    it('uploads receipt image and creates a receipt scan record', async () => {
-      mockExpoFetch.mockResolvedValueOnce({ ok: true });
-      mockGetPublicUrl.mockReturnValueOnce({ data: { publicUrl: imageUrl } });
-      mockSingle.mockResolvedValueOnce({ data: makeReceipt(), error: null });
+    it('sends compressed receipt image to the scan function', async () => {
+      mockExpoFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: makeReceipt() }),
+      });
 
       const { data, error } = await receiptService.uploadReceipt(
         tripId,
@@ -108,29 +117,35 @@ describe('receiptService', () => {
       );
 
       expect(mockExpoFetch).toHaveBeenCalledWith(
-        expect.stringMatching(
-          /^https:\/\/project\.supabase\.co\/storage\/v1\/object\/trip-media\/receipts\/trip-1\/user-1\/\d+\.jpg$/
-        ),
+        'https://project.supabase.co/functions/v1/scan-receipt',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
             Authorization: 'Bearer user-token',
             apikey: 'anon-key',
-            'Content-Type': 'image/jpeg',
+            'Content-Type': 'application/json',
+          }),
+          body: JSON.stringify({
+            tripId,
+            userId,
+            imageBase64: 'base64:file:///cache/compressed-receipt.jpg',
+            mimeType: 'image/jpeg',
           }),
         })
       );
-      expect(mockResize).toHaveBeenCalledWith({ height: 1600 });
-      expect(mockSaveAsync).toHaveBeenCalledWith({ compress: 0.78, format: 'jpeg' });
-      expect(mockFrom).toHaveBeenCalledWith('receipt_scans');
+      expect(mockManipulateAsync).toHaveBeenCalledWith(
+        'file:///receipt.jpg',
+        [{ resize: { width: 1600 } }],
+        { compress: 0.82, format: 'jpeg' }
+      );
       expect(error).toBeNull();
       expect(data?.image_url).toBe(imageUrl);
     });
 
-    it('returns upload errors', async () => {
+    it('returns scan upload errors', async () => {
       mockExpoFetch.mockResolvedValueOnce({
         ok: false,
-        text: () => Promise.resolve('Upload failed'),
+        json: () => Promise.resolve({ error: 'Upload failed' }),
       });
 
       const { data, error } = await receiptService.uploadReceipt(

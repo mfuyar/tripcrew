@@ -56,6 +56,11 @@ jest.mock('../../services/mediaService', () => ({
   },
 }));
 
+const mockSendBroadcast = jest.fn().mockResolvedValue(undefined);
+jest.mock('../../lib/realtimeBroadcast', () => ({
+  sendBroadcast: mockSendBroadcast,
+}));
+
 // notificationService uses the same supabase mock — make member query return empty
 // so notifyTripMembers is a no-op in these tests
 beforeAll(() => {
@@ -242,15 +247,33 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
   });
 
   it('creates push talk notifications through the database RPC and sends push to recipients', async () => {
-    const members = [{ user_id: 'user-2' }, { user_id: 'user-3' }];
+    const members = [
+      {
+        id: 'n-1',
+        user_id: 'user-2',
+        trip_id: tripId,
+        type: 'push_talk',
+        title: '🎙️ Push Talk',
+        body: 'A voice message was sent to your family',
+        data: { trip_id: tripId, auto_play: true },
+        is_read: false,
+        created_at: '2026-06-07T00:00:00Z',
+        auto_play: true,
+      },
+      {
+        id: 'n-2',
+        user_id: 'user-3',
+        trip_id: tripId,
+        type: 'push_talk',
+        title: '🎙️ Push Talk',
+        body: 'A voice message was sent to your family',
+        data: { trip_id: tripId, auto_play: false },
+        is_read: false,
+        created_at: '2026-06-07T00:00:00Z',
+        auto_play: false,
+      },
+    ];
     mockRpc.mockResolvedValueOnce({ data: members, error: null });
-    mockIn.mockResolvedValueOnce({
-      data: [
-        { user_id: 'user-2', push_talk_enabled: true },
-        { user_id: 'user-3', push_talk_enabled: false },
-      ],
-      error: null,
-    });
 
     const { data, error } = await chatService.notifyPushTalkReceivers(
       tripId,
@@ -267,7 +290,7 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
       p_family_id: familyId,
       p_media_url: 'https://cdn.example.com/push.m4a',
     });
-    expect(mockIn).toHaveBeenCalledWith('user_id', ['user-2', 'user-3']);
+    expect(mockSendBroadcast).toHaveBeenCalledTimes(2);
   });
 
   it('sends push talk notifications even without a family id', async () => {

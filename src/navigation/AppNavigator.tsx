@@ -389,6 +389,14 @@ function handleNotificationNavigation(data: Record<string, unknown>) {
       return;
     }
 
+    if (data?.settlement_id) {
+      (navigationRef as any).navigate('Main', {
+        screen: 'PaymentTracking',
+        params: { tripId },
+      });
+      return;
+    }
+
     const MODAL_SCREEN: Record<string, string> = {
       expense_added: 'Settlements',
       settlement_request: 'Settlements',
