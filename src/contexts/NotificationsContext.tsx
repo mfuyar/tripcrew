@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import * as Notifications from 'expo-notifications';
+import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Notification, ServiceResult } from '../types';
@@ -200,7 +201,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     if (!user || isDemoMode) return;
     refreshUnread();
 
+    // Prompt for both push notification and location access right after
+    // login, so messages, announcements, settlements, etc. and live
+    // location sharing work without the user having to find the toggles
+    // in Profile first. Re-running this on an already-decided permission
+    // is a no-op — the OS won't re-prompt.
     enablePushNotifications();
+    void Location.requestForegroundPermissionsAsync();
 
     // Subscribe to real-time notification broadcasts
     const unsub = notificationService.subscribeToNotifications(user.id, (n: Notification) => {

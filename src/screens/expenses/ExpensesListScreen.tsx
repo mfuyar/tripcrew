@@ -172,6 +172,24 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
     (sum, expense) => sum + expenseShareForViewer(expense, user?.id, userFamily?.id, canSeeAllExpenseTotals),
     0
   );
+
+  // Organizers/admins see the trip-wide total above, which excludes private
+  // expenses entirely (including their own). Surface their personal total —
+  // their share of trip expenses plus their own private spending — so a
+  // private expense the organizer added doesn't disappear from view.
+  const yourPrivateTotal = canSeeAllExpenseTotals && privateSelfExpenses.length > 0
+    ? expenses
+        .filter((e) => {
+          if (isSelfOnlyExpense(e)) return canViewSelfOnlyExpense(e, user?.id, userFamily?.id, false);
+          if (e.paid_by_family_id) {
+            return e.paid_by_family_id === userFamily?.id
+              || e.expense_splits?.some((split) => split.family_id === userFamily?.id && split.share_amount > 0) === true;
+          }
+          return e.paid_by_user_id === user?.id
+            || e.expense_person_splits?.some((split) => split.user_id === user?.id && split.share_amount > 0) === true;
+        })
+        .reduce((sum, expense) => sum + expenseShareForViewer(expense, user?.id, userFamily?.id, false), 0)
+    : null;
   const horizontalPadding = Spacing.md * 2;
   const categoryGap = Spacing.xs;
   const categoryChipMinWidth = Math.floor((width - horizontalPadding - categoryGap * 2) / 3);
@@ -208,6 +226,11 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
           <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>
             {currencySymbol(currentTrip?.currency)}{total.toFixed(2)}
           </Text>
+          {yourPrivateTotal !== null && (
+            <Text style={styles.yourTotalHint} numberOfLines={1}>
+              Your total (incl. personal): {currencySymbol(currentTrip?.currency)}{yourPrivateTotal.toFixed(2)}
+            </Text>
+          )}
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
@@ -486,6 +509,7 @@ const styles = StyleSheet.create({
   totalBlock: { flex: 1, marginRight: Spacing.sm },
   totalLabel: { fontSize: FontSize.sm, color: Colors.surface + 'CC' },
   totalAmount: { fontSize: FontSize.xxl, fontWeight: FontWeight.bold, color: Colors.surface },
+  yourTotalHint: { fontSize: FontSize.xs, color: Colors.surface + 'CC', marginTop: 2 },
   headerActions: { flexDirection: 'row', gap: Spacing.sm, flexShrink: 0 },
   balanceBtn: {
     backgroundColor: Colors.surface + '22',
