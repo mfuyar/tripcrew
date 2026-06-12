@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, Alert,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -92,7 +92,11 @@ export function NotificationCenterScreen() {
 
   async function handleDeleteAll() {
     if (!user) return;
-    await notificationService.deleteAll(user.id);
+    const { error } = await notificationService.deleteAll(user.id);
+    if (error) {
+      Alert.alert('Error', error);
+      return;
+    }
     setNotifications([]);
     refreshUnread();
   }

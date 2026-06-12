@@ -457,6 +457,10 @@ CREATE POLICY "Users can update their own notifications"
   ON notifications FOR UPDATE
   USING (user_id = auth.uid());
 
+CREATE POLICY "Users can delete their own notifications"
+  ON notifications FOR DELETE
+  USING (user_id = auth.uid());
+
 CREATE POLICY "Trip members can create notifications"
   ON notifications FOR INSERT
   WITH CHECK (
