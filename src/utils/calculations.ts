@@ -106,11 +106,12 @@ export function calculateExpenseSplits(
 
     case 'custom_family_amounts': {
       const amounts = options.amounts ?? {};
-      return families.map((f) => ({
+      const shares = families.map((f) => ({
         familyId: f.id,
         familyName: f.name,
         shareAmount: round2(amounts[f.id] ?? 0),
       }));
+      return adjustRounding(shares, amount);
     }
 
     case 'selected_families_only': {
@@ -287,6 +288,28 @@ export function calculatePersonBalances(
   }));
 }
 
+export function applySettlementsToPersonBalances(
+  balances: PersonBalance[],
+  settlements: Settlement[]
+): PersonBalance[] {
+  const activeSettlements = settlements.filter(
+    (s) => !s.deleted_at && s.status === 'completed' && s.settlement_type === 'person',
+  );
+
+  return balances.map((b) => {
+    let balance = b.balance;
+    for (const settlement of activeSettlements) {
+      if (settlement.from_user_id === b.userId) {
+        balance = round2(balance + settlement.amount);
+      }
+      if (settlement.to_user_id === b.userId) {
+        balance = round2(balance - settlement.amount);
+      }
+    }
+    return { ...b, balance: normalizeSettlementBalance(balance) };
+  });
+}
+
 export function calculatePersonSettlements(
   balances: PersonBalance[]
 ): PersonSettlementCalculation[] {
@@ -375,12 +398,14 @@ export function calculateFairnessMetrics(
   }
 
   // Check if spending is balanced
-  const expectedShare = total / families.length;
-  const maxDeviation = Math.max(
-    ...balances.map((b) => Math.abs(b.totalOwed - expectedShare))
-  );
-  if (maxDeviation < total * 0.05 && total > 0) {
-    insights.push("Spending is well balanced across families!");
+  if (total > 0 && families.length > 0) {
+    const expectedShare = total / families.length;
+    const maxDeviation = Math.max(
+      ...balances.map((b) => Math.abs(b.totalOwed - expectedShare))
+    );
+    if (maxDeviation < total * 0.05) {
+      insights.push("Spending is well balanced across families!");
+    }
   }
 
   return { paymentShareByFamily, insights };

@@ -21,6 +21,7 @@ import {
   calculatePersonSettlements,
   calculateSettlements,
   applySettlementsToFamilyBalances,
+  applySettlementsToPersonBalances,
 } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
@@ -63,11 +64,12 @@ export function SettlementScreen({ navigation, route }: Props) {
     setExistingSettlements(existing);
 
     const rawBalances = calculateFamilyBalances(expenses, families);
-    const personBalances = calculatePersonBalances(expenses, members);
+    const rawPersonBalances = calculatePersonBalances(expenses, members);
     const adjustedBalances = applySettlementsToFamilyBalances(rawBalances, existing);
+    const adjustedPersonBalances = applySettlementsToPersonBalances(rawPersonBalances, existing);
 
     setSettlements(calculateSettlements(adjustedBalances));
-    setPersonSettlements(calculatePersonSettlements(personBalances));
+    setPersonSettlements(calculatePersonSettlements(adjustedPersonBalances));
     setLoading(false);
     setRefreshing(false);
   }

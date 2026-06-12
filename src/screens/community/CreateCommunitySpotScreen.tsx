@@ -87,6 +87,7 @@ export function CreateCommunitySpotScreen({ navigation, route }: Props) {
       mediaTypes: ['images'],
       allowsEditing: true,
       quality: 0.7,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
     });
     if (!result.canceled && result.assets[0]) {
       setPhotoUri(result.assets[0].uri);

@@ -64,6 +64,7 @@ export function ReceiptScannerScreen({ navigation, route }: Props) {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.8,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
     });
     if (!res.canceled && res.assets[0]) {
       setImageUri(res.assets[0].uri);

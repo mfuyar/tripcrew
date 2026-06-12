@@ -15,7 +15,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { expenseService } from '../../services/expenseService';
 import { settlementService } from '../../services/settlementService';
 import { demoExpenses } from '../../lib/mockData';
-import { applySettlementsToFamilyBalances, calculateFamilyBalances, calculatePersonBalances } from '../../utils/calculations';
+import { applySettlementsToFamilyBalances, applySettlementsToPersonBalances, calculateFamilyBalances, calculatePersonBalances } from '../../utils/calculations';
 import { LoadingView } from '../../components/LoadingView';
 import { currencySymbol } from '../../utils/currency';
 import { isSelfOnlyExpense } from '../../utils/expenseVisibility';
@@ -50,7 +50,12 @@ export function BalancesScreen({ navigation, route }: Props) {
       settlementRecords
     );
     setBalances(result);
-    setPersonBalances(calculatePersonBalances(allExpenses, members));
+    setPersonBalances(
+      applySettlementsToPersonBalances(
+        calculatePersonBalances(allExpenses, members),
+        settlementRecords
+      )
+    );
     setLoading(false);
     setRefreshing(false);
   }

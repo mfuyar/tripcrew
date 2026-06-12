@@ -167,6 +167,7 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
       quality: 0.7,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
     });
     if (!result.canceled && result.assets.length > 0) {
       await processUploads(result.assets.map((a) => ({ uri: a.uri })));

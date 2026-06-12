@@ -13,8 +13,10 @@ import {
   calculateFamilyBalances,
   calculateSettlements,
   calculateFairnessMetrics,
+  calculatePersonBalances,
+  applySettlementsToPersonBalances,
 } from '../../utils/calculations';
-import { Family, Expense, FamilyBalance } from '../../types';
+import { Family, Expense, FamilyBalance, PersonBalance, Settlement } from '../../types';
 
 // ─── Test Fixtures ──────────────────────────────────────────────────────────
 
@@ -175,6 +177,19 @@ describe('calculateExpenseSplits', () => {
       expect(find(result, 'a').shareAmount).toBe(120);
       expect(find(result, 'b').shareAmount).toBe(80);
       expect(find(result, 'c').shareAmount).toBe(100);
+    });
+
+    it('absorbs rounding drift into the first family when amounts do not sum exactly', () => {
+      // Provided amounts sum to 299.98, but the expense is $300 — the
+      // 2-cent gap must be assigned to the first family to satisfy the
+      // sum invariant (SPEC §12.2).
+      const result = calculateExpenseSplits(300, families, 'custom_family_amounts', {
+        amounts: { a: 119.99, b: 80, c: 99.99 },
+      });
+      expect(total(result)).toBeCloseTo(300, 2);
+      expect(find(result, 'a').shareAmount).toBeCloseTo(120.01, 2);
+      expect(find(result, 'b').shareAmount).toBe(80);
+      expect(find(result, 'c').shareAmount).toBe(99.99);
     });
   });
 
@@ -491,6 +506,140 @@ describe('calculateFairnessMetrics', () => {
     const metrics = calculateFairnessMetrics({ expenses, families });
     const sum = metrics.paymentShareByFamily.reduce((s, p) => s + p.percentage, 0);
     expect(sum).toBeCloseTo(100, 1);
+  });
+
+  it('does not crash or report false "well balanced" insight for trips with no families', () => {
+    // Person-only trips have an empty families array. With families.length === 0,
+    // total / families.length is Infinity/NaN and Math.max(...[]) is -Infinity —
+    // both of which previously made the "well balanced" check pass spuriously.
+    const personExpense: Expense = {
+      id: 'p1',
+      trip_id: 'trip-1',
+      title: 'Snacks',
+      amount: 50,
+      currency: 'USD',
+      paid_by_family_id: null,
+      paid_by_user_id: 'user-1',
+      date: new Date().toISOString(),
+      category: 'other',
+      split_method: 'equal_by_person',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      expense_person_splits: [
+        { id: 'eps-1', expense_id: 'p1', trip_id: 'trip-1', user_id: 'user-1', share_amount: 25, created_at: '' },
+        { id: 'eps-2', expense_id: 'p1', trip_id: 'trip-1', user_id: 'user-2', share_amount: 25, created_at: '' },
+      ],
+    };
+
+    const metrics = calculateFairnessMetrics({ expenses: [personExpense], families: [] });
+    expect(metrics.paymentShareByFamily).toEqual([]);
+    expect(metrics.insights).not.toContain('Spending is well balanced across families!');
+  });
+});
+
+// ─── applySettlementsToPersonBalances ───────────────────────────────────────
+
+describe('applySettlementsToPersonBalances', () => {
+  function makePersonBalances(
+    items: Array<{ id: string; name: string; balance: number }>
+  ): PersonBalance[] {
+    return items.map((item) => ({
+      userId: item.id,
+      userName: item.name,
+      totalPaid: item.balance > 0 ? item.balance : 0,
+      totalOwed: item.balance < 0 ? -item.balance : 0,
+      balance: item.balance,
+    }));
+  }
+
+  function makeSettlement(overrides: Partial<Settlement>): Settlement {
+    return {
+      id: 's1',
+      trip_id: 'trip-1',
+      settlement_type: 'person',
+      amount: 0,
+      currency: 'USD',
+      status: 'completed',
+      created_at: '',
+      updated_at: '',
+      ...overrides,
+    };
+  }
+
+  it('nets a completed person settlement out of both balances', () => {
+    const balances = makePersonBalances([
+      { id: 'u1', name: 'Alice', balance: -50 },
+      { id: 'u2', name: 'Bob', balance: 50 },
+    ]);
+    const settlements = [
+      makeSettlement({ from_user_id: 'u1', to_user_id: 'u2', amount: 50, status: 'completed' }),
+    ];
+
+    const result = applySettlementsToPersonBalances(balances, settlements);
+    const alice = result.find((b) => b.userId === 'u1')!;
+    const bob = result.find((b) => b.userId === 'u2')!;
+
+    expect(alice.balance).toBe(0);
+    expect(bob.balance).toBe(0);
+  });
+
+  it('ignores settlements that are not completed', () => {
+    const balances = makePersonBalances([
+      { id: 'u1', name: 'Alice', balance: -50 },
+      { id: 'u2', name: 'Bob', balance: 50 },
+    ]);
+    const settlements = [
+      makeSettlement({ from_user_id: 'u1', to_user_id: 'u2', amount: 50, status: 'confirmed' }),
+    ];
+
+    const result = applySettlementsToPersonBalances(balances, settlements);
+    expect(result.find((b) => b.userId === 'u1')!.balance).toBe(-50);
+    expect(result.find((b) => b.userId === 'u2')!.balance).toBe(50);
+  });
+
+  it('ignores soft-deleted settlements', () => {
+    const balances = makePersonBalances([
+      { id: 'u1', name: 'Alice', balance: -50 },
+      { id: 'u2', name: 'Bob', balance: 50 },
+    ]);
+    const settlements = [
+      makeSettlement({ from_user_id: 'u1', to_user_id: 'u2', amount: 50, status: 'completed', deleted_at: new Date().toISOString() }),
+    ];
+
+    const result = applySettlementsToPersonBalances(balances, settlements);
+    expect(result.find((b) => b.userId === 'u1')!.balance).toBe(-50);
+    expect(result.find((b) => b.userId === 'u2')!.balance).toBe(50);
+  });
+
+  it('ignores family-type settlements', () => {
+    const balances = makePersonBalances([
+      { id: 'u1', name: 'Alice', balance: -50 },
+      { id: 'u2', name: 'Bob', balance: 50 },
+    ]);
+    const settlements = [
+      makeSettlement({ settlement_type: 'family', from_family_id: 'f1', to_family_id: 'f2', amount: 50, status: 'completed' }),
+    ];
+
+    const result = applySettlementsToPersonBalances(balances, settlements);
+    expect(result.find((b) => b.userId === 'u1')!.balance).toBe(-50);
+    expect(result.find((b) => b.userId === 'u2')!.balance).toBe(50);
+  });
+
+  it('leaves a residual balance if a second debt arises after settling the first', () => {
+    // u1 already settled a $50 debt to u2. A new $20 debt has since accrued.
+    const balances = makePersonBalances([
+      { id: 'u1', name: 'Alice', balance: -20 },
+      { id: 'u2', name: 'Bob', balance: 20 },
+    ]);
+    const settlements = [
+      makeSettlement({ from_user_id: 'u1', to_user_id: 'u2', amount: 50, status: 'completed' }),
+    ];
+
+    const result = applySettlementsToPersonBalances(balances, settlements);
+    // u1 now appears to have OVERPAID by $30 (a credit), since the $50
+    // settlement fully covers the new $20 debt with $30 left over.
+    expect(result.find((b) => b.userId === 'u1')!.balance).toBe(30);
+    expect(result.find((b) => b.userId === 'u2')!.balance).toBe(-30);
   });
 });
 

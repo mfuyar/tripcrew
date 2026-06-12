@@ -425,6 +425,7 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
       mediaTypes: ['images'],
       allowsMultipleSelection: false,
       quality: 0.7,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
     });
 
     if (result.canceled || result.assets.length === 0) return;

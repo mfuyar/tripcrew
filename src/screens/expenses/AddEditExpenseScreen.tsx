@@ -8,9 +8,9 @@ import {
   Alert,
   Image,
   Modal,
-  SafeAreaView,
   useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { mediaService } from '../../services/mediaService';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, ExpenseCategory, SplitMethod, FamilySplitShare, PersonSplitShare } from '../../types';
@@ -24,7 +24,7 @@ import { AppButton } from '../../components/AppButton';
 import { CurrencyAmount } from '../../components/CurrencyAmount';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { DatePickerField } from '../../components/DatePickerField';
-import { parseDate } from '../../utils/dateUtils';
+import { parseDate, todayStr } from '../../utils/dateUtils';
 import { currencySymbol } from '../../utils/currency';
 import {
   Colors, FontSize, FontWeight, Spacing, Radius,
@@ -86,7 +86,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   const [paidByFamilyId, setPaidByFamilyId] = useState(userFamily?.id ?? families[0]?.id ?? '');
   const [splitMethod, setSplitMethod] = useState<SplitMethod>('equal_by_family');
   const [baseSplitMethod, setBaseSplitMethod] = useState<SplitMethod>('equal_by_family');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayStr());
   const [notes, setNotes] = useState('');
   const [selectedFamilies, setSelectedFamilies] = useState<string[]>(families.map((f) => f.id));
   const [paidByUserId, setPaidByUserId] = useState(user?.id ?? '');
@@ -121,11 +121,17 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setSelectedPersonIds((prev) => (prev.length ? prev : tripMembers.map((m) => m.user_id)));
       return;
     }
-    if (!paidByFamilyId) {
+    const familyIds = families.map((f) => f.id);
+    if (!paidByFamilyId || !familyIds.includes(paidByFamilyId)) {
       setExpenseScope((prev) => (prev === 'person' ? prev : 'family'));
       setPaidByFamilyId(userFamily?.id ?? families[0].id);
-      setSelectedFamilies(families.map((f) => f.id));
+      setSelectedFamilies(familyIds);
+      return;
     }
+    setSelectedFamilies((prev) => {
+      const filtered = prev.filter((id) => familyIds.includes(id));
+      return filtered.length ? filtered : familyIds;
+    });
   }, [families, hasFamilies, paidByFamilyId, tripMembers, userFamily?.id]);
 
   useEffect(() => {
@@ -199,7 +205,10 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
         isGlobalAdmin ||
         data.paid_by_user_id === user?.id ||
         isPersonExpenseParticipant(data, user?.id);
-      if (baseCanEdit && data.paid_by_family_id) {
+      // The settlement lock only applies to a regular payer/creator — the
+      // organizer/global admin can always edit so they can fix expenses even
+      // after a settlement has been recorded for that family.
+      if (baseCanEdit && data.paid_by_family_id && !isTripOrganizer && !isGlobalAdmin) {
         const locked = await settlementService.isExpenseEditLocked(tripId, data.paid_by_family_id);
         if (locked) baseCanEdit = false;
       }
@@ -228,7 +237,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       }));
       const total = shares.reduce((sum, s) => sum + s.shareAmount, 0);
       const diff = Math.round((amt - total) * 100) / 100;
-      if (shares.length) shares[shares.length - 1].shareAmount = Math.round((shares[shares.length - 1].shareAmount + diff) * 100) / 100;
+      if (shares.length) shares[0].shareAmount = Math.round((shares[0].shareAmount + diff) * 100) / 100;
       setPersonSplits(shares);
       setSplits([]);
       return;

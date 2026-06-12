@@ -4,6 +4,7 @@ import { Expense } from '../types';
 import { Colors, FontSize, FontWeight, Radius, Spacing } from '../constants/theme';
 import { CATEGORY_ICONS, CATEGORY_COLORS } from '../constants/theme';
 import { CurrencyAmount } from './CurrencyAmount';
+import { parseDate } from '../utils/dateUtils';
 
 interface Props {
   expense: Expense;
@@ -14,7 +15,7 @@ interface Props {
 export function ExpenseCard({ expense, onPress, currency }: Props) {
   const icon = CATEGORY_ICONS[expense.category] ?? '💸';
   const catColor = CATEGORY_COLORS[expense.category] ?? Colors.textSecondary;
-  const dateStr = new Date(expense.date).toLocaleDateString('en-US', {
+  const dateStr = parseDate(expense.date).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
   });
