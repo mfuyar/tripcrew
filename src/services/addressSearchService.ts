@@ -16,6 +16,12 @@ interface NominatimResult {
   lon: string;
 }
 
+interface GoogleGeocodeResult {
+  place_id?: string;
+  formatted_address?: string;
+  geometry?: { location?: { lat: number; lng: number } };
+}
+
 async function geocodeWithDevice(query: string, limit: number): Promise<AddressSuggestion[]> {
   const locations = await Location.geocodeAsync(query);
   return locations.slice(0, limit).map((item, index) => ({
@@ -26,10 +32,40 @@ async function geocodeWithDevice(query: string, limit: number): Promise<AddressS
   }));
 }
 
+async function searchWithGoogle(query: string, limit: number, apiKey: string): Promise<AddressSuggestion[]> {
+  const response = await fetch(
+    `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${apiKey}`
+  );
+  if (!response.ok) return [];
+
+  const json = await response.json();
+  if (json.status !== 'OK' || !Array.isArray(json.results)) return [];
+
+  return (json.results as GoogleGeocodeResult[])
+    .slice(0, limit)
+    .map((item, index) => ({
+      id: item.place_id ?? `${query}-${index}`,
+      label: item.formatted_address ?? query,
+      latitude: item.geometry?.location?.lat ?? NaN,
+      longitude: item.geometry?.location?.lng ?? NaN,
+    }))
+    .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude));
+}
+
 export const addressSearchService = {
   async search(query: string, limit = 5): Promise<ServiceResult<AddressSuggestion[]>> {
     const trimmed = query.trim();
     if (trimmed.length < 3) return { data: [], error: null };
+
+    const googleApiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+    if (googleApiKey) {
+      try {
+        const suggestions = await searchWithGoogle(trimmed, limit, googleApiKey);
+        if (suggestions.length > 0) return { data: suggestions, error: null };
+      } catch {
+        // Fall through to OpenStreetMap / device geocoder below.
+      }
+    }
 
     try {
       const response = await fetch(

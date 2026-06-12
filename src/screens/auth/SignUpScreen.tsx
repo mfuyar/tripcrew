@@ -73,7 +73,7 @@ export function SignUpScreen({ navigation }: Props) {
   return (
     <FormKeyboardView contentContainerStyle={styles.container} keyboardVerticalOffset={0}>
         <View style={styles.header}>
-          <Text style={styles.logo}>✈️</Text>
+          <Text style={styles.logo}>🏖️</Text>
           <Text style={styles.appName}>Travel Crew</Text>
         </View>
 

@@ -6,7 +6,9 @@ import {
   StyleSheet,
   Alert,
   TouchableOpacity,
+  Share,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AdminConsentRequest, MainStackParamList, TripJoinRequest, TripMember } from '../../types';
 import { useTripContext } from '../../contexts/TripContext';
@@ -16,6 +18,7 @@ import { tripService } from '../../services/tripService';
 import { familyService } from '../../services/familyService';
 import { adminAccessService } from '../../services/adminAccessService';
 import { AppTextInput } from '../../components/AppTextInput';
+import { AddressAutocomplete } from '../../components/AddressAutocomplete';
 import { AppButton } from '../../components/AppButton';
 import { displayName } from '../../utils/displayName';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
@@ -54,6 +57,28 @@ export function TripSettingsScreen({ navigation, route }: Props) {
   const [adminRequests, setAdminRequests] = useState<AdminConsentRequest[]>([]);
   const [activeAdminAccess, setActiveAdminAccess] = useState<AdminConsentRequest[]>([]);
   const [reviewingConsentId, setReviewingConsentId] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  async function handleCopyInviteCode() {
+    const code = currentTrip?.invite_code;
+    if (!code) return;
+    await Clipboard.setStringAsync(code);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  }
+
+  async function handleShareInviteCode() {
+    const code = currentTrip?.invite_code;
+    if (!code) return;
+    const tripName = currentTrip?.name ?? 'our trip';
+    try {
+      await Share.share({
+        message: `Join "${tripName}" on Travel Crew! Use invite code ${code} to request access.`,
+      });
+    } catch {
+      // User dismissed the share sheet — nothing to do.
+    }
+  }
 
   async function loadJoinRequests() {
     const { data, error } = await tripService.getPendingJoinRequests(tripId);
@@ -277,6 +302,14 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         <View style={styles.codeBox}>
           <Text style={styles.inviteCode}>{currentTrip?.invite_code}</Text>
           <Text style={styles.codeHint}>Share this code so people can request access</Text>
+          <View style={styles.codeActions}>
+            <TouchableOpacity style={styles.codeActionButton} onPress={handleCopyInviteCode} activeOpacity={0.8}>
+              <Text style={styles.codeActionText}>{codeCopied ? '✓ Copied' : '📋 Copy Code'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.codeActionButton} onPress={handleShareInviteCode} activeOpacity={0.8}>
+              <Text style={styles.codeActionText}>📤 Share via SMS / WhatsApp</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -285,7 +318,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Trip Details</Text>
           <AppTextInput label="Trip Name" value={name} onChangeText={setName} />
-          <AppTextInput
+          <AddressAutocomplete
             label="Destination / Address"
             value={destination}
             onChangeText={setDestination}
@@ -758,6 +791,29 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   codeHint: { fontSize: FontSize.sm, color: Colors.textSecondary },
+  codeActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    width: '100%',
+  },
+  codeActionButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  codeActionText: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.primary,
+    textAlign: 'center',
+  },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',

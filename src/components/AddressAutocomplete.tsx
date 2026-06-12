@@ -17,9 +17,10 @@ interface Props {
   onSelect?: (suggestion: AddressSuggestion) => void;
   placeholder?: string;
   required?: boolean;
+  error?: string;
 }
 
-export function AddressAutocomplete({ label, value, onChangeText, onSelect, placeholder, required }: Props) {
+export function AddressAutocomplete({ label, value, onChangeText, onSelect, placeholder, required, error }: Props) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -60,7 +61,7 @@ export function AddressAutocomplete({ label, value, onChangeText, onSelect, plac
   return (
     <View style={styles.wrap}>
       <Text style={styles.label}>{label}{required ? <Text style={styles.requiredStar}> *</Text> : null}</Text>
-      <View style={[styles.inputWrap, focused && styles.inputWrapFocused]}>
+      <View style={[styles.inputWrap, focused && styles.inputWrapFocused, !!error && styles.inputWrapError]}>
         <TextInput
           style={styles.input}
           value={value}
@@ -76,6 +77,7 @@ export function AddressAutocomplete({ label, value, onChangeText, onSelect, plac
         />
         {loading ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
       </View>
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
       {focused && suggestions.length > 0 ? (
         <View style={styles.suggestionBox}>
           {suggestions.map((suggestion) => (
@@ -113,6 +115,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
   },
   inputWrapFocused: { borderColor: Colors.primary },
+  inputWrapError: { borderColor: Colors.danger },
+  errorText: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    marginTop: Spacing.xs,
+    marginLeft: Spacing.xs,
+  },
   input: {
     flex: 1,
     padding: Spacing.md,

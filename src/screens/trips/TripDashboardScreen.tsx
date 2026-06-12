@@ -131,7 +131,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
     >
       {/* Trip Header Card */}
       <View style={styles.heroCard}>
-        <Text style={styles.heroEmoji}>✈️</Text>
+        <Text style={styles.heroEmoji}>🏖️</Text>
         <Text style={styles.heroTitle}>{trip?.name ?? 'Trip'}</Text>
         <View style={styles.heroDates}>
           <Text style={styles.heroDateText}>

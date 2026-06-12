@@ -158,7 +158,7 @@ function MainTabs() {
         component={TripsListScreen}
         options={{
           tabBarLabel: 'Trips',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="✈️" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon emoji="🏖️" focused={focused} />,
         }}
       />
       <Tab.Screen
@@ -219,6 +219,7 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
 
   return (
     <TripTab.Navigator
+      key={tripId}
       screenOptions={({ navigation, route }) => ({
         headerShown: true,
         headerTintColor: Colors.primary,

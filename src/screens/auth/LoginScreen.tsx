@@ -59,7 +59,7 @@ export function LoginScreen({ navigation }: Props) {
 
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.logo}>✈️</Text>
+          <Text style={styles.logo}>🏖️</Text>
           <Text style={styles.appName}>Travel Crew</Text>
           <Text style={styles.slogan}>Plan together. Pay fairly. Remember everything.</Text>
         </View>
@@ -93,25 +93,6 @@ export function LoginScreen({ navigation }: Props) {
             autoComplete="password"
           />
 
-          <View style={styles.consentBox}>
-            <TouchableOpacity
-              style={[styles.checkbox, acceptedPolicy && styles.checkboxChecked]}
-              onPress={() => setAcceptedPolicy((prev) => !prev)}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: acceptedPolicy }}
-              activeOpacity={0.8}
-            >
-              {acceptedPolicy ? <Text style={styles.checkboxMark}>✓</Text> : null}
-            </TouchableOpacity>
-            <Text style={styles.consentText}>
-              I agree to the{' '}
-              <Text style={styles.policyLink} onPress={() => navigation.navigate('PrivacyPolicy')}>
-                Privacy Policy and Disclosure
-              </Text>
-              .
-            </Text>
-          </View>
-
           <AppButton title="Sign In" onPress={handleSignIn} loading={loading} fullWidth />
 
           <TouchableOpacity
@@ -142,9 +123,28 @@ export function LoginScreen({ navigation }: Props) {
             </Text>
           </TouchableOpacity>
 
+          <View style={styles.consentBox}>
+            <TouchableOpacity
+              style={[styles.checkbox, acceptedPolicy && styles.checkboxChecked]}
+              onPress={() => setAcceptedPolicy((prev) => !prev)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: acceptedPolicy }}
+              activeOpacity={0.8}
+            >
+              {acceptedPolicy ? <Text style={styles.checkboxMark}>✓</Text> : null}
+            </TouchableOpacity>
+            <Text style={styles.consentText}>
+              I agree to the{' '}
+              <Text style={styles.policyLink} onPress={() => navigation.navigate('PrivacyPolicy')}>
+                Privacy Policy and Disclosure
+              </Text>
+              .
+            </Text>
+          </View>
+
           {/* Demo mode */}
           <TouchableOpacity style={styles.demoButton} onPress={handleDemo} activeOpacity={0.8}>
-            <Text style={styles.demoText}>✈️  Try Demo — explore without sign-up</Text>
+            <Text style={styles.demoText}>🏖️  Try Demo — explore without sign-up</Text>
           </TouchableOpacity>
 
           <View style={styles.footer}>

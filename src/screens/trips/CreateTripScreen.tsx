@@ -10,6 +10,7 @@ import { MainStackParamList } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { tripService } from '../../services/tripService';
 import { AppTextInput } from '../../components/AppTextInput';
+import { AddressAutocomplete } from '../../components/AddressAutocomplete';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { DatePickerField } from '../../components/DatePickerField';
@@ -78,7 +79,7 @@ export function CreateTripScreen({ navigation }: Props) {
           placeholder="Summer Vacation 2025"
           error={errors.name}
         />
-        <AppTextInput
+        <AddressAutocomplete
           label="Destination / Address" required
           value={destination}
           onChangeText={setDestination}

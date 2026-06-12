@@ -55,7 +55,7 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
     <TouchableOpacity style={styles.tripCard} onPress={onPress} activeOpacity={0.75}>
       <View style={styles.tripCardContent}>
         <View style={styles.tripIconBox}>
-          <Text style={styles.tripIcon}>✈️</Text>
+          <Text style={styles.tripIcon}>🏖️</Text>
         </View>
         <View style={styles.tripInfo}>
           <Text style={styles.tripName} numberOfLines={1}>{trip.name}</Text>
@@ -339,7 +339,7 @@ export function TripsListScreen() {
         ) : null}
         ListEmptyComponent={myRequests.length === 0 ? (
           <EmptyState
-            icon="✈️"
+            icon="🏖️"
             title="No trips yet"
             subtitle="Create your first trip or join one with an invite code."
             actionLabel="Create a Trip"
