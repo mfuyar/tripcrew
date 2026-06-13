@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS trips (
   end_date      DATE NOT NULL,
   currency      TEXT NOT NULL DEFAULT 'USD',
   cover_image_url TEXT,
+  cover_emoji   TEXT NOT NULL DEFAULT '🏖️',
   created_by    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   is_active     BOOLEAN NOT NULL DEFAULT true,
   invite_code   TEXT NOT NULL UNIQUE,

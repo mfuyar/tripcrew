@@ -70,6 +70,21 @@ export const Shadow = {
   },
 };
 
+export const DEFAULT_TRIP_EMOJI = '🏖️';
+
+export const TRIP_THEMES: { emoji: string; label: string }[] = [
+  { emoji: '🏖️', label: 'Beach' },
+  { emoji: '🏔️', label: 'Mountain' },
+  { emoji: '❄️', label: 'Snow' },
+  { emoji: '🏙️', label: 'City' },
+  { emoji: '🏕️', label: 'Camping' },
+  { emoji: '🚐', label: 'Road Trip' },
+  { emoji: '🛳️', label: 'Cruise' },
+  { emoji: '🌲', label: 'Nature' },
+  { emoji: '🎉', label: 'Celebration' },
+  { emoji: '🍷', label: 'Food & Wine' },
+];
+
 export const CATEGORY_ICONS: Record<string, string> = {
   lodging: '🏨',
   groceries: '🛒',

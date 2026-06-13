@@ -221,33 +221,35 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
     <View style={styles.container}>
       {/* Summary header */}
       <View style={styles.header}>
-        <View style={styles.totalBlock}>
-          <Text style={styles.totalLabel}>{canSeeAllExpenseTotals ? 'Total Expenses' : 'Your Expenses'}</Text>
-          <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>
-            {currencySymbol(currentTrip?.currency)}{total.toFixed(2)}
-          </Text>
-          {yourPrivateTotal !== null && (
-            <Text style={styles.yourTotalHint} numberOfLines={1}>
-              Your total (incl. personal): {currencySymbol(currentTrip?.currency)}{yourPrivateTotal.toFixed(2)}
+        <View style={styles.headerTopRow}>
+          <View style={styles.totalBlock}>
+            <Text style={styles.totalLabel}>{canSeeAllExpenseTotals ? 'Total Expenses' : 'Your Expenses'}</Text>
+            <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>
+              {currencySymbol(currentTrip?.currency)}{total.toFixed(2)}
             </Text>
-          )}
-        </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={styles.balanceBtn}
-            onPress={() => navigation.navigate('Balances', { tripId })}
-          >
-            <Text style={styles.balanceBtnText}>⚖️ Balances</Text>
-          </TouchableOpacity>
-          {canManageTrip && (
+          </View>
+          <View style={styles.headerActions}>
             <TouchableOpacity
-              style={styles.addBtn}
-              onPress={() => navigation.navigate('AddEditExpense', { tripId })}
+              style={styles.balanceBtn}
+              onPress={() => navigation.navigate('Balances', { tripId })}
             >
-              <Text style={styles.addBtnText}>+ Add</Text>
+              <Text style={styles.balanceBtnText}>⚖️ Balances</Text>
             </TouchableOpacity>
-          )}
+            {canManageTrip && (
+              <TouchableOpacity
+                style={styles.addBtn}
+                onPress={() => navigation.navigate('AddEditExpense', { tripId })}
+              >
+                <Text style={styles.addBtnText}>+ Add</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
+        {yourPrivateTotal !== null && (
+          <Text style={styles.yourTotalHint}>
+            Your total (incl. personal): {currencySymbol(currentTrip?.currency)}{yourPrivateTotal.toFixed(2)}
+          </Text>
+        )}
       </View>
 
       {/* Category filters */}
@@ -500,16 +502,18 @@ export function ExpensesListScreen({ route }: { route: { params: { tripId: strin
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
+    backgroundColor: Colors.primary,
+    padding: Spacing.lg,
+  },
+  headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Colors.primary,
-    padding: Spacing.lg,
   },
   totalBlock: { flex: 1, marginRight: Spacing.sm },
   totalLabel: { fontSize: FontSize.sm, color: Colors.surface + 'CC' },
   totalAmount: { fontSize: FontSize.xxl, fontWeight: FontWeight.bold, color: Colors.surface },
-  yourTotalHint: { fontSize: FontSize.xs, color: Colors.surface + 'CC', marginTop: 2 },
+  yourTotalHint: { fontSize: FontSize.sm, color: Colors.surface + 'CC', marginTop: Spacing.sm },
   headerActions: { flexDirection: 'row', gap: Spacing.sm, flexShrink: 0 },
   balanceBtn: {
     backgroundColor: Colors.surface + '22',

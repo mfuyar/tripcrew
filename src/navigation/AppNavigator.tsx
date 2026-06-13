@@ -8,6 +8,7 @@ import * as Notifications from 'expo-notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { Colors, FontSize } from '../constants/theme';
 import { LoadingView } from '../components/LoadingView';
+import { NotificationBellButton } from '../components/NotificationBellButton';
 
 // Auth Screens
 import { LoginScreen } from '../screens/auth/LoginScreen';
@@ -84,9 +85,6 @@ import {
 } from '../types';
 import { useNotifications } from '../contexts/NotificationsContext';
 import { useTripContext } from '../contexts/TripContext';
-import { tripService } from '../services/tripService';
-import { familyService } from '../services/familyService';
-import { featureFlagService } from '../services/featureFlagService';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -177,34 +175,25 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const {
     currentTrip,
-    setCurrentTrip,
-    setFamilies,
-    setMembers,
-    setFeatureFlags,
+    loadTripData,
     canViewExpenses,
     isFeatureEnabled,
   } = useTripContext();
-  const [bootstrapping, setBootstrapping] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(currentTrip?.id !== tripId);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadTripContext() {
+      // If the trip context already matches (e.g. it was just loaded by
+      // openTrip before navigating here), there's nothing to fetch.
+      if (currentTrip?.id === tripId) {
+        setBootstrapping(false);
+        return;
+      }
       setBootstrapping(true);
-      const [trip, families, members, flags] = await Promise.all([
-        currentTrip?.id === tripId
-          ? Promise.resolve({ data: currentTrip, error: null })
-          : tripService.getTripById(tripId),
-        familyService.getFamilies(tripId),
-        tripService.getTripMembers(tripId),
-        featureFlagService.getTripFlags(tripId),
-      ]);
-
+      await loadTripData(tripId);
       if (cancelled) return;
-      if (trip.data) setCurrentTrip(trip.data);
-      setFamilies(families.data ?? []);
-      setMembers(members.data ?? []);
-      if (flags.data) setFeatureFlags(flags.data);
       setBootstrapping(false);
     }
 
@@ -213,7 +202,7 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
     return () => {
       cancelled = true;
     };
-  }, [tripId, currentTrip, setCurrentTrip, setFamilies, setMembers, setFeatureFlags]);
+  }, [tripId, currentTrip, loadTripData]);
 
   if (bootstrapping) return <LoadingView />;
 
@@ -240,6 +229,7 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
                 </Text>
               </TouchableOpacity>
             ),
+        headerRight: () => <NotificationBellButton />,
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textSecondary,
         tabBarStyle: { borderTopColor: Colors.border },
@@ -314,6 +304,7 @@ function MainNavigator() {
         headerBackTitle: 'Back',
         headerTitleStyle: { fontWeight: '600' },
         headerStyle: { backgroundColor: Colors.surface },
+        headerRight: () => <NotificationBellButton />,
       }}
     >
       <MainStack.Screen name="Tabs" component={MainTabs} options={{ headerShown: false }} />
@@ -359,7 +350,11 @@ function MainNavigator() {
           headerShown: false,
         }}
       />
-      <MainStack.Screen name="Notifications" component={NotificationCenterScreen} options={{ title: 'Notifications' }} />
+      <MainStack.Screen
+        name="Notifications"
+        component={NotificationCenterScreen}
+        options={{ title: 'Notifications', headerRight: () => null }}
+      />
     </MainStack.Navigator>
   );
 }

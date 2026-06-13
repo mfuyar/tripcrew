@@ -242,14 +242,14 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
       {/* Header */}
       <View style={styles.header}>
         {selectMode ? (
-          <>
+          <View style={styles.headerRow}>
             <Text style={styles.count}>
               {selectedIds.size} selected
             </Text>
             <TouchableOpacity onPress={exitSelectMode} style={styles.cancelBtn}>
               <Text style={styles.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
-          </>
+          </View>
         ) : (
           <>
             <Text style={styles.count}>{media.length} photos</Text>
@@ -433,16 +433,19 @@ export function TripAlbumScreen({ route }: { route: { params: { tripId: string }
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: Spacing.md,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+    gap: Spacing.sm,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   count: { fontSize: FontSize.sm, color: Colors.textSecondary },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexWrap: 'wrap' },
   selectBtn: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,

@@ -2,12 +2,16 @@ import React, {
   createContext,
   useContext,
   useState,
+  useRef,
   ReactNode,
   useCallback,
 } from 'react';
 import { Trip, TripMember, Family, FamilyMember, TripRole } from '../types';
 import { useAuth } from './AuthContext';
 import { defaultFeatureMap, TripFeatureKey } from '../constants/features';
+import { tripService } from '../services/tripService';
+import { familyService } from '../services/familyService';
+import { featureFlagService } from '../services/featureFlagService';
 
 interface TripContextValue {
   currentTrip: Trip | null;
@@ -30,6 +34,15 @@ interface TripContextValue {
   getFamilyById: (id: string) => Family | undefined;
   refreshTripData: (() => void) | null;
   setRefreshTripData: (fn: (() => void) | null) => void;
+  /**
+   * Loads (and applies) the trip, families, members, and feature flags for a
+   * trip switch. Pass the `Trip` object when already known (sets it
+   * immediately so screens reflect the switch right away) or a tripId string
+   * to fetch it too. Guards against out-of-order responses: if another
+   * `loadTripData` call starts before this one resolves, this call's results
+   * are discarded. Returns whether its results were applied.
+   */
+  loadTripData: (trip: Trip | string) => Promise<boolean>;
 }
 
 const TripContext = createContext<TripContextValue | undefined>(undefined);
@@ -65,6 +78,36 @@ export function TripProvider({ children }: { children: ReactNode }) {
     [families]
   );
 
+  // Tracks the most recently requested trip switch so that a slower, earlier
+  // request can't clobber a faster, later one with stale/mismatched data.
+  const activeTripRequestRef = useRef<string | null>(null);
+
+  const loadTripData = useCallback(async (trip: Trip | string): Promise<boolean> => {
+    const tripId = typeof trip === 'string' ? trip : trip.id;
+    activeTripRequestRef.current = tripId;
+
+    if (typeof trip !== 'string') setCurrentTrip(trip);
+
+    const [tripResult, famResult, memResult, flagsResult] = await Promise.all([
+      typeof trip === 'string'
+        ? tripService.getTripById(tripId)
+        : Promise.resolve({ data: trip, error: null }),
+      familyService.getFamilies(tripId),
+      tripService.getTripMembers(tripId),
+      featureFlagService.getTripFlags(tripId),
+    ]);
+
+    // A newer trip switch started while this one was loading — discard
+    // these results so they don't overwrite the newer trip's data.
+    if (activeTripRequestRef.current !== tripId) return false;
+
+    if (tripResult.data) setCurrentTrip(tripResult.data);
+    setFamilies(famResult.data ?? []);
+    setMembers(memResult.data ?? []);
+    if (flagsResult.data) setFeatureFlags(flagsResult.data);
+    return true;
+  }, []);
+
   return (
     <TripContext.Provider
       value={{
@@ -88,6 +131,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
         getFamilyById,
         refreshTripData,
         setRefreshTripData,
+        loadTripData,
       }}
     >
       {children}

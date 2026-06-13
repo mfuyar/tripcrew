@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Notification, ServiceResult } from '../types';
 import { notificationService } from '../services/notificationService';
@@ -196,6 +196,19 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     checkPermission();
   }, [checkPermission]);
+
+  // Realtime delivery only works while JS is running. After the app comes
+  // back from the background or a locked screen — where pushes for missed
+  // events were delivered by the OS but never reached our realtime
+  // listeners — resync the unread count from the server so the bell badge
+  // reflects what actually happened while away.
+  useEffect(() => {
+    if (!user || isDemoMode) return undefined;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshUnread();
+    });
+    return () => sub.remove();
+  }, [user?.id, isDemoMode, refreshUnread]);
 
   useEffect(() => {
     if (!user || isDemoMode) return;

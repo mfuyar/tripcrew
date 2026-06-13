@@ -16,7 +16,7 @@ import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { DatePickerField } from '../../components/DatePickerField';
 import { todayDate, todayStr, parseDate, isBefore } from '../../utils/dateUtils';
 import { currencySymbol } from '../../utils/currency';
-import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
+import { Colors, FontSize, FontWeight, Spacing, Radius, TRIP_THEMES, DEFAULT_TRIP_EMOJI } from '../../constants/theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateTrip'>;
 
@@ -30,6 +30,7 @@ export function CreateTripScreen({ navigation }: Props) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [currency, setCurrency] = useState('USD');
+  const [coverEmoji, setCoverEmoji] = useState(DEFAULT_TRIP_EMOJI);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -55,6 +56,7 @@ export function CreateTripScreen({ navigation }: Props) {
       start_date: startDate,
       end_date: endDate,
       currency,
+      cover_emoji: coverEmoji,
     });
     setLoading(false);
     if (error) {
@@ -127,6 +129,24 @@ export function CreateTripScreen({ navigation }: Props) {
           ))}
         </View>
 
+        {/* Trip Theme Picker */}
+        <Text style={styles.label}>Trip Theme</Text>
+        <View style={styles.themeGrid}>
+          {TRIP_THEMES.map((t) => (
+            <TouchableOpacity
+              key={t.emoji}
+              style={[styles.themeChip, coverEmoji === t.emoji && styles.themeChipActive]}
+              onPress={() => setCoverEmoji(t.emoji)}
+              accessibilityLabel={`Use ${t.label} theme`}
+            >
+              <Text style={styles.themeEmoji}>{t.emoji}</Text>
+              <Text style={[styles.themeLabel, coverEmoji === t.emoji && styles.themeLabelActive]}>
+                {t.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <AppButton
           title="Create Trip"
           onPress={handleCreate}
@@ -178,5 +198,33 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.medium,
   },
   currencyTextActive: { color: Colors.primary },
+  themeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  themeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  themeChipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  themeEmoji: { fontSize: FontSize.md },
+  themeLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    fontWeight: FontWeight.medium,
+  },
+  themeLabelActive: { color: Colors.primary },
   createBtn: { marginTop: Spacing.sm },
 });

@@ -43,6 +43,7 @@ export const demoTrip: Trip = {
   start_date: '2024-07-06',
   end_date: '2024-07-13',
   currency: 'USD',
+  cover_emoji: '🏖️',
   created_by: DEMO_USER_ID,
   is_active: true,
   invite_code: 'BEACH24',

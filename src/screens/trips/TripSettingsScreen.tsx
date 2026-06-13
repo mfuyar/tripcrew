@@ -23,7 +23,8 @@ import { AppButton } from '../../components/AppButton';
 import { displayName } from '../../utils/displayName';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
-import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
+import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow, TRIP_THEMES, DEFAULT_TRIP_EMOJI } from '../../constants/theme';
+import { buildTripInviteLink } from '../../constants/auth';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'TripSettings'>;
 
@@ -51,6 +52,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(currentTrip?.name ?? '');
   const [destination, setDestination] = useState(currentTrip?.destination ?? '');
+  const [coverEmoji, setCoverEmoji] = useState(currentTrip?.cover_emoji || DEFAULT_TRIP_EMOJI);
   const [joinRequests, setJoinRequests] = useState<TripJoinRequest[]>([]);
   const [canSeeRequests, setCanSeeRequests] = useState(canManageTrip || isGlobalAdmin);
   const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
@@ -71,9 +73,10 @@ export function TripSettingsScreen({ navigation, route }: Props) {
     const code = currentTrip?.invite_code;
     if (!code) return;
     const tripName = currentTrip?.name ?? 'our trip';
+    const link = buildTripInviteLink(code);
     try {
       await Share.share({
-        message: `Join "${tripName}" on Travel Crew! Use invite code ${code} to request access.`,
+        message: `Join "${tripName}" on Travel Crew! Tap to request access: ${link}\n\nOr enter invite code ${code} in the app.`,
       });
     } catch {
       // User dismissed the share sheet — nothing to do.
@@ -133,7 +136,7 @@ export function TripSettingsScreen({ navigation, route }: Props) {
   async function handleSave() {
     if (isDemoMode) { Alert.alert('Demo Mode', 'Editing trip settings is disabled in demo.'); return; }
     setSaving(true);
-    const { data, error } = await tripService.updateTrip(tripId, { name, destination });
+    const { data, error } = await tripService.updateTrip(tripId, { name, destination, cover_emoji: coverEmoji });
     setSaving(false);
     if (error) {
       Alert.alert('Error', error);
@@ -324,6 +327,22 @@ export function TripSettingsScreen({ navigation, route }: Props) {
             onChangeText={setDestination}
             placeholder="Hotel, venue, street address, or city"
           />
+          <Text style={styles.themeLabel}>Trip Theme</Text>
+          <View style={styles.themeGrid}>
+            {TRIP_THEMES.map((t) => (
+              <TouchableOpacity
+                key={t.emoji}
+                style={[styles.themeChip, coverEmoji === t.emoji && styles.themeChipActive]}
+                onPress={() => setCoverEmoji(t.emoji)}
+                accessibilityLabel={`Use ${t.label} theme`}
+              >
+                <Text style={styles.themeEmoji}>{t.emoji}</Text>
+                <Text style={[styles.themeChipText, coverEmoji === t.emoji && styles.themeChipTextActive]}>
+                  {t.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <AppButton title="Save Changes" onPress={handleSave} loading={saving} fullWidth />
         </View>
       )}
@@ -765,6 +784,40 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: Spacing.md,
   },
+  themeLabel: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.medium,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+  },
+  themeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  themeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  themeChipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  themeEmoji: { fontSize: FontSize.md },
+  themeChipText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    fontWeight: FontWeight.medium,
+  },
+  themeChipTextActive: { color: Colors.primary },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

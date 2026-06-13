@@ -71,6 +71,7 @@ export interface Trip {
   end_date: string;
   currency: string;
   cover_image_url?: string;
+  cover_emoji?: string;
   created_by: string;
   is_active: boolean;
   status?: 'active' | 'closed' | 'archived';

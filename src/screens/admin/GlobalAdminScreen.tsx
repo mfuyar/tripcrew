@@ -10,7 +10,6 @@ import { AdminConsentRequest, MainStackParamList, Trip, TripMember, TripRole } f
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { tripService } from '../../services/tripService';
-import { familyService } from '../../services/familyService';
 import { adminAccessService } from '../../services/adminAccessService';
 import { featureFlagService } from '../../services/featureFlagService';
 import { TRIP_FEATURES, TripFeatureKey } from '../../constants/features';
@@ -22,7 +21,7 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
 export function GlobalAdminScreen() {
   const navigation = useNavigation<Nav>();
   const { isGlobalAdmin } = useAuth();
-  const { setCurrentTrip, setFamilies, setMembers, setFeatureFlags } = useTripContext();
+  const { loadTripData } = useTripContext();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,15 +63,10 @@ export function GlobalAdminScreen() {
   );
 
   async function openTrip(trip: Trip) {
-    setCurrentTrip(trip);
-    const [fam, mem, flags] = await Promise.all([
-      familyService.getFamilies(trip.id),
-      tripService.getTripMembers(trip.id),
-      featureFlagService.getTripFlags(trip.id),
-    ]);
-    setFamilies(fam.data ?? []);
-    setMembers(mem.data ?? []);
-    if (flags.data) setFeatureFlags(flags.data);
+    const applied = await loadTripData(trip);
+    // A different trip was opened while this one was still loading — don't
+    // navigate into this stale trip on top of it.
+    if (!applied) return;
     navigation.navigate('TripStack', { tripId: trip.id });
   }
 

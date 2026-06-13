@@ -21,14 +21,12 @@ import { useTripContext } from '../../contexts/TripContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { supabase } from '../../lib/supabaseClient';
 import { tripService } from '../../services/tripService';
-import { familyService } from '../../services/familyService';
-import { featureFlagService } from '../../services/featureFlagService';
 import { demoTrip, demoFamilies } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { AppButton } from '../../components/AppButton';
-import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
+import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow, DEFAULT_TRIP_EMOJI } from '../../constants/theme';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -55,7 +53,7 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
     <TouchableOpacity style={styles.tripCard} onPress={onPress} activeOpacity={0.75}>
       <View style={styles.tripCardContent}>
         <View style={styles.tripIconBox}>
-          <Text style={styles.tripIcon}>🏖️</Text>
+          <Text style={styles.tripIcon}>{trip.cover_emoji || DEFAULT_TRIP_EMOJI}</Text>
         </View>
         <View style={styles.tripInfo}>
           <Text style={styles.tripName} numberOfLines={1}>{trip.name}</Text>
@@ -86,9 +84,9 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
 export function TripsListScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { user, profile, isDemoMode, isGlobalAdmin } = useAuth();
+  const { user, profile, isDemoMode, isGlobalAdmin, pendingInviteCode, consumePendingInviteCode } = useAuth();
   const { unreadCount } = useNotifications();
-  const { setCurrentTrip, setFamilies, setMembers, setFeatureFlags } = useTripContext();
+  const { setCurrentTrip, setFamilies, setMembers, loadTripData } = useTripContext();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -171,20 +169,27 @@ export function TripsListScreen() {
     };
   }, [user, isDemoMode, loadTrips]);
 
+  // Opened a shared invite link ("travelcrew://join?code=..."). Pre-fill and
+  // surface the join modal so requesting access takes one tap instead of
+  // typing in the 8-character code.
+  useEffect(() => {
+    if (!pendingInviteCode || !user || isDemoMode) return;
+    setInviteCode(pendingInviteCode);
+    setShowJoin(true);
+    consumePendingInviteCode();
+    navigation.navigate('Tabs', { screen: 'TripsTab' } as any);
+  }, [pendingInviteCode, user, isDemoMode]);
+
   async function openTrip(trip: Trip) {
-    setCurrentTrip(trip);
     if (isDemoMode) {
+      setCurrentTrip(trip);
       setFamilies(demoFamilies);
       setMembers([]);
     } else {
-      const [fam, mem, flags] = await Promise.all([
-        familyService.getFamilies(trip.id),
-        tripService.getTripMembers(trip.id),
-        featureFlagService.getTripFlags(trip.id),
-      ]);
-      setFamilies(fam.data ?? []);
-      setMembers(mem.data ?? []);
-      if (flags.data) setFeatureFlags(flags.data);
+      const applied = await loadTripData(trip);
+      // A different trip was opened while this one was still loading —
+      // don't navigate into this stale trip on top of it.
+      if (!applied) return;
     }
     navigation.navigate('TripStack', { tripId: trip.id });
   }

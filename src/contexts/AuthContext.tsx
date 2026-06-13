@@ -33,6 +33,8 @@ interface AuthContextValue {
   refreshProfile: () => Promise<void>;
   isPasswordRecovery: boolean;
   finishPasswordRecovery: () => void;
+  pendingInviteCode: string | null;
+  consumePendingInviteCode: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
   const [isGlobalAdmin, setIsGlobalAdmin] = useState(false);
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
 
   function getUrlParams(url: string): URLSearchParams {
     const parsed = new URL(url);
@@ -89,12 +92,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (_e) {}
   }
 
+  // "travelcrew://join?code=ABC12345" — opened from a shared invite link
+  // (WhatsApp/SMS/email). Stash the code so the trips list can pre-fill and
+  // open the "Request Trip Access" modal once the user is signed in.
+  function handleJoinUrl(url: string) {
+    try {
+      if (!url.startsWith('travelcrew://')) return;
+      const parsed = new URL(url);
+      if (parsed.hostname !== 'join') return;
+      const code = new URLSearchParams(parsed.search).get('code')?.trim().toUpperCase();
+      if (code) setPendingInviteCode(code);
+    } catch (_e) {}
+  }
+
+  function consumePendingInviteCode() {
+    setPendingInviteCode(null);
+  }
+
   useEffect(() => {
     Linking.getInitialURL().then((url) => {
-      if (url) handleAuthUrl(url);
+      if (url) {
+        handleAuthUrl(url);
+        handleJoinUrl(url);
+      }
     });
     const linkingSubscription = Linking.addEventListener('url', ({ url }) => {
       handleAuthUrl(url);
+      handleJoinUrl(url);
     });
 
     supabase.auth.getSession().then(({ data: { session: s } }) => {
@@ -239,6 +263,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user, profile, session, loading, isDemoMode, isGlobalAdmin,
       signIn, signUp, requestPasswordReset, updatePassword, signInWithGoogle,
       signInDemo, signOut, refreshProfile, isPasswordRecovery, finishPasswordRecovery,
+      pendingInviteCode, consumePendingInviteCode,
     }}>
       {children}
     </AuthContext.Provider>

@@ -22,6 +22,7 @@ import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { AppButton } from '../../components/AppButton';
 import { LoadingView } from '../../components/LoadingView';
 import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
+import { buildTripInviteLink } from '../../constants/auth';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'FamilyDetail'>;
 
@@ -118,11 +119,12 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
       greeting,
       '',
       `I added your family to ${tripName} in Travel Crew.`,
-      inviteCode ? `Use invite code: ${inviteCode}` : '',
+      inviteCode ? `Tap to join: ${buildTripInviteLink(inviteCode)}` : '',
+      inviteCode ? `Or enter invite code: ${inviteCode}` : '',
       '',
       `Family: ${family?.name ?? 'Family'}`,
       '',
-      'After you sign in or create an account, join the trip with the invite code and the organizer can place you in the family.',
+      'After you sign in or create an account, join the trip with the invite link/code and the organizer can place you in the family.',
     ].filter(Boolean).join('\n');
 
     return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;

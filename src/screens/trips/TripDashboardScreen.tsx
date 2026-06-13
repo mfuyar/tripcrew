@@ -19,7 +19,7 @@ import { tripService } from '../../services/tripService';
 import { pollService } from '../../services/pollService';
 import { Poll } from '../../types';
 import { demoExpenses, demoAnnouncements } from '../../lib/mockData';
-import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../constants/theme';
+import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow, DEFAULT_TRIP_EMOJI } from '../../constants/theme';
 import { LoadingView } from '../../components/LoadingView';
 import { TripClosedBanner } from '../../components/TripClosedBanner';
 import { isMappableDestination, openAppleMapsDirections, openGoogleMapsDirections } from '../../utils/maps';
@@ -131,7 +131,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
     >
       {/* Trip Header Card */}
       <View style={styles.heroCard}>
-        <Text style={styles.heroEmoji}>🏖️</Text>
+        <Text style={styles.heroEmoji}>{trip?.cover_emoji || DEFAULT_TRIP_EMOJI}</Text>
         <Text style={styles.heroTitle}>{trip?.name ?? 'Trip'}</Text>
         <View style={styles.heroDates}>
           <Text style={styles.heroDateText}>
