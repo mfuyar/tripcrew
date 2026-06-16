@@ -3,24 +3,12 @@ import { Message, Notification, ServiceResult } from '../types';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { notificationService } from './notificationService';
 import { mediaService } from './mediaService';
-import { sendBroadcast } from '../lib/realtimeBroadcast';
-
-// Keyed by tripId — reused for both receiving and sending so we never
-// remove the subscriber's channel by accident.
-const activeChannels = new Map<string, RealtimeChannel>();
-const NOTIFY_CHANNEL = (userId: string) => `user-notifications:${userId}`;
 
 // Set by TripChatScreen on mount/unmount so background audio player
 // knows whether the chat screen is already handling push-talk playback.
 let _activeChatTripId: string | null = null;
 export function setActiveChatTrip(id: string | null) { _activeChatTripId = id; }
 export function getActiveChatTrip() { return _activeChatTripId; }
-
-function broadcastNotification(notification: Notification): void {
-  const channel = supabase.channel(NOTIFY_CHANNEL(notification.user_id));
-  void sendBroadcast(channel, 'notification', notification)
-    .finally(() => supabase.removeChannel(channel));
-}
 
 function isMissingPushTalkRpc(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
@@ -85,8 +73,6 @@ export const chatService = {
       .select('*, profile:profiles(*), family:families(*)')
       .single();
     if (error) return { data: null, error: error.message };
-    // Broadcast to all subscribers on this trip's chat channel
-    chatService.broadcastMessage(tripId, data as Message);
 
     if (isPushTalk) {
       // Push talk: always notify family members. Their Live Audio setting only
@@ -126,7 +112,6 @@ export const chatService = {
       .single();
 
     if (error) return { data: null, error: error.message };
-    chatService.broadcastMessage((data as Message).trip_id, data as Message);
     return { data: data as Message, error: null };
   },
 
@@ -135,16 +120,9 @@ export const chatService = {
     onMessage: (message: Message) => void,
     onTyping?: (userId: string, name: string) => void
   ): RealtimeChannel {
+    void onTyping;
     const channel = supabase
-      .channel(`chat:${tripId}`)
-      .on('broadcast', { event: 'new_message' }, ({ payload }) => {
-        onMessage(payload as Message);
-      })
-      .on('broadcast', { event: 'typing' }, ({ payload }) => {
-        if (onTyping && payload?.userId && payload?.name) {
-          onTyping(payload.userId as string, payload.name as string);
-        }
-      })
+      .channel(`chat-db:${tripId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages', filter: `trip_id=eq.${tripId}` },
@@ -156,7 +134,6 @@ export const chatService = {
         }
       )
       .subscribe();
-    activeChannels.set(tripId, channel);
     return channel;
   },
 
@@ -188,13 +165,6 @@ export const chatService = {
     if (error) return { data: null, error: error.message };
 
     let rows = (recipients ?? []) as (Partial<Notification> & { user_id: string; auto_play?: boolean | null })[];
-    if (usedRpc) {
-      rows.forEach((row) => {
-        if (row.id && row.title && row.body && row.type && row.is_read !== undefined && row.created_at) {
-          broadcastNotification(row as Notification);
-        }
-      });
-    }
     const missingAutoPlayPrefs = rows.some((r) => r.auto_play === undefined || r.auto_play === null);
     if (missingAutoPlayPrefs && rows.length > 0) {
       const { data: prefs } = await supabase
@@ -218,13 +188,13 @@ export const chatService = {
     const [autoPlayPush, silentPush] = await Promise.all([
       autoPlayIds.length > 0
         ? usedRpc
-          ? notificationService.sendPushToUsers(autoPlayIds, '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: true })
-          : notificationService.notifyUsers(autoPlayIds, tripId, 'push_talk', '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: true })
+          ? notificationService.sendPushToUsers(autoPlayIds, '🎙️ Push to Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: true })
+          : notificationService.notifyUsers(autoPlayIds, tripId, 'push_talk', '🎙️ Push to Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: true })
         : { error: null },
       silentIds.length > 0
         ? usedRpc
-          ? notificationService.sendPushToUsers(silentIds, '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: false })
-          : notificationService.notifyUsers(silentIds, tripId, 'push_talk', '🎙️ Push Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: false })
+          ? notificationService.sendPushToUsers(silentIds, '🎙️ Push to Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: false })
+          : notificationService.notifyUsers(silentIds, tripId, 'push_talk', '🎙️ Push to Talk', 'A voice message was sent to your family', { ...basePayload, auto_play: false })
         : { error: null },
     ]);
 
@@ -232,10 +202,8 @@ export const chatService = {
   },
 
   broadcastMessage(tripId: string, message: Message): void {
-    const channel = activeChannels.get(tripId);
-    if (channel) {
-      void channel.send({ type: 'broadcast', event: 'new_message', payload: message });
-    }
+    void tripId;
+    void message;
   },
 
   async holdMessage(messageId: string): Promise<ServiceResult<null>> {
@@ -255,16 +223,12 @@ export const chatService = {
   },
 
   broadcastTyping(tripId: string, userId: string, name: string): void {
-    const channel = activeChannels.get(tripId);
-    if (channel) {
-      void channel.send({ type: 'broadcast', event: 'typing', payload: { userId, name } });
-    }
+    void tripId;
+    void userId;
+    void name;
   },
 
   unsubscribe(channel: RealtimeChannel): void {
-    for (const [tripId, ch] of activeChannels.entries()) {
-      if (ch === channel) { activeChannels.delete(tripId); break; }
-    }
     supabase.removeChannel(channel);
   },
 };

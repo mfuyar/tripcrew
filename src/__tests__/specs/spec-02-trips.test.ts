@@ -14,6 +14,7 @@ const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
 const mockRpc = jest.fn();
+const mockFunctionsInvoke = jest.fn();
 
 const mockFrom = jest.fn((table: string) => ({
   select: mockSelect.mockReturnThis(),
@@ -39,13 +40,17 @@ jest.mock('../../lib/supabaseClient', () => ({
   supabase: {
     from: mockFrom,
     rpc: mockRpc,
+    functions: { invoke: mockFunctionsInvoke },
     auth: { getSession: mockGetSession, getUser: mockGetUser },
   },
 }));
 
 import { tripService } from '../../services/tripService';
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockFunctionsInvoke.mockResolvedValue({ data: { sent: 1 }, error: null });
+});
 
 const userId = 'user-1';
 const tripId = 'trip-1';
@@ -79,9 +84,13 @@ describe('SPEC §2.1 — Create Trip', () => {
     mockSingle.mockResolvedValueOnce({ data: created, error: null });
 
     const { data } = await tripService.createTrip(userId, tripInput);
+    const tripInsert = (mockInsert as jest.Mock).mock.calls.find(
+      ([payload]) => payload && payload.invite_code
+    )?.[0];
 
     expect(data?.invite_code).toBeDefined();
-    expect(data?.invite_code).toHaveLength(8);
+    expect(tripInsert.invite_code).toMatch(/^[A-Z]+[0-9]{2}$/);
+    expect(tripInsert.invite_code.length).toBeGreaterThan(8);
   });
 
   it('automatically adds creator to trip_members after creation', async () => {
@@ -132,6 +141,16 @@ describe('SPEC §2.2 — Join Trip', () => {
 
     expect(error).toBeNull();
     expect(data?.status).toBe('pending');
+    expect(mockFunctionsInvoke).toHaveBeenCalledWith('send-push', {
+      body: expect.objectContaining({
+        requestId: 'req-1',
+        data: expect.objectContaining({
+          type: 'join_request',
+          trip_id: tripId,
+          request_id: 'req-1',
+        }),
+      }),
+    });
   });
 
   it('does not insert a trip member before organizer approval', async () => {
@@ -186,6 +205,17 @@ describe('SPEC §2.2 — Join Trip', () => {
       p_reviewer_id: userId,
       p_status: 'approved',
     }));
+    expect(mockFunctionsInvoke).toHaveBeenCalledWith('send-push', {
+      body: expect.objectContaining({
+        requestId: 'req-1',
+        data: expect.objectContaining({
+          type: 'join_request_review',
+          trip_id: tripId,
+          request_id: 'req-1',
+          status: 'approved',
+        }),
+      }),
+    });
   });
 });
 

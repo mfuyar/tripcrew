@@ -56,11 +56,6 @@ jest.mock('../../services/mediaService', () => ({
   },
 }));
 
-const mockSendBroadcast = jest.fn().mockResolvedValue(undefined);
-jest.mock('../../lib/realtimeBroadcast', () => ({
-  sendBroadcast: mockSendBroadcast,
-}));
-
 // notificationService uses the same supabase mock — make member query return empty
 // so notifyTripMembers is a no-op in these tests
 beforeAll(() => {
@@ -253,7 +248,7 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
         user_id: 'user-2',
         trip_id: tripId,
         type: 'push_talk',
-        title: '🎙️ Push Talk',
+        title: '🎙️ Push to Talk',
         body: 'A voice message was sent to your family',
         data: { trip_id: tripId, auto_play: true },
         is_read: false,
@@ -265,7 +260,7 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
         user_id: 'user-3',
         trip_id: tripId,
         type: 'push_talk',
-        title: '🎙️ Push Talk',
+        title: '🎙️ Push to Talk',
         body: 'A voice message was sent to your family',
         data: { trip_id: tripId, auto_play: false },
         is_read: false,
@@ -290,7 +285,7 @@ describe('SPEC §8 — sendMessage (push talk)', () => {
       p_family_id: familyId,
       p_media_url: 'https://cdn.example.com/push.m4a',
     });
-    expect(mockSendBroadcast).toHaveBeenCalledTimes(2);
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('sends push talk notifications even without a family id', async () => {
@@ -320,7 +315,6 @@ describe('SPEC §8 — editMessage', () => {
   it('updates the sender text message content and marks it edited', async () => {
     const edited = makeMessage({ id: 'msg-1', content: 'Updated plan', edited_at: new Date().toISOString() });
     mockSingle.mockResolvedValueOnce({ data: edited, error: null });
-    chatService.subscribeToMessages(tripId, jest.fn());
 
     const { data, error } = await chatService.editMessage('msg-1', userId, '  Updated plan  ');
 
@@ -334,10 +328,7 @@ describe('SPEC §8 — editMessage', () => {
     expect(mockEq).toHaveBeenCalledWith('id', 'msg-1');
     expect(mockEq).toHaveBeenCalledWith('user_id', userId);
     expect(mockEq).toHaveBeenCalledWith('message_type', 'text');
-    expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({
-      event: 'new_message',
-      payload: edited,
-    }));
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('rejects empty edits before touching the database', async () => {
@@ -355,7 +346,7 @@ describe('SPEC §8 — Realtime subscription', () => {
   it('creates a Realtime channel for the trip', () => {
     const { supabase } = require('../../lib/supabaseClient');
     chatService.subscribeToMessages(tripId, jest.fn());
-    expect(supabase.channel).toHaveBeenCalledWith(`chat:${tripId}`);
+    expect(supabase.channel).toHaveBeenCalledWith(`chat-db:${tripId}`);
   });
 
   it('unsubscribe removes the channel', () => {
@@ -364,15 +355,16 @@ describe('SPEC §8 — Realtime subscription', () => {
     expect(supabase.removeChannel).toHaveBeenCalledWith(mockChannel);
   });
 
-  it('passes broadcast payloads to the message handler', () => {
+  it('loads changed messages from the RLS-protected table feed', async () => {
     const onMessage = jest.fn();
-    const payload = makeMessage({ id: 'broadcast-msg', content: 'Live update' });
+    const payload = makeMessage({ id: 'db-msg', content: 'Live update' });
+    mockSingle.mockResolvedValueOnce({ data: payload, error: null });
 
     chatService.subscribeToMessages(tripId, onMessage);
 
     const onCalls = (mockChannel.on as jest.Mock).mock.calls;
-    const broadcastHandler = onCalls.find(([eventType]) => eventType === 'broadcast')?.[2];
-    broadcastHandler({ payload });
+    const dbHandler = onCalls.find(([eventType]) => eventType === 'postgres_changes')?.[2];
+    await dbHandler({ new: { id: payload.id } });
 
     expect(onMessage).toHaveBeenCalledWith(payload);
   });

@@ -21,6 +21,10 @@ type ReceiptScanRow = {
   image_url: string;
 };
 
+type AuthUserResponse = {
+  id?: string;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -191,6 +195,44 @@ function storagePathFromPublicUrl(imageUrl: string) {
   return decodeURIComponent(imageUrl.slice(index + marker.length).split('?')[0]);
 }
 
+async function getAuthedUserId(supabaseUrl: string, anonKey: string, authHeader: string) {
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      Authorization: authHeader,
+      apikey: anonKey,
+    },
+  });
+
+  if (!response.ok) return null;
+  const user = await response.json().catch(() => null) as AuthUserResponse | null;
+  return user?.id ?? null;
+}
+
+async function isTripMember(
+  supabaseUrl: string,
+  anonKey: string,
+  authHeader: string,
+  tripId: string,
+  userId: string,
+) {
+  const params = new URLSearchParams({
+    trip_id: `eq.${tripId}`,
+    user_id: `eq.${userId}`,
+    select: 'id',
+    limit: '1',
+  });
+  const response = await fetch(`${supabaseUrl}/rest/v1/trip_members?${params.toString()}`, {
+    headers: {
+      Authorization: authHeader,
+      apikey: anonKey,
+    },
+  });
+
+  if (!response.ok) return false;
+  const rows = await response.json().catch(() => []) as unknown[];
+  return rows.length > 0;
+}
+
 async function deleteRejectedReceipt(
   supabaseUrl: string,
   serviceRoleKey: string,
@@ -238,6 +280,8 @@ Deno.serve(async (req) => {
     if (!authHeader) return jsonResponse({ error: 'Missing authorization header' }, 401);
 
     const body = await req.json();
+    const authedUserId = await getAuthedUserId(supabaseUrl, supabaseAnonKey, authHeader);
+    if (!authedUserId) return jsonResponse({ error: 'Unauthorized' }, 401);
 
     let receiptId: string;
     let base64Image: string;
@@ -248,6 +292,21 @@ Deno.serve(async (req) => {
       const { tripId, userId, imageBase64, mimeType } = body;
       if (!tripId || !userId || !imageBase64) {
         return jsonResponse({ error: 'tripId, userId and imageBase64 are required' }, 400);
+      }
+      // Validate MIME type
+      const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      if (mimeType && !allowedMimes.includes(mimeType)) {
+        return jsonResponse({ error: 'Invalid image format. Use JPEG, PNG, WebP, or GIF.' }, 400);
+      }
+      // Enforce 8 MB base64 limit (~6 MB decoded)
+      if (typeof imageBase64 === 'string' && imageBase64.length > 11_000_000) {
+        return jsonResponse({ error: 'Image too large. Maximum size is 6 MB.' }, 413);
+      }
+      if (userId !== authedUserId) {
+        return jsonResponse({ error: 'Cannot scan a receipt for another user' }, 403);
+      }
+      if (!(await isTripMember(supabaseUrl, supabaseAnonKey, authHeader, tripId, authedUserId))) {
+        return jsonResponse({ error: 'Not a trip member' }, 403);
       }
       base64Image = imageBase64;
       contentType = mimeType ?? 'image/jpeg';

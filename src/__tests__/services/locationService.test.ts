@@ -2,9 +2,9 @@
  * SPEC §13 — Live Location
  *
  * - requestPermission / checkPermission delegate to expo-location
- * - startSharing subscribes channel and watches position
- * - stop function removes watcher and notifies peers
- * - subscribeToLocations wires up broadcast handlers
+ * - startSharing watches position and writes to live_locations
+ * - stop function removes watcher and clears persisted location
+ * - subscribeToLocations wires up RLS-protected database handlers
  */
 
 import * as Location from 'expo-location';
@@ -109,6 +109,8 @@ const tripId = 'trip-1';
 const userId = 'user-1';
 const familyId = 'fam-1';
 
+const flushAsyncWork = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 // ─── §13 Permission ───────────────────────────────────────────────────────────
 
 describe('SPEC §13 — requestPermission', () => {
@@ -147,10 +149,10 @@ describe('SPEC §13 — checkPermission', () => {
 // ─── §13 startSharing ─────────────────────────────────────────────────────────
 
 describe('SPEC §13 — startSharing', () => {
-  it('creates a Realtime channel for the trip', async () => {
+  it('does not create a public broadcast channel for the trip', async () => {
     await locationService.startSharing(tripId, userId, familyId, 'Alex', 'Uyar Family');
 
-    expect(mockSupabaseChannel).toHaveBeenCalledWith(`live-location:${tripId}`);
+    expect(mockSupabaseChannel).not.toHaveBeenCalled();
   });
 
   it('calls watchPositionAsync with Balanced accuracy', async () => {
@@ -178,23 +180,17 @@ describe('SPEC §13 — startSharing', () => {
     expect(mockRemove).toHaveBeenCalled();
   });
 
-  it('stop function broadcasts a location-stop event to notify peers', async () => {
+  it('stop function deletes the persisted live location', async () => {
     const stop = await locationService.startSharing(tripId, userId, familyId, 'Alex', 'Uyar Family');
     stop();
 
-    expect(mockSend).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'location-stop', payload: { userId } })
-    );
+    await flushAsyncWork();
+    expect(mockDelete).toHaveBeenCalled();
+    expect(mockDeleteEq).toHaveBeenCalledWith('trip_id', tripId);
+    expect(mockDeleteEq).toHaveBeenCalledWith('user_id', userId);
   });
 
-  it('stop function removes the Supabase channel', async () => {
-    const stop = await locationService.startSharing(tripId, userId, familyId, 'Alex', 'Uyar Family');
-    stop();
-
-    expect(mockRemoveChannel).toHaveBeenCalledWith(mockChannel);
-  });
-
-  it('position callback broadcasts location-update with correct shape', async () => {
+  it('position callback persists location with correct shape', async () => {
     let positionCallback: ((pos: any) => void) | null = null;
     (Location.watchPositionAsync as jest.Mock).mockImplementationOnce(
       (_opts: any, cb: (pos: any) => void) => {
@@ -204,23 +200,23 @@ describe('SPEC §13 — startSharing', () => {
     );
 
     await locationService.startSharing(tripId, userId, familyId, 'Alex', 'Uyar Family');
+    mockUpsert.mockClear();
 
     positionCallback!({
       coords: { latitude: 40.7128, longitude: -74.006, accuracy: 8, heading: 90 },
       timestamp: Date.now(),
     });
 
-    expect(mockSend).toHaveBeenCalledWith(
+    await flushAsyncWork();
+    expect(mockUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: 'location-update',
-        payload: expect.objectContaining({
-          userId,
-          familyId,
-          latitude: 40.7128,
-          longitude: -74.006,
-          isLive: true,
-        }),
-      })
+        trip_id: tripId,
+        user_id: userId,
+        family_id: familyId,
+        latitude: 40.7128,
+        longitude: -74.006,
+      }),
+      { onConflict: 'trip_id,user_id' }
     );
   });
 
@@ -357,33 +353,39 @@ describe('SPEC §13 — subscribeToLocations', () => {
   it('creates a Realtime channel for the trip', () => {
     locationService.subscribeToLocations(tripId, jest.fn());
 
-    expect(mockSupabaseChannel).toHaveBeenCalledWith(`live-location:${tripId}`);
+    expect(mockSupabaseChannel).toHaveBeenCalledWith(`live-location-db:${tripId}`);
   });
 
-  it('subscribes to location-update and location-stop broadcast events', () => {
+  it('subscribes to RLS-protected live location table changes', () => {
     locationService.subscribeToLocations(tripId, jest.fn());
 
     const onCalls = (mockOn as jest.Mock).mock.calls;
-    const events = onCalls.map(([, { event }]) => event);
-    expect(events).toContain('location-update');
-    expect(events).toContain('location-stop');
+    expect(onCalls).toContainEqual([
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'live_locations', filter: `trip_id=eq.${tripId}` },
+      expect.any(Function),
+    ]);
   });
 
-  it('location-update handler adds entry to the map and calls onChange', () => {
+  it('database change handler adds entry to the map and calls onChange', () => {
     const onChange = jest.fn();
     let updateHandler: ((data: any) => void) | null = null;
 
-    mockOn.mockImplementation((_type: string, { event }: { event: string }, handler: (d: any) => void) => {
-      if (event === 'location-update') updateHandler = handler;
+    mockOn.mockImplementation((type: string, _filter: unknown, handler: (d: any) => void) => {
+      if (type === 'postgres_changes') updateHandler = handler;
       return mockChannel;
     });
 
     locationService.subscribeToLocations(tripId, onChange);
 
     updateHandler!({
-      payload: {
-        userId: 'user-2', familyId: 'fam-2', latitude: 48.8566, longitude: 2.3522,
-        timestamp: new Date().toISOString(), isLive: true,
+      eventType: 'INSERT',
+      new: {
+        user_id: 'user-2',
+        family_id: 'fam-2',
+        latitude: 48.8566,
+        longitude: 2.3522,
+        updated_at: new Date().toISOString(),
       },
     });
 
@@ -393,14 +395,12 @@ describe('SPEC §13 — subscribeToLocations', () => {
     expect(map.get('user-2')?.isLive).toBe(true);
   });
 
-  it('location-stop handler marks user as not live', () => {
+  it('database delete handler removes entry from the map', () => {
     const onChange = jest.fn();
     let updateHandler: ((data: any) => void) | null = null;
-    let stopHandler: ((data: any) => void) | null = null;
 
-    mockOn.mockImplementation((_type: string, { event }: { event: string }, handler: (d: any) => void) => {
-      if (event === 'location-update') updateHandler = handler;
-      if (event === 'location-stop') stopHandler = handler;
+    mockOn.mockImplementation((type: string, _filter: unknown, handler: (d: any) => void) => {
+      if (type === 'postgres_changes') updateHandler = handler;
       return mockChannel;
     });
 
@@ -408,14 +408,14 @@ describe('SPEC §13 — subscribeToLocations', () => {
 
     // First, add a live location
     updateHandler!({
-      payload: { userId: 'user-2', latitude: 48.8, longitude: 2.3, timestamp: new Date().toISOString(), isLive: true },
+      eventType: 'INSERT',
+      new: { user_id: 'user-2', latitude: 48.8, longitude: 2.3, updated_at: new Date().toISOString() },
     });
 
-    // Then stop it
-    stopHandler!({ payload: { userId: 'user-2' } });
+    updateHandler!({ eventType: 'DELETE', old: { user_id: 'user-2' } });
 
     const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as Map<string, any>;
-    expect(lastCall.get('user-2')?.isLive).toBe(false);
+    expect(lastCall.has('user-2')).toBe(false);
   });
 
   it('returns an unsubscribe function that removes the channel', () => {

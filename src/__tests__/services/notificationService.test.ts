@@ -11,23 +11,14 @@ const mockFrom = jest.fn((table: string) => {
     insert: mockNotificationInsert,
   };
 });
-const mockChannel = jest.fn((name: string) => ({ name }));
-const mockRemoveChannel = jest.fn();
 const mockFunctionsInvoke = jest.fn();
 
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: {
-    from: mockFrom,
-    channel: mockChannel,
-    removeChannel: mockRemoveChannel,
-    functions: { invoke: mockFunctionsInvoke },
-  },
-}));
-
-const mockSendBroadcast = jest.fn().mockResolvedValue(undefined);
-jest.mock('../../lib/realtimeBroadcast', () => ({
-  sendBroadcast: mockSendBroadcast,
-}));
+	  supabase: {
+	    from: mockFrom,
+	    functions: { invoke: mockFunctionsInvoke },
+	  },
+	}));
 
 import { notificationService } from '../../services/notificationService';
 
@@ -39,7 +30,7 @@ beforeEach(() => {
 });
 
 describe('notificationService.notifyUsers', () => {
-  it('creates and broadcasts notifications only for the provided users', async () => {
+  it('creates notifications only for the provided users and sends trip-scoped push', async () => {
     const inserted = [
       { id: 'n-1', user_id: 'user-2', title: 'Push talk ping', body: 'Ping', type: 'push_talk', is_read: false },
       { id: 'n-2', user_id: 'user-3', title: 'Push talk ping', body: 'Ping', type: 'push_talk', is_read: false },
@@ -62,15 +53,12 @@ describe('notificationService.notifyUsers', () => {
       expect.objectContaining({ user_id: 'user-2', trip_id: 'trip-1', type: 'push_talk' }),
       expect.objectContaining({ user_id: 'user-3', trip_id: 'trip-1', type: 'push_talk' }),
     ]);
-    expect(mockChannel).toHaveBeenCalledWith('user-notifications:user-2');
-    expect(mockChannel).toHaveBeenCalledWith('user-notifications:user-3');
-    expect(mockSendBroadcast).toHaveBeenCalledTimes(2);
     expect(mockFunctionsInvoke).toHaveBeenCalledWith('send-push', {
       body: {
         userIds: ['user-2', 'user-3'],
         title: 'Push talk ping',
         body: 'Ping',
-        data: { family_id: 'family-1', family_only: true, type: 'push_talk' },
+        data: { family_id: 'family-1', family_only: true, trip_id: 'trip-1', type: 'push_talk' },
       },
     });
   });
@@ -88,6 +76,6 @@ describe('notificationService.notifyUsers', () => {
 
     expect(data).toBeNull();
     expect(error).toBe('permission denied');
-    expect(mockSendBroadcast).not.toHaveBeenCalled();
+    expect(mockFunctionsInvoke).not.toHaveBeenCalled();
   });
 });

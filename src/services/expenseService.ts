@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 import { Expense, ExpensePersonSplit, ExpenseSplit, ExpenseVersion, FamilySplitShare, PersonSplitShare, ServiceResult } from '../types';
+import { notificationService } from './notificationService';
 
 function isMissingReplaceSplitsFunction(error: { message?: string; code?: string } | null): boolean {
   if (!error) return false;
@@ -17,6 +18,41 @@ function isMissingReplacePersonSplitsFunction(error: { message?: string; code?: 
     error.message?.includes('replace_expense_person_splits') === true ||
     error.message?.includes('schema cache') === true
   );
+}
+
+function formatExpenseAmount(expense: Pick<Expense, 'amount' | 'currency'>): string {
+  const currency = expense.currency || 'USD';
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(expense.amount);
+  } catch {
+    return `${currency} ${expense.amount.toFixed(2)}`;
+  }
+}
+
+async function getExpenseNotificationRecipients(expense: Expense, actorUserId: string): Promise<string[]> {
+  const ids = new Set<string>();
+
+  if (expense.paid_by_family_id) {
+    const { data: members } = await supabase
+      .from('trip_members')
+      .select('user_id')
+      .eq('trip_id', expense.trip_id);
+    (members ?? []).forEach((row: { user_id: string }) => ids.add(row.user_id));
+  } else {
+    if (expense.paid_by_user_id) ids.add(expense.paid_by_user_id);
+    const splitIds = expense.expense_person_splits?.map((split) => split.user_id).filter(Boolean) ?? [];
+    splitIds.forEach((id) => ids.add(id));
+
+    const { data: organizers } = await supabase
+      .from('trip_members')
+      .select('user_id')
+      .eq('trip_id', expense.trip_id)
+      .in('role', ['trip_organizer', 'trip_admin']);
+    (organizers ?? []).forEach((row: { user_id: string }) => ids.add(row.user_id));
+  }
+
+  ids.delete(actorUserId);
+  return [...ids];
 }
 
 export const expenseService = {
@@ -54,6 +90,38 @@ export const expenseService = {
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as Expense, error: null };
+  },
+
+  async notifyExpenseChange(
+    expenseId: string,
+    actorUserId: string,
+    event: 'created' | 'updated' | 'deleted'
+  ): Promise<ServiceResult<number>> {
+    const { data: expense, error } = await expenseService.getExpenseById(expenseId);
+    if (error || !expense) return { data: null, error: error ?? 'Expense not found' };
+
+    const userIds = await getExpenseNotificationRecipients(expense, actorUserId);
+    if (userIds.length === 0) return { data: 0, error: null };
+
+    const verb = event === 'created' ? 'added' : event;
+    const title = event === 'created'
+      ? '💸 New Expense'
+      : event === 'updated'
+        ? '💸 Expense Updated'
+        : '💸 Expense Deleted';
+    const body = `${expense.title} ${verb}: ${formatExpenseAmount(expense)}`;
+
+    return notificationService.notifyUsers(userIds, expense.trip_id, 'expense_added', title, body, {
+      type: 'expense_added',
+      event: `expense_${event}`,
+      trip_id: expense.trip_id,
+      expense_id: expense.id,
+      paid_by_family_id: expense.paid_by_family_id,
+      paid_by_user_id: expense.paid_by_user_id,
+    }).then((result) => ({
+      data: result.data?.length ?? 0,
+      error: result.error,
+    }));
   },
 
   async updateExpense(

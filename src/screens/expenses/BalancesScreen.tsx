@@ -67,7 +67,8 @@ export function BalancesScreen({ navigation, route }: Props) {
   const totalExpenses = balances.reduce((s, b) => s + b.totalPaid, 0);
   const currency = currencySymbol(currentTrip?.currency);
   const visiblePersonBalances = personBalances.filter((b) =>
-    isTripOrganizer || isGlobalAdmin || b.userId === user?.id
+    (b.totalPaid > 0 || b.totalOwed > 0 || Math.abs(b.balance) > 0.01) &&
+    (isTripOrganizer || isGlobalAdmin || b.userId === user?.id)
   );
 
   return (

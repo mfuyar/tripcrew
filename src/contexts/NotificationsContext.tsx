@@ -4,39 +4,29 @@ import * as Location from 'expo-location';
 import { AppState, Platform } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Notification, ServiceResult } from '../types';
-import { notificationService } from '../services/notificationService';
+import { notificationService, PushRegistration } from '../services/notificationService';
 import { getActiveChatTrip } from '../services/chatService';
 import { useAuth } from './AuthContext';
 import { NOTIFICATION_SOUND } from '../constants/notifications';
 
 const LOCAL_NOTIFICATION_SOURCE = 'tripcrew-local-realtime';
 
-function isMessageScreenNotification(type?: unknown): boolean {
-  return (
-    (type === 'message' || type === 'push_talk') &&
-    getActiveChatTrip() !== null
-  );
-}
-
 Notifications.setNotificationHandler({
-  handleNotification: async (notification) => {
-    const type = notification.request.content.data?.type;
-    const suppressMessageBanner = isMessageScreenNotification(type);
-    return {
-      shouldShowBanner: !suppressMessageBanner,
-      shouldShowList: !suppressMessageBanner,
-      shouldPlaySound: !suppressMessageBanner,
-      shouldSetBadge: true,
-    };
-  },
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
 });
 
 interface NotificationsContextValue {
   unreadCount: number;
   refreshUnread: () => Promise<void>;
-  enablePushNotifications: () => Promise<ServiceResult<string>>;
+  enablePushNotifications: () => Promise<ServiceResult<PushRegistration>>;
   pushTokenError: string | null;
   notificationsEnabled: boolean;
+  pushTokenRegistered: boolean;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue>({
@@ -45,6 +35,7 @@ const NotificationsContext = createContext<NotificationsContextValue>({
   enablePushNotifications: async () => ({ data: null, error: 'Notifications are not ready yet.' }),
   pushTokenError: null,
   notificationsEnabled: false,
+  pushTokenRegistered: false,
 });
 
 function BackgroundPushTalkPlayer({ url, onDone }: { url: string; onDone: () => void }) {
@@ -90,7 +81,7 @@ function BackgroundPushTalkPlayer({ url, onDone }: { url: string; onDone: () => 
           interruptionMode: 'doNotMix',
         });
         if (!canceled) {
-          player.setActiveForLockScreen(true, { title: 'Push Talk', artist: 'TripCrew' });
+          player.setActiveForLockScreen(true, { title: 'Push to Talk', artist: 'TripCrew' });
           tryPlay();
         }
       } catch {
@@ -129,6 +120,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [pushTokenError, setPushTokenError] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [pushTokenRegistered, setPushTokenRegistered] = useState(false);
   const [bgPushTalkUrl, setBgPushTalkUrl] = useState<string | null>(null);
 
   // Check current permission status on mount and after enabling
@@ -143,19 +135,30 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     setUnreadCount(data ?? 0);
   }, [user, isDemoMode]);
 
-  const enablePushNotifications = useCallback(async (): Promise<ServiceResult<string>> => {
+  const enablePushNotifications = useCallback(async (): Promise<ServiceResult<PushRegistration>> => {
     if (!user || isDemoMode) {
       const result = { data: null, error: 'Sign in to enable notifications.' };
       setPushTokenError(result.error);
+      setPushTokenRegistered(false);
       return result;
     }
 
-    const result = await notificationService.registerForPushNotifications(user.id);
-    // Don't surface the "add EAS projectId" dev-config note as a user error
-    const isDevConfigNote = result.error?.includes('EAS projectId');
-    setPushTokenError(isDevConfigNote ? null : result.error);
-    await checkPermission();
-    return result;
+    try {
+      const result = await notificationService.registerForPushNotifications(user.id);
+      setPushTokenRegistered(Boolean(result.data));
+      setPushTokenError(result.error);
+      await checkPermission();
+      return result;
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'This device could not be registered for push notifications.';
+      const result = { data: null, error: message };
+      setPushTokenRegistered(false);
+      setPushTokenError(message);
+      await checkPermission();
+      return result;
+    }
   }, [user, isDemoMode, checkPermission]);
 
   const showLocalNotification = useCallback(async (notification: Notification) => {
@@ -197,6 +200,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     checkPermission();
   }, [checkPermission]);
 
+  useEffect(() => {
+    if (!user || isDemoMode) {
+      setPushTokenRegistered(false);
+      setPushTokenError(null);
+    }
+  }, [user?.id, isDemoMode]);
+
   // Realtime delivery only works while JS is running. After the app comes
   // back from the background or a locked screen — where pushes for missed
   // events were delivered by the OS but never reached our realtime
@@ -227,9 +237,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       setUnreadCount((c) => c + 1);
       // Background push-talk: auto-play only for recipients who opted in to Live Audio
       const notifData = n.data as Record<string, any> | null;
-      if (!isMessageScreenNotification(n.type)) {
-        void showLocalNotification(n);
-      }
+      void showLocalNotification(n);
       if (
         n.type === 'push_talk' &&
         notifData?.auto_play === true &&
@@ -242,8 +250,6 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const receivedSub = Notifications.addNotificationReceivedListener((event) => {
       if (event.request.content.data?.source === LOCAL_NOTIFICATION_SOURCE) return;
       const data = event.request.content.data as Record<string, any>;
-      if (isMessageScreenNotification(data?.type)) return;
-      setUnreadCount((c) => c + 1);
       // Play push-talk audio from OS push notification when app is backgrounded —
       // only for recipients who opted in to Live Audio (embedded per-recipient by the sender).
       if (
@@ -262,7 +268,16 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   }, [user?.id, isDemoMode, enablePushNotifications, refreshUnread, showLocalNotification]);
 
   return (
-    <NotificationsContext.Provider value={{ unreadCount, refreshUnread, enablePushNotifications, pushTokenError, notificationsEnabled }}>
+    <NotificationsContext.Provider
+      value={{
+        unreadCount,
+        refreshUnread,
+        enablePushNotifications,
+        pushTokenError,
+        notificationsEnabled,
+        pushTokenRegistered,
+      }}
+    >
       {children}
       {bgPushTalkUrl && (
         <BackgroundPushTalkPlayer

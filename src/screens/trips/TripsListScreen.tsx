@@ -205,10 +205,14 @@ export function TripsListScreen() {
       setShowJoin(false);
       setInviteCode('');
       await loadTrips(); // refresh so pending request appears immediately
-      Alert.alert(
-        'Request sent',
-        'The trip organizer will review your request before you can see or join the trip.'
-      );
+      if (data.status === 'approved') {
+        Alert.alert('Trip joined', 'You already have access to this trip.');
+      } else {
+        Alert.alert(
+          'Request sent',
+          'The trip organizer will review your request before you can see or join the trip.'
+        );
+      }
     }
   }
 
@@ -362,13 +366,13 @@ export function TripsListScreen() {
         >
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Request Trip Access</Text>
-            <Text style={styles.modalSubtitle}>Enter the 8-character invite code. An organizer must approve you before the trip appears.</Text>
+            <Text style={styles.modalSubtitle}>Enter the invite code. An organizer must approve you before the trip appears.</Text>
             <TextInput
               style={styles.codeInput}
               value={inviteCode}
-              onChangeText={(t) => setInviteCode(t.toUpperCase())}
-              placeholder="e.g. ABC12345"
-              maxLength={8}
+              onChangeText={(t) => setInviteCode(t.replace(/\s/g, '').toUpperCase())}
+              placeholder="e.g. ROSEPARIS42"
+              maxLength={24}
               autoCapitalize="characters"
               autoFocus
               placeholderTextColor={Colors.textSecondary}
@@ -578,7 +582,7 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     textAlign: 'center',
     color: Colors.text,
-    letterSpacing: 8,
+    letterSpacing: 1,
     marginBottom: Spacing.lg,
   },
 });

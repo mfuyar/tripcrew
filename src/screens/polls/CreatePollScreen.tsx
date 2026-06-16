@@ -6,7 +6,10 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTripContext } from '../../contexts/TripContext';
 import { pollService } from '../../services/pollService';
+import { tripEmailService } from '../../services/tripEmailService';
+import { whatsappService } from '../../services/whatsappService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
@@ -28,10 +31,13 @@ const DURATIONS: { label: string; hours: number | null }[] = [
 export function CreatePollScreen({ navigation, route }: Props) {
   const { tripId } = route.params;
   const { user } = useAuth();
+  const { currentTrip } = useTripContext();
   const [question, setQuestion] = useState('');
   const [description, setDescription] = useState('');
   const [options, setOptions] = useState(['', '']);
   const [durationHours, setDurationHours] = useState<number | null>(24);
+  const [emailEveryone, setEmailEveryone] = useState(false);
+  const [whatsappEveryone, setWhatsappEveryone] = useState(false);
   const [loading, setLoading] = useState(false);
 
   function updateOption(idx: number, value: string) {
@@ -55,13 +61,30 @@ export function CreatePollScreen({ navigation, route }: Props) {
       : undefined;
 
     setLoading(true);
-    const { error } = await pollService.createPoll(
+    const { data: createdPoll, error } = await pollService.createPoll(
       tripId, user.id, question.trim(), validOptions, description.trim() || undefined,
       deadline,
     );
     setLoading(false);
     if (error) Alert.alert('Error', error);
-    else navigation.goBack();
+    else {
+      if (emailEveryone) {
+        const email = await tripEmailService.emailPoll(
+          tripId,
+          currentTrip,
+          question.trim(),
+          validOptions.map((option) => option.trim()),
+          description.trim() || undefined,
+          createdPoll?.id
+        );
+        if (email.error) Alert.alert('Email not sent', email.error);
+      }
+      if (whatsappEveryone && createdPoll?.id) {
+        const wa = await whatsappService.sendPollWhatsApp(tripId, createdPoll.id, question.trim());
+        if (wa.error) Alert.alert('WhatsApp not sent', wa.error);
+      }
+      navigation.goBack();
+    }
   }
 
   return (
@@ -104,6 +127,36 @@ export function CreatePollScreen({ navigation, route }: Props) {
           ))}
         </View>
 
+        <TouchableOpacity
+          style={styles.emailToggle}
+          onPress={() => setEmailEveryone((v) => !v)}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: emailEveryone }}
+        >
+          <View style={[styles.emailCheckbox, emailEveryone && styles.emailCheckboxActive]}>
+            {emailEveryone && <Text style={styles.emailCheckmark}>✓</Text>}
+          </View>
+          <View style={styles.emailToggleCopy}>
+            <Text style={styles.emailToggleTitle}>Email everyone</Text>
+            <Text style={styles.emailToggleText}>Sends automatically to trip members after creating.</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.emailToggle}
+          onPress={() => setWhatsappEveryone((v) => !v)}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: whatsappEveryone }}
+        >
+          <View style={[styles.emailCheckbox, whatsappEveryone && styles.emailCheckboxActive]}>
+            {whatsappEveryone && <Text style={styles.emailCheckmark}>✓</Text>}
+          </View>
+          <View style={styles.emailToggleCopy}>
+            <Text style={styles.emailToggleTitle}>WhatsApp everyone</Text>
+            <Text style={styles.emailToggleText}>Sends a WhatsApp message to members with a phone number.</Text>
+          </View>
+        </TouchableOpacity>
+
         <AppButton title="Create Poll" onPress={handleCreate} loading={loading} fullWidth style={styles.createBtn} />
     </FormKeyboardView>
   );
@@ -128,5 +181,37 @@ const styles = StyleSheet.create({
   durationChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
   durationText: { fontSize: FontSize.sm, color: Colors.textSecondary },
   durationTextActive: { color: Colors.primary, fontWeight: FontWeight.semiBold },
+  emailToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    backgroundColor: Colors.surface,
+  },
+  emailCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emailCheckboxActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  emailCheckmark: {
+    color: Colors.surface,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+  },
+  emailToggleCopy: { flex: 1 },
+  emailToggleTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
+  emailToggleText: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   createBtn: { marginTop: Spacing.sm },
 });

@@ -6,6 +6,7 @@ import * as Location from 'expo-location';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { authService } from '../../services/authService';
+import { notificationService } from '../../services/notificationService';
 import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
@@ -14,12 +15,18 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 
 export function ProfileScreen() {
   const { user, profile, signOut, refreshProfile, isDemoMode } = useAuth();
-  const { enablePushNotifications, pushTokenError, notificationsEnabled } = useNotifications();
+  const {
+    enablePushNotifications,
+    pushTokenError,
+    notificationsEnabled,
+    pushTokenRegistered,
+  } = useNotifications();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(profile?.full_name ?? '');
   const [phone, setPhone] = useState(profile?.phone ?? '');
   const [saving, setSaving] = useState(false);
   const [enablingNotifications, setEnablingNotifications] = useState(false);
+  const [testingNotifications, setTestingNotifications] = useState(false);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [enablingLocation, setEnablingLocation] = useState(false);
 
@@ -70,7 +77,7 @@ export function ProfileScreen() {
     setEnablingNotifications(false);
 
     if (data) {
-      Alert.alert('Notifications Enabled', 'You will receive push talk, message, and announcement alerts.');
+      Alert.alert('Notifications Enabled', 'You will receive Push to Talk, message, and announcement alerts.');
       return;
     }
 
@@ -83,6 +90,47 @@ export function ProfileScreen() {
     }
 
     Alert.alert('Notifications', error ?? 'Notifications could not be enabled.');
+  }
+
+  async function handleSendTestNotification() {
+    if (!user || isDemoMode) {
+      Alert.alert('Demo Mode', 'Notifications are disabled in demo.');
+      return;
+    }
+
+    setTestingNotifications(true);
+    const registration = await enablePushNotifications();
+    if (!registration.data) {
+      setTestingNotifications(false);
+      Alert.alert('Notification Test Failed', registration.error ?? 'This device could not be registered.');
+      return;
+    }
+
+    const { data, error } = await notificationService.sendPushToUsers(
+      [user.id],
+      'TripCrew notification test',
+      'This confirms remote push delivery is working for this device.',
+      { type: 'notification_test' }
+    );
+    setTestingNotifications(false);
+
+    if (error) {
+      Alert.alert('Notification Test Failed', error);
+      return;
+    }
+
+    if (!data) {
+      Alert.alert(
+        'No Active Device Token',
+        'The app registered permission, but Supabase still did not find an active token for this account.'
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Test Sent',
+      `Expo accepted the push request for ${data} active device${data === 1 ? '' : 's'}. Lock or background the app and try again if you do not see it.`
+    );
   }
 
   async function handleEnableLocation() {
@@ -149,18 +197,23 @@ export function ProfileScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Notifications</Text>
           <Text style={styles.appInfo}>
-            Receive push talk, message, and announcement alerts.
+            Receive Push to Talk, message, and announcement alerts.
           </Text>
-          {notificationsEnabled ? (
+          {notificationsEnabled && pushTokenRegistered ? (
             <View style={styles.notifEnabledRow}>
               <Text style={styles.notifEnabledIcon}>🔔</Text>
-              <Text style={styles.notifEnabledText}>Notifications are enabled</Text>
+              <Text style={styles.notifEnabledText}>This device is registered for notifications</Text>
             </View>
           ) : (
             <>
+              {notificationsEnabled && !pushTokenRegistered ? (
+                <Text style={styles.noticeText}>
+                  Notifications are allowed, but this device is not registered for push alerts yet.
+                </Text>
+              ) : null}
               {pushTokenError ? <Text style={styles.noticeText}>{pushTokenError}</Text> : null}
               <AppButton
-                title="Enable Notifications"
+                title={notificationsEnabled ? 'Register This Device' : 'Enable Notifications'}
                 onPress={handleEnableNotifications}
                 loading={enablingNotifications}
                 fullWidth
@@ -168,6 +221,15 @@ export function ProfileScreen() {
               />
             </>
           )}
+          <AppButton
+            title="Send Test Notification"
+            onPress={handleSendTestNotification}
+            loading={testingNotifications}
+            disabled={enablingNotifications}
+            variant="outline"
+            fullWidth
+            style={styles.notificationBtn}
+          />
         </View>
 
         {/* Location Services */}
@@ -192,13 +254,27 @@ export function ProfileScreen() {
           )}
         </View>
 
+        {/* WhatsApp Notifications */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>💬 WhatsApp Notifications</Text>
+          <Text style={styles.noticeText}>
+            Receive poll alerts and emergency messages via WhatsApp. Tap below to join — the message is pre-filled, just hit send.
+          </Text>
+          <AppButton
+            title="Open WhatsApp & Join"
+            onPress={() => Linking.openURL('https://wa.me/14155238886?text=join%20expression-quite')}
+            fullWidth
+            style={styles.notificationBtn}
+          />
+        </View>
+
         {/* App info */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>About Travel Crew</Text>
           <Text style={styles.appInfo}>
             Plan together. Pay fairly. Remember everything.
           </Text>
-          <Text style={styles.version}>Version 1.0.0 (MVP)</Text>
+          <Text style={styles.version}>Version 1.8.0</Text>
         </View>
 
         {/* Sign out */}

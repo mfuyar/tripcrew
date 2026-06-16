@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal,
+  TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, Poll } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { pollService } from '../../services/pollService';
+import { tripEmailService } from '../../services/tripEmailService';
+import { whatsappService } from '../../services/whatsappService';
 import { LoadingView } from '../../components/LoadingView';
 import { StatusBadge } from '../../components/StatusBadge';
 import { AppButton } from '../../components/AppButton';
@@ -17,10 +20,17 @@ type Props = NativeStackScreenProps<MainStackParamList, 'PollDetail'>;
 export function PollDetailScreen({ navigation, route }: Props) {
   const { tripId, pollId } = route.params;
   const { user, isDemoMode, isGlobalAdmin } = useAuth();
-  const { userFamily, isTripOrganizer } = useTripContext();
+  const { userFamily, isTripOrganizer, canManageTrip } = useTripContext();
   const [poll, setPoll] = useState<Poll | null>(null);
   const [loading, setLoading] = useState(true);
   const [voting, setVoting] = useState<string | null>(null);
+  const [sendingReminder, setSendingReminder] = useState(false);
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editQuestion, setEditQuestion] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editOptions, setEditOptions] = useState<{ id?: string; option_text: string }[]>([]);
 
   async function load() {
     if (isDemoMode) { setLoading(false); return; }
@@ -62,6 +72,57 @@ export function PollDetailScreen({ navigation, route }: Props) {
     return `${m}m left`;
   }
 
+  async function handleSendReminder() {
+    if (!poll) return;
+    Alert.alert(
+      'Send Reminder Email',
+      'This will email all trip members asking them to vote on this poll.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            setSendingReminder(true);
+            const { data: count, error } = await tripEmailService.emailPollReminder(
+              tripId,
+              poll.question,
+              (poll.options ?? []).map((o) => o.option_text),
+              poll.description ?? undefined,
+              poll.id
+            );
+            setSendingReminder(false);
+            if (error) {
+              Alert.alert('Failed to send', error);
+            } else {
+              Alert.alert('Reminder sent', `Emailed ${count} trip member${count === 1 ? '' : 's'}.`);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  async function handleWhatsAppReminder() {
+    if (!poll) return;
+    Alert.alert(
+      'WhatsApp Reminder',
+      'Send a WhatsApp reminder to all trip members who have a phone number?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            setSendingWhatsApp(true);
+            const { data, error } = await whatsappService.sendPollReminderWhatsApp(tripId, poll.id, poll.question);
+            setSendingWhatsApp(false);
+            if (error) Alert.alert('WhatsApp failed', error);
+            else Alert.alert('Sent!', `WhatsApp reminder sent to ${data!.sent} of ${data!.total} members.`);
+          },
+        },
+      ]
+    );
+  }
+
   async function handleClose() {
     Alert.alert('Close Poll', 'This will stop accepting votes.', [
       { text: 'Cancel', style: 'cancel' },
@@ -70,7 +131,7 @@ export function PollDetailScreen({ navigation, route }: Props) {
   }
 
   async function handleDelete() {
-    Alert.alert('Delete Poll', 'This will permanently delete the poll and its votes.', [
+    Alert.alert('Delete Poll', 'This will hide the poll and keep its audit history.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -87,11 +148,69 @@ export function PollDetailScreen({ navigation, route }: Props) {
     ]);
   }
 
+  function openEdit() {
+    if (!poll) return;
+    setEditQuestion(poll.question);
+    setEditDescription(poll.description ?? '');
+    setEditOptions((poll.options ?? []).map((option) => ({
+      id: option.id,
+      option_text: option.option_text,
+    })));
+    setShowEdit(true);
+  }
+
+  function updateDraftOption(index: number, optionText: string) {
+    setEditOptions((current) => current.map((option, i) => (
+      i === index ? { ...option, option_text: optionText } : option
+    )));
+  }
+
+  function removeDraftOption(index: number) {
+    if (editOptions.length <= 2) {
+      Alert.alert('Keep two choices', 'A poll needs at least two choices.');
+      return;
+    }
+    setEditOptions((current) => current.filter((_, i) => i !== index));
+  }
+
+  async function saveEdit() {
+    if (!poll) return;
+    const cleanedOptions = editOptions
+      .map((option) => ({ ...option, option_text: option.option_text.trim() }))
+      .filter((option) => option.option_text.length > 0);
+
+    if (!editQuestion.trim()) {
+      Alert.alert('Question required', 'Add a poll question.');
+      return;
+    }
+    if (cleanedOptions.length < 2) {
+      Alert.alert('Choices required', 'A poll needs at least two choices.');
+      return;
+    }
+
+    setSavingEdit(true);
+    const { data, error } = await pollService.updatePollWithOptions(poll.id, {
+      question: editQuestion.trim(),
+      description: editDescription.trim() || null,
+      allow_multiple: poll.allow_multiple,
+      options: cleanedOptions,
+    });
+    setSavingEdit(false);
+
+    if (error) {
+      Alert.alert('Unable to save poll', error);
+      return;
+    }
+
+    if (data) setPoll(data);
+    setShowEdit(false);
+  }
+
   if (loading) return <LoadingView />;
   if (!poll) return null;
 
-  // Only poll creator, trip organizer, or global admin can close/delete
-  const canManagePoll = poll.created_by === user?.id || isTripOrganizer || isGlobalAdmin;
+  const canEditPoll = poll.created_by === user?.id || canManageTrip || isGlobalAdmin;
+  const canDeletePoll = isTripOrganizer || isGlobalAdmin;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -141,29 +260,119 @@ export function PollDetailScreen({ navigation, route }: Props) {
       </View>
 
       {/* Creator controls */}
-      {canManagePoll && (
+      {canEditPoll && (
         <View style={styles.creatorCard}>
           <Text style={styles.creatorTitle}>Poll Controls</Text>
+          <AppButton
+            title="Edit Choices"
+            onPress={openEdit}
+            variant="outline"
+            fullWidth
+          />
           {poll.status === 'active' ? (
-            <AppButton
-              title="Close Poll"
-              onPress={handleClose}
-              variant="outline"
-              fullWidth
-            />
+            <>
+              <AppButton
+                title="📧 Send Reminder Email"
+                onPress={handleSendReminder}
+                loading={sendingReminder}
+                variant="outline"
+                fullWidth
+                style={styles.controlButton}
+              />
+              <AppButton
+                title="💬 Send WhatsApp Reminder"
+                onPress={handleWhatsAppReminder}
+                loading={sendingWhatsApp}
+                variant="outline"
+                fullWidth
+                style={styles.controlButton}
+              />
+              <AppButton
+                title="Close Poll"
+                onPress={handleClose}
+                variant="outline"
+                fullWidth
+                style={styles.controlButton}
+              />
+            </>
           ) : (
             <Text style={styles.settingDesc}>This poll is closed.</Text>
           )}
-          <View style={styles.deleteWrap}>
-            <AppButton
-              title="Delete Poll"
-              onPress={handleDelete}
-              variant="danger"
-              fullWidth
-            />
-          </View>
+          {canDeletePoll && (
+            <View style={styles.deleteWrap}>
+              <AppButton
+                title="Delete Poll"
+                onPress={handleDelete}
+                variant="danger"
+                fullWidth
+              />
+            </View>
+          )}
         </View>
       )}
+
+      <Modal visible={showEdit} transparent animationType="slide" onRequestClose={() => setShowEdit(false)}>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.keyboardAvoider}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.modalContent}>
+              <View style={styles.modalBox}>
+                <Text style={styles.modalTitle}>Edit Poll</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editQuestion}
+                  onChangeText={setEditQuestion}
+                  placeholder="Question"
+                  placeholderTextColor={Colors.textSecondary}
+                />
+                <TextInput
+                  style={[styles.modalInput, styles.descriptionInput]}
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  placeholder="Description"
+                  placeholderTextColor={Colors.textSecondary}
+                  multiline
+                  textAlignVertical="top"
+                />
+                <Text style={styles.optionEditTitle}>Choices</Text>
+                {editOptions.map((option, index) => (
+                  <View key={option.id ?? `new-${index}`} style={styles.optionEditRow}>
+                    <TextInput
+                      style={[styles.modalInput, styles.optionEditInput]}
+                      value={option.option_text}
+                      onChangeText={(text) => updateDraftOption(index, text)}
+                      placeholder={`Choice ${index + 1}`}
+                      placeholderTextColor={Colors.textSecondary}
+                    />
+                    <TouchableOpacity
+                      style={styles.removeChoiceButton}
+                      onPress={() => removeDraftOption(index)}
+                    >
+                      <Text style={styles.removeChoiceText}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <TouchableOpacity
+                  style={styles.addChoiceButton}
+                  onPress={() => setEditOptions((current) => [...current, { option_text: '' }])}
+                >
+                  <Text style={styles.addChoiceText}>+ Add Choice</Text>
+                </TouchableOpacity>
+                <AppButton title="Save Changes" onPress={saveEdit} loading={savingEdit} fullWidth />
+                <AppButton
+                  title="Cancel"
+                  onPress={() => setShowEdit(false)}
+                  variant="outline"
+                  fullWidth
+                  style={styles.cancelButton}
+                />
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -210,5 +419,43 @@ const styles = StyleSheet.create({
   settingInfo: { flex: 1, marginRight: Spacing.md },
   settingLabel: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.text },
   settingDesc: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  controlButton: { marginTop: Spacing.sm },
   deleteWrap: { marginTop: Spacing.sm },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  keyboardAvoider: { flex: 1 },
+  modalContent: { flexGrow: 1, justifyContent: 'flex-end' },
+  modalBox: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    padding: Spacing.xl,
+    paddingBottom: Spacing.xl + Spacing.md,
+  },
+  modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.text, marginBottom: Spacing.lg },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    fontSize: FontSize.md,
+    color: Colors.text,
+    marginBottom: Spacing.md,
+    minHeight: 52,
+  },
+  descriptionInput: { minHeight: 86 },
+  optionEditTitle: { fontSize: FontSize.sm, color: Colors.textSecondary, fontWeight: FontWeight.semiBold, marginBottom: Spacing.sm },
+  optionEditRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  optionEditInput: { flex: 1 },
+  removeChoiceButton: { paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm, marginBottom: Spacing.md },
+  removeChoiceText: { color: Colors.danger, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
+  addChoiceButton: {
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  addChoiceText: { color: Colors.primary, fontSize: FontSize.md, fontWeight: FontWeight.semiBold },
+  cancelButton: { marginTop: Spacing.sm },
 });

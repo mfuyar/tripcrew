@@ -139,6 +139,19 @@ describe('SPEC §9 — getMedia (reverse-chronological grid)', () => {
     expect(data).toHaveLength(2);
   });
 
+  it('does not return receipt attachments in the shared album', async () => {
+    const items = [
+      makeMedia({ id: 'album-photo', url: 'https://project.supabase.co/storage/v1/object/public/trip-media/trip-1/user-1/photo.jpg' }),
+      makeMedia({ id: 'receipt-photo', url: 'https://project.supabase.co/storage/v1/object/public/trip-media/trip-1/user-1/receipts/receipt.jpg' }),
+    ];
+    mockOrder.mockResolvedValueOnce({ data: items, error: null });
+
+    const { data, error } = await mediaService.getMedia(tripId);
+
+    expect(error).toBeNull();
+    expect(data?.map((item) => item.id)).toEqual(['album-photo']);
+  });
+
   it('returns empty array when trip has no media', async () => {
     mockOrder.mockResolvedValueOnce({ data: [], error: null });
 
@@ -331,6 +344,25 @@ describe('SPEC §9 — uploadMedia', () => {
       expect.objectContaining({
         headers: expect.objectContaining({ 'Content-Type': 'image/jpeg' }),
       })
+    );
+  });
+
+  it('uploads receipt images without inserting trip_media', async () => {
+    mockExpoFetch.mockResolvedValueOnce({ ok: true });
+    mockGetPublicUrl.mockReturnValueOnce({
+      data: { publicUrl: 'https://storage.example.com/trip-1/user-1/receipts/1234.jpg' },
+    });
+
+    const { data, error } = await mediaService.uploadReceiptImage(
+      tripId, userId, 'file:///local/receipt.jpg'
+    );
+
+    expect(error).toBeNull();
+    expect(data?.url).toContain('/receipts/');
+    expect(mockFrom).not.toHaveBeenCalledWith('trip_media');
+    expect(mockCreateSignedUrl).toHaveBeenCalledWith(
+      expect.stringMatching(/^trip-1\/user-1\/receipts\/\d+\.jpg$/),
+      60 * 60 * 24 * 7
     );
   });
 });

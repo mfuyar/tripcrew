@@ -357,17 +357,40 @@ CREATE TABLE IF NOT EXISTS packing_items (
   category            TEXT,
   quantity            INTEGER DEFAULT 1,
   assigned_family_id  UUID REFERENCES families(id),
+  group_id            TEXT,
   status              TEXT NOT NULL DEFAULT 'unpacked'
     CHECK (status IN ('unpacked','packed','left_behind')),
   notes               TEXT,
   is_essential        BOOLEAN NOT NULL DEFAULT false,
   added_by            UUID NOT NULL REFERENCES profiles(id),
+  is_deleted          BOOLEAN NOT NULL DEFAULT false,
+  deleted_at          TIMESTAMPTZ,
+  deleted_by          UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  current_version     INTEGER NOT NULL DEFAULT 1,
+  last_edited_by      UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  last_edited_at      TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS packing_items_trip_id_idx ON packing_items(trip_id);
+CREATE INDEX IF NOT EXISTS packing_items_group_id_idx ON packing_items(group_id) WHERE group_id IS NOT NULL;
 CREATE TRIGGER packing_items_updated_at BEFORE UPDATE ON packing_items
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE IF NOT EXISTS packing_item_versions (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  packing_item_id   UUID NOT NULL REFERENCES packing_items(id) ON DELETE CASCADE,
+  trip_id           UUID NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  version_number    INTEGER NOT NULL,
+  snapshot          JSONB NOT NULL,
+  change_type       TEXT NOT NULL CHECK (change_type IN ('create','update','delete','restore')),
+  changed_by        UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  changed_by_name   TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (packing_item_id, version_number)
+);
+CREATE INDEX IF NOT EXISTS packing_item_versions_item_id_idx ON packing_item_versions(packing_item_id);
+CREATE INDEX IF NOT EXISTS packing_item_versions_trip_id_idx ON packing_item_versions(trip_id);
 
 -- ─── Cars ─────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS cars (
@@ -408,6 +431,12 @@ CREATE TABLE IF NOT EXISTS polls (
   deadline        TIMESTAMPTZ,
   allow_multiple  BOOLEAN NOT NULL DEFAULT false,
   created_by      UUID NOT NULL REFERENCES profiles(id),
+  is_deleted      BOOLEAN NOT NULL DEFAULT false,
+  deleted_at      TIMESTAMPTZ,
+  deleted_by      UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  current_version INTEGER NOT NULL DEFAULT 1,
+  last_edited_by  UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  last_edited_at  TIMESTAMPTZ,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -422,9 +451,28 @@ CREATE TABLE IF NOT EXISTS poll_options (
   trip_id       UUID NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
   option_text   TEXT NOT NULL,
   votes_count   INTEGER NOT NULL DEFAULT 0,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  is_deleted    BOOLEAN NOT NULL DEFAULT false,
+  deleted_at    TIMESTAMPTZ,
+  deleted_by    UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS poll_options_poll_id_idx ON poll_options(poll_id);
+
+CREATE TABLE IF NOT EXISTS poll_versions (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  poll_id         UUID NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  trip_id         UUID NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+  version_number  INTEGER NOT NULL,
+  snapshot        JSONB NOT NULL,
+  change_type     TEXT NOT NULL CHECK (change_type IN ('create','update','delete','restore','close')),
+  changed_by      UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  changed_by_name TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (poll_id, version_number)
+);
+CREATE INDEX IF NOT EXISTS poll_versions_poll_id_idx ON poll_versions(poll_id);
+CREATE INDEX IF NOT EXISTS poll_versions_trip_id_idx ON poll_versions(trip_id);
 
 -- ─── Poll Votes ───────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS poll_votes (

@@ -1,11 +1,11 @@
 import { supabase } from '../lib/supabaseClient';
-import { PackingItem, PackingStatus, ServiceResult } from '../types';
+import { PackingItem, PackingItemVersion, PackingStatus, ServiceResult } from '../types';
 
 export const packingService = {
   async addItem(
     tripId: string,
     userId: string,
-    input: Pick<PackingItem, 'name' | 'category' | 'quantity' | 'assigned_family_id' | 'notes' | 'is_essential'>
+    input: Pick<PackingItem, 'name' | 'category' | 'quantity' | 'assigned_family_id' | 'notes' | 'is_essential'> & Pick<Partial<PackingItem>, 'group_id'>
   ): Promise<ServiceResult<PackingItem>> {
     const { data, error } = await supabase
       .from('packing_items')
@@ -26,7 +26,10 @@ export const packingService = {
       .from('packing_items')
       .select('*, assigned_family:families(*)')
       .eq('trip_id', tripId)
+      .eq('is_deleted', false)
       .order('category')
+      .order('group_id')
+      .order('created_at')
       .order('name');
     if (error) return { data: null, error: error.message };
     return { data: data as PackingItem[], error: null };
@@ -47,8 +50,25 @@ export const packingService = {
   },
 
   async deleteItem(itemId: string): Promise<ServiceResult<null>> {
-    const { error } = await supabase.from('packing_items').delete().eq('id', itemId);
+    const { error } = await supabase
+      .from('packing_items')
+      .update({
+        is_deleted: true,
+        deleted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', itemId);
     return { data: null, error: error?.message ?? null };
+  },
+
+  async getItemVersions(itemId: string): Promise<ServiceResult<PackingItemVersion[]>> {
+    const { data, error } = await supabase
+      .from('packing_item_versions')
+      .select('*')
+      .eq('packing_item_id', itemId)
+      .order('version_number', { ascending: false });
+    if (error) return { data: null, error: error.message };
+    return { data: data as PackingItemVersion[], error: null };
   },
 
   async updateStatus(

@@ -9,7 +9,7 @@ import {
   Alert,
   Platform,
   TextInput,
-  Linking,
+  Modal,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainStackParamList, FamilyMember } from '../../types';
@@ -18,6 +18,8 @@ import { useTripContext } from '../../contexts/TripContext';
 import { familyService } from '../../services/familyService';
 import { tripService } from '../../services/tripService';
 import { notificationService } from '../../services/notificationService';
+import { tripEmailService } from '../../services/tripEmailService';
+import { whatsappService } from '../../services/whatsappService';
 import { FamilyAvatar } from '../../components/FamilyAvatar';
 import { AppButton } from '../../components/AppButton';
 import { LoadingView } from '../../components/LoadingView';
@@ -58,6 +60,9 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [sendingPush, setSendingPush] = useState(false);
+  const [sendingEmergency, setSendingEmergency] = useState(false);
+  const [emergencyMsg, setEmergencyMsg] = useState('');
+  const [showEmergency, setShowEmergency] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
@@ -71,6 +76,16 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
   const isMyFamily = familyMembers.some((m) => m.user_id === user?.id);
   const isAdmin = familyMembers.some((m) => m.user_id === user?.id && m.is_admin);
   const canManageFamily = canManageTrip || isAdmin;
+
+  // Trip admins/organizers are implicitly family admins — no separate role needed
+  function isTripManager(userId: string) {
+    return tripMembers.some(
+      (m) => m.user_id === userId && (m.role === 'trip_organizer' || m.role === 'trip_admin')
+    );
+  }
+  function effectivelyFamilyAdmin(member: FamilyMember) {
+    return member.is_admin || isTripManager(member.user_id);
+  }
   const memberCapacity = family ? familyCapacity(family.adults_count, family.children_count) : 0;
   const familyIsFull = Boolean(family && familyMembers.length >= memberCapacity);
   const isCurrentUserFamily = userFamily?.id === familyId;
@@ -108,42 +123,35 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
     refresh();
   }
 
-  function buildInviteEmail() {
-    const email = inviteEmail.trim().toLowerCase();
-    const name = inviteName.trim();
-    const tripName = currentTrip?.name ?? 'our trip';
-    const inviteCode = currentTrip?.invite_code ?? '';
-    const subject = `Join ${tripName} on Travel Crew`;
-    const greeting = name ? `Hi ${name},` : 'Hi,';
-    const body = [
-      greeting,
-      '',
-      `I added your family to ${tripName} in Travel Crew.`,
-      inviteCode ? `Tap to join: ${buildTripInviteLink(inviteCode)}` : '',
-      inviteCode ? `Or enter invite code: ${inviteCode}` : '',
-      '',
-      `Family: ${family?.name ?? 'Family'}`,
-      '',
-      'After you sign in or create an account, join the trip with the invite link/code and the organizer can place you in the family.',
-    ].filter(Boolean).join('\n');
-
-    return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  }
-
   async function handleSendInviteEmail() {
     const email = inviteEmail.trim().toLowerCase();
     if (!email.includes('@')) {
       Alert.alert('Email required', 'Enter a valid email address to send an invite.');
       return;
     }
-
-    const url = buildInviteEmail();
-    const canOpen = await Linking.canOpenURL(url);
-    if (!canOpen) {
-      Alert.alert('Email unavailable', 'No email app is available on this device.');
+    if (!currentTrip?.invite_code) {
+      Alert.alert('Invite unavailable', 'This trip does not have an invite code yet.');
       return;
     }
-    await Linking.openURL(url);
+
+    setInviting(true);
+    const { error } = await tripEmailService.emailTripInvite({
+      tripId,
+      recipientEmail: email,
+      recipientName: inviteName.trim() || undefined,
+      familyName: family?.name,
+      familyId,
+      inviteLink: buildTripInviteLink(currentTrip.invite_code),
+    });
+    setInviting(false);
+
+    if (error) {
+      Alert.alert('Invite email failed', error);
+      return;
+    }
+    setInviteName('');
+    setInviteEmail('');
+    Alert.alert('Invite sent', `Sent invite email to ${email}.`);
   }
 
   async function handleInviteByEmail() {
@@ -209,8 +217,8 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
 
   async function handleTogglePushTalk(member: FamilyMember, enabled: boolean) {
     const { data, error } = await familyService.updateFamilyMemberPushTalk(member.id, enabled);
-    if (error) return Alert.alert('Unable to update push talk setting', error);
-    setFamilyMembers((prev) => prev.map((m) => (m.id === member.id ? data ?? m : m)));
+    if (error) return Alert.alert('Unable to update Push to Talk setting', error);
+    setFamilyMembers((prev) => prev.map((m) => (m.id === member.id ? { ...m, ...(data ?? {}), profile: m.profile } : m)));
   }
 
   async function handleSendPushTalk() {
@@ -223,10 +231,8 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
     setSendingPush(true);
     const title = 'Family ping';
     const body = `${profile?.full_name ?? 'A family member'} wants ${family.name} to check the trip chat.`;
-    const { error } = await notificationService.notifyUsers(
+    const { error } = await notificationService.sendPushToUsers(
       recipients.map((recipient) => recipient.user_id),
-      tripId,
-      'push_talk',
       title,
       body,
       {
@@ -245,6 +251,21 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
       return;
     }
     Alert.alert('Family ping sent', `Sent to ${recipients.length} family member${recipients.length === 1 ? '' : 's'}.`);
+  }
+
+  async function handleSendEmergency() {
+    const text = emergencyMsg.trim();
+    if (!text) { Alert.alert('Message required', 'Type an emergency message first.'); return; }
+    setSendingEmergency(true);
+    const { data, error } = await whatsappService.sendEmergency(tripId, text, familyId);
+    setSendingEmergency(false);
+    if (error) {
+      Alert.alert('WhatsApp failed', error);
+      return;
+    }
+    setEmergencyMsg('');
+    setShowEmergency(false);
+    Alert.alert('Sent!', `WhatsApp emergency message delivered to ${data!.sent} of ${data!.total} members.`);
   }
 
   async function handleDeleteFamily() {
@@ -328,6 +349,16 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         Sends a notification to other family members and opens trip chat when they tap it.
       </Text>
 
+      <AppButton
+        title="🚨 Send Emergency WhatsApp"
+        onPress={() => setShowEmergency(true)}
+        fullWidth
+        style={styles.emergencyBtn}
+      />
+      <Text style={styles.pushTalkLabel}>
+        Sends an urgent WhatsApp message to all family members who have a phone number.
+      </Text>
+
       {/* Current Members */}
       <Text style={styles.sectionTitle}>Members ({familyMembers.length}/{memberCapacity})</Text>
       {familyIsFull ? (
@@ -346,7 +377,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
           const displayMemberName = memberDisplayName(m, isMe, profile?.full_name, user?.email);
           return (
             <View key={m.id} style={styles.memberCard}>
-              {/* Top row: avatar + info + push-talk */}
+              {/* Top row: avatar + info + Push to Talk */}
               <View style={styles.memberCardTop}>
                 <FamilyAvatar name={memberName(m, isMe ? profile?.full_name : undefined, isMe ? user?.email : undefined)} size={40} />
                 <View style={styles.memberMain}>
@@ -360,7 +391,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                           <Text style={styles.youBadgeText}>You</Text>
                         </View>
                       )}
-                      {m.is_admin && (
+                      {effectivelyFamilyAdmin(m) && (
                         <View style={styles.adminBadge}>
                           <Text style={styles.adminText}>Family Admin</Text>
                         </View>
@@ -368,7 +399,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                     </View>
                     <Text style={styles.memberEmail} numberOfLines={1}>{m.profile?.email ?? ''}</Text>
                   </View>
-                  {/* Push talk toggle — only the member themselves can change it */}
+                  {/* Push to Talk toggle — only the member themselves can change it */}
                   {isMe ? (
                     <TouchableOpacity
                       style={[styles.pushTalkBtn2, m.push_talk_enabled && styles.pushTalkBtnOn]}
@@ -389,7 +420,8 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
               {/* Bottom row: admin toggle + remove (managers only, not self) */}
               {canManageFamily && !isMe && (
                 <View style={styles.memberCardActions}>
-                  {canManageTrip && (
+                  {/* Trip admins/organizers are implicit family admins — no toggle needed */}
+                  {canManageTrip && !isTripManager(m.user_id) && (
                     <TouchableOpacity
                       style={[styles.memberActionBtn, m.is_admin && styles.memberActionBtnActive]}
                       onPress={() => {
@@ -404,7 +436,7 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
                             onPress: async () => {
                               const { data, error } = await familyService.setFamilyMemberAdmin(m.id, !m.is_admin);
                               if (error) Alert.alert('Error', error);
-                              else if (data) setFamilyMembers((prev) => prev.map((x) => x.id === m.id ? data : x));
+                              else setFamilyMembers((prev) => prev.map((x) => x.id === m.id ? { ...x, ...(data ?? {}), is_admin: !m.is_admin, profile: x.profile } : x));
                             },
                           },
                         ]);
@@ -497,6 +529,8 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
             <AppButton
               title="Send Invite"
               onPress={handleSendInviteEmail}
+              loading={inviting}
+              disabled={familyIsFull}
               variant="outline"
               style={styles.inviteAction}
             />
@@ -514,6 +548,42 @@ export function FamilyDetailScreen({ navigation, route }: Props) {
         />
       )}
     </ScrollView>
+
+    {/* Emergency WhatsApp modal */}
+    <Modal visible={showEmergency} transparent animationType="slide" onRequestClose={() => setShowEmergency(false)}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalBox}>
+          <Text style={styles.modalTitle}>🚨 Emergency WhatsApp</Text>
+          <Text style={styles.modalSubtitle}>
+            This message will be sent via WhatsApp to all family members who have a phone number saved in their profile.
+          </Text>
+          <TextInput
+            style={styles.modalInput}
+            value={emergencyMsg}
+            onChangeText={setEmergencyMsg}
+            placeholder="Type your emergency message..."
+            placeholderTextColor={Colors.textSecondary}
+            multiline
+            autoFocus
+            textAlignVertical="top"
+          />
+          <AppButton
+            title={sendingEmergency ? 'Sending…' : 'Send Emergency WhatsApp'}
+            onPress={handleSendEmergency}
+            loading={sendingEmergency}
+            fullWidth
+            style={styles.emergencySendBtn}
+          />
+          <AppButton
+            title="Cancel"
+            onPress={() => { setShowEmergency(false); setEmergencyMsg(''); }}
+            variant="outline"
+            fullWidth
+            style={{ marginTop: Spacing.sm }}
+          />
+        </View>
+      </View>
+    </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -687,4 +757,37 @@ const styles = StyleSheet.create({
   },
   addBtnDisabled: { opacity: 0.5 },
   addBtnText: { color: Colors.surface, fontSize: FontSize.sm, fontWeight: FontWeight.semiBold },
+  emergencyBtn: { marginBottom: Spacing.sm, backgroundColor: '#dc2626' },
+  emergencySendBtn: { backgroundColor: '#dc2626' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  modalBox: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    padding: Spacing.xl,
+    paddingBottom: Spacing.xl + Spacing.md,
+  },
+  modalTitle: {
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.bold,
+    color: '#dc2626',
+    marginBottom: Spacing.sm,
+  },
+  modalSubtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: Spacing.md,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    fontSize: FontSize.md,
+    color: Colors.text,
+    minHeight: 100,
+    marginBottom: Spacing.md,
+    backgroundColor: Colors.background,
+  },
 });

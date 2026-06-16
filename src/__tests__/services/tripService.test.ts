@@ -13,6 +13,7 @@ const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
 const mockRpc = jest.fn();
+const mockFunctionsInvoke = jest.fn();
 
 const mockFrom = jest.fn(() => ({
   select: mockSelect.mockReturnThis(),
@@ -34,12 +35,20 @@ const mockGetUser = jest.fn().mockResolvedValue({
 });
 
 jest.mock('../../lib/supabaseClient', () => ({
-  supabase: { from: mockFrom, rpc: mockRpc, auth: { getSession: mockGetSession, getUser: mockGetUser } },
+  supabase: {
+    from: mockFrom,
+    rpc: mockRpc,
+    functions: { invoke: mockFunctionsInvoke },
+    auth: { getSession: mockGetSession, getUser: mockGetUser },
+  },
 }));
 
 import { tripService } from '../../services/tripService';
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockFunctionsInvoke.mockResolvedValue({ data: { sent: 1 }, error: null });
+});
 
 describe('tripService', () => {
   const userId = 'user-1';
@@ -141,6 +150,18 @@ describe('tripService', () => {
         p_invite_code: 'ABC12345',
         p_user_id: userId,
       });
+      expect(mockFunctionsInvoke).toHaveBeenCalledWith('send-push', {
+        body: {
+          requestId: 'req-1',
+          title: '🙋 New Join Request',
+          body: 'Someone wants to join your trip. Open Trip Settings to review.',
+          data: {
+            type: 'join_request',
+            trip_id: tripId,
+            request_id: 'req-1',
+          },
+        },
+      });
     });
 
     it('joinTrip remains a compatibility wrapper for requesting access', async () => {
@@ -154,6 +175,19 @@ describe('tripService', () => {
       expect(error).toBeNull();
       expect(data?.status).toBe('pending');
       expect(mockRpc).toHaveBeenCalledWith('request_trip_join_by_code', expect.any(Object));
+    });
+
+    it('does not notify organizers when the invite code returns an already-approved membership', async () => {
+      mockRpc.mockResolvedValueOnce({
+        data: { id: 'req-1', trip_id: tripId, user_id: userId, status: 'approved' },
+        error: null,
+      });
+
+      const { data, error } = await tripService.requestJoinTrip(userId, 'ABC12345');
+
+      expect(error).toBeNull();
+      expect(data?.status).toBe('approved');
+      expect(mockFunctionsInvoke).not.toHaveBeenCalled();
     });
 
     it('returns error on invalid invite code', async () => {
@@ -193,6 +227,19 @@ describe('tripService', () => {
         p_request_id: 'req-1',
         p_reviewer_id: userId,
         p_status: 'approved',
+      });
+      expect(mockFunctionsInvoke).toHaveBeenCalledWith('send-push', {
+        body: {
+          requestId: 'req-1',
+          title: '✅ Join Request Approved',
+          body: 'Your request to join the trip was approved.',
+          data: {
+            type: 'join_request_review',
+            trip_id: tripId,
+            request_id: 'req-1',
+            status: 'approved',
+          },
+        },
       });
     });
   });

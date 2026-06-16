@@ -12,6 +12,7 @@ import { AppTextInput } from '../../components/AppTextInput';
 import { AppButton } from '../../components/AppButton';
 import { FormKeyboardView } from '../../components/FormKeyboardView';
 import { Colors, FontSize, FontWeight, Spacing, Radius } from '../../constants/theme';
+import { welcomeEmailService } from '../../services/tripEmailService';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'SignUp'>;
 
@@ -44,12 +45,15 @@ export function SignUpScreen({ navigation }: Props) {
     }
     setError('');
     setLoading(true);
-    const { error: e } = await signUp(email.trim().toLowerCase(), password, fullName.trim());
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedName = fullName.trim();
+    const { error: e } = await signUp(trimmedEmail, password, trimmedName);
     setLoading(false);
     if (e) {
       setError(e);
     } else {
       setSuccess(true);
+      welcomeEmailService.send(trimmedEmail, trimmedName);
     }
   }
 

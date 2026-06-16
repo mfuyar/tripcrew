@@ -1,12 +1,8 @@
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { LiveLocation } from '../types';
 
-const CHANNEL = (tripId: string) => `live-location:${tripId}`;
-const BROADCAST_EVENT = 'location-update';
-const STOP_EVENT = 'location-stop';
 const LIVE_LOCATION_FRESH_MS = 5 * 60 * 1000;
 const BACKGROUND_LOCATION_TASK = 'tripcrew-background-live-location';
 const ACTIVE_BACKGROUND_SESSION_KEY = 'tripcrew.activeLiveLocationSession';
@@ -244,26 +240,13 @@ export const locationService = {
     activeSharingSession?.stop();
     const session: LiveLocationSession = { tripId, userId, familyId, userName, familyName };
 
-    const channel = supabase.channel(CHANNEL(tripId));
     const listeners = new Set<LocationListener>();
     if (onLocation) listeners.add(onLocation);
     let stopSharingNow = () => {};
 
-    // Subscribe with a 6-second timeout so the UI never hangs indefinitely
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 6000); // resolve anyway after 6s
-      channel.subscribe((status) => {
-        if (status === 'SUBSCRIBED' || status === 'CHANNEL_ERROR') {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-    });
-
     const broadcast = (pos: Location.LocationObject) => {
       const payload = toPayload(session, pos);
       listeners.forEach((listener) => listener(payload));
-      channel.send({ type: 'broadcast', event: BROADCAST_EVENT, payload });
       void (async () => {
         try {
           const tripIsLive = await isTripLiveLocationAllowed(tripId);
@@ -288,7 +271,6 @@ export const locationService = {
 
     const stop = () => {
       locationSub.remove();
-      channel.send({ type: 'broadcast', event: STOP_EVENT, payload: { userId } });
       void (async () => {
         try {
           await stopBackgroundLocationTask();
@@ -296,7 +278,6 @@ export const locationService = {
           await deleteLiveLocation(tripId, userId);
         } catch {}
       })();
-      supabase.removeChannel(channel);
       if (activeSharingSession?.tripId === tripId && activeSharingSession.userId === userId) {
         activeSharingSession = null;
       }
@@ -379,19 +360,8 @@ export const locationService = {
   ): () => void {
     const locations = new Map<string, LiveLocation>();
 
-    const channel: RealtimeChannel = supabase
-      .channel(CHANNEL(tripId))
-      .on('broadcast', { event: BROADCAST_EVENT }, ({ payload }: { payload: LiveLocation }) => {
-        locations.set(payload.userId, payload);
-        onChange(new Map(locations));
-      })
-      .on('broadcast', { event: STOP_EVENT }, ({ payload }: { payload: { userId: string } }) => {
-        const existing = locations.get(payload.userId);
-        if (existing) {
-          locations.set(payload.userId, { ...existing, isLive: false });
-          onChange(new Map(locations));
-        }
-      })
+    const channel = supabase
+      .channel(`live-location-db:${tripId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'live_locations', filter: `trip_id=eq.${tripId}` },

@@ -18,7 +18,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
     body: [
       'Account information: name, email address, profile details, authentication identifiers, and optional phone/avatar details.',
       'Trip information: trip names, destinations, dates, invite/join requests, families, members, roles, itinerary items, grocery and packing lists, car plans, announcements, polls, expenses, settlements, receipts, comments, and messages.',
-      'Media and audio: photos, receipt images, chat photos, captions, and push-talk/audio messages that you upload or record.',
+      'Media and audio: photos, receipt images, chat photos, captions, and Push to Talk/audio messages that you upload or record.',
       'Location information: your current location only when you choose to use live location or location-based features such as community spots. Live location is visible only to trip members while sharing is active.',
       'Device and notification information: push notification tokens, app session/device identifiers where available, platform type, and basic technical information needed to deliver notifications and keep the app working.',
       'Moderation information: reports, moderation status, reviewer actions, and automated review signals for bad language, unsafe content, or adult imagery.',
@@ -29,7 +29,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
     body: [
       'To create and manage your account and trips.',
       'To show trip data to the correct members and apply organizer, admin, family, and global admin permissions.',
-      'To deliver chat, push-talk, announcements, polls, expense updates, and push notifications.',
+      'To deliver chat, Push to Talk, announcements, polls, expense updates, and push notifications.',
       'To store and display uploaded media, receipts, and community spot photos.',
       'To provide map, address, nearby spot, and location-sharing features that you choose to use.',
       'To moderate content, prevent abuse, investigate safety issues, and enforce trip privacy.',
@@ -59,7 +59,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
     title: 'Photos, audio, and retention',
     body: [
       'Saved trip media remains available until deleted by a permitted user or removed by an admin/moderator.',
-      'Chat photos and push-talk/audio that are not saved to the trip album are intended to expire and be deleted after about 24 hours.',
+      'Chat photos and Push to Talk/audio that are not saved to the trip album are intended to expire and be deleted after about 24 hours.',
       'Deletion may not be instant because cleanup jobs, backups, caches, and signed media links can take time to expire.',
     ],
   },

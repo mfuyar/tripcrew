@@ -4,7 +4,7 @@ export const TRIP_FEATURES = [
   { key: 'community_spots', label: 'Community Spots', description: 'Explore and post local spots.', screens: ['CommunitySpots', 'CreateCommunitySpot'] },
   { key: 'families', label: 'Families', description: 'Families, family joining, and family management.', screens: ['Families', 'JoinFamily', 'AddEditFamily', 'FamilyDetail'] },
   { key: 'expenses', label: 'Expenses', description: 'Expenses, balances, settlements, fairness, and payment tracking.', screens: ['Expenses', 'AddEditExpense', 'Balances', 'Settlements', 'PaymentTracking', 'ExpenseHistory', 'Fairness'] },
-  { key: 'chat', label: 'Chat', description: 'Trip chat and push talk.', screens: ['Chat'] },
+  { key: 'chat', label: 'Chat', description: 'Trip chat and Push to Talk.', screens: ['Chat'] },
   { key: 'album', label: 'Album', description: 'Trip photo album and media details.', screens: ['Album', 'MediaDetail'] },
   { key: 'itinerary', label: 'Itinerary', description: 'Itinerary and daily plan.', screens: ['Itinerary', 'AddEditItineraryItem', 'DailyPlan'] },
   { key: 'grocery', label: 'Grocery List', description: 'Shared grocery list.', screens: ['GroceryList'] },

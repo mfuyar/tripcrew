@@ -138,13 +138,13 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
         interruptionMode: 'doNotMix',
       });
       if (playingPushTalkRef.current?.id !== pushTalk.id) return;
-      pushTalkPlayer.replace({ uri: pushTalk.url, name: 'Push Talk' });
+      pushTalkPlayer.replace({ uri: pushTalk.url, name: 'Push to Talk' });
       tryStartPushTalkPlayback();
       // Lock screen controls are best-effort — a native throw here (known to
       // happen on stale/rapid metadata updates) must never block playback.
       try {
         pushTalkPlayer.setActiveForLockScreen(true, {
-          title: 'Push Talk',
+          title: 'Push to Talk',
           artist: currentTrip?.name ?? 'TripCrew',
         });
       } catch {
@@ -664,10 +664,10 @@ export function TripChatScreen({ route }: { route: { params: { tripId: string } 
           onPressOut={handlePushTalkPressOut}
           disabled={uploadingMedia}
           accessibilityRole="button"
-          accessibilityLabel="Hold to talk"
+          accessibilityLabel="Push to talk"
         >
           <Text style={[styles.attachmentText, recordingInProgress && styles.recordingText]}>
-            {recordingInProgress ? 'Live - release' : 'Hold to Talk'}
+            {recordingInProgress ? 'Live - release' : 'Push to Talk'}
           </Text>
         </Pressable>
       </View>

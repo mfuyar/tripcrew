@@ -34,6 +34,10 @@ function getDownloadFileName(item: Pick<TripMedia, 'id' | 'url' | 'media_type' |
   return `tripcrew-${item.id}.${ext}`;
 }
 
+function isLocalLibraryUri(uri: string): boolean {
+  return /^(file|ph|assets-library):/.test(uri);
+}
+
 // Extract storage object path from a public or signed URL
 function extractStoragePath(url: string): string | null {
   // Public URL: .../storage/v1/object/public/trip-media/<path>
@@ -45,6 +49,10 @@ function extractStoragePath(url: string): string | null {
   const signIdx = url.indexOf(sign);
   if (signIdx >= 0) return decodeURIComponent(url.substring(signIdx + sign.length).split('?')[0]);
   return null;
+}
+
+function isReceiptStoragePath(path: string | null): boolean {
+  return path?.split('/').includes('receipts') === true;
 }
 
 function getContentType(file: File, ext: string, mediaType: MediaType): string {
@@ -98,10 +106,11 @@ async function uploadStorageObject(
   userId: string,
   uri: string,
   mediaType: MediaType,
-  pathPrefix = ''
+  pathPrefix = '',
+  pathFolder = ''
 ): Promise<ServiceResult<{ fileName: string; contentType: string; fileSize: number | null }>> {
   const { ext, contentType, file } = await prepareFileForUpload(uri, mediaType);
-  const fileName = `${pathPrefix}${tripId}/${userId}/${Date.now()}.${ext}`;
+  const fileName = `${pathPrefix}${tripId}/${userId}/${pathFolder}${Date.now()}.${ext}`;
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token ?? supabaseAnonKey;
 
@@ -128,6 +137,16 @@ async function uploadStorageObject(
 }
 
 export const mediaService = {
+  async getSignedMediaUrl(url: string, expiresIn = 60 * 60 * 24 * 7): Promise<ServiceResult<string>> {
+    const path = extractStoragePath(url);
+    if (!path) return { data: url, error: null };
+    const { data, error } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrl(path, expiresIn);
+    if (error || !data?.signedUrl) return { data: url, error: error?.message ?? null };
+    return { data: data.signedUrl, error: null };
+  },
+
   async saveMediaToLibrary(item: Pick<TripMedia, 'id' | 'url' | 'media_type' | 'mime_type'>): Promise<ServiceResult<string>> {
     if (Platform.OS === 'web') {
       const anchor = document.createElement('a');
@@ -144,6 +163,11 @@ export const mediaService = {
     const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo', 'video']);
     if (permission.status !== 'granted') {
       return { data: null, error: 'Please allow photo library access to download this photo.' };
+    }
+
+    if (isLocalLibraryUri(item.url)) {
+      await MediaLibrary.saveToLibraryAsync(item.url);
+      return { data: item.url, error: null };
     }
 
     const fileUri = `${FileSystem.cacheDirectory}${getDownloadFileName(item)}`;
@@ -194,12 +218,15 @@ export const mediaService = {
 
     if (error) return { data: null, error: error.message };
 
-    notificationService.notifyTripMembers(
+    const notify = await notificationService.notifyTripMembers(
       tripId, userId, 'other',
       mediaType === 'video' ? '🎬 New Video' : '📸 New Photo',
       mediaType === 'video' ? 'A new video was added to the trip album' : 'A new photo was added to the trip album',
       { trip_id: tripId, media_type: mediaType }
     );
+    if (notify.error) {
+      console.warn(`[media] notification failed for ${data.id}: ${notify.error}`);
+    }
 
     // DB stores the public URL (used as a path marker for signed-URL regeneration).
     // Return a signed URL to callers so the file is immediately accessible
@@ -220,7 +247,7 @@ export const mediaService = {
       .order('created_at', { ascending: false });
     if (error) return { data: null, error: error.message };
 
-    const items = data as TripMedia[];
+    const items = (data as TripMedia[]).filter((item) => !isReceiptStoragePath(extractStoragePath(item.url)));
     const paths = items.map((item) => extractStoragePath(item.url)).filter(Boolean) as string[];
 
     if (paths.length > 0) {
@@ -286,6 +313,36 @@ export const mediaService = {
       return { data: null, error: 'Could not generate a secure download URL for the uploaded file.' };
     }
     return { data: { url: signed.signedUrl, mime_type: contentType }, error: null };
+  },
+
+  async uploadReceiptImage(
+    tripId: string,
+    userId: string,
+    uri: string
+  ): Promise<ServiceResult<{ url: string; previewUrl: string; mime_type: string }>> {
+    const upload = await uploadStorageObject(tripId, userId, uri, 'photo', '', 'receipts/');
+    if (upload.error || !upload.data) return { data: null, error: upload.error };
+    const { fileName, contentType } = upload.data;
+
+    const { data: urlData } = supabase.storage
+      .from(MEDIA_BUCKET)
+      .getPublicUrl(fileName);
+    const { data: signed, error: signErr } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrl(fileName, 60 * 60 * 24 * 7);
+
+    if (signErr || !signed?.signedUrl) {
+      return { data: null, error: 'Could not generate a secure receipt preview URL.' };
+    }
+
+    return {
+      data: {
+        url: urlData.publicUrl,
+        previewUrl: signed.signedUrl,
+        mime_type: contentType,
+      },
+      error: null,
+    };
   },
 
   async uploadChatAudio(

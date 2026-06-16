@@ -8,8 +8,10 @@ import {
   Alert,
   Image,
   Modal,
+  Pressable,
   useWindowDimensions,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { mediaService } from '../../services/mediaService';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -102,7 +104,9 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
   const [expenseIsDeleted, setExpenseIsDeleted] = useState(false);
   const [receiptLocalUri, setReceiptLocalUri] = useState<string | undefined>(scannedExpense?.receiptImageUri);
   const [receiptUrl, setReceiptUrl] = useState<string | undefined>();
+  const [receiptDisplayUri, setReceiptDisplayUri] = useState<string | undefined>(scannedExpense?.receiptImageUri);
   const [receiptFullScreen, setReceiptFullScreen] = useState(false);
+  const [receiptDownloading, setReceiptDownloading] = useState(false);
   const hasFamilies = families.length > 0;
   const usePersonExpense = !hasFamilies || expenseScope === 'person';
   const tripMembers = useMemo(() => members.filter((m) => m.profile), [members]);
@@ -110,6 +114,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     () => new Map(tripMembers.map((m) => [m.user_id, m.profile?.full_name ?? m.profile?.email ?? 'Member'])),
     [tripMembers]
   );
+  const receiptImageUri = receiptLocalUri ?? receiptDisplayUri ?? receiptUrl;
 
   useEffect(() => {
     if (!hasFamilies) {
@@ -182,7 +187,11 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
       setSplitMethod(data.split_method);
       setDate(data.date);
       setNotes(data.notes ?? '');
-      if (data.receipt_url) setReceiptUrl(data.receipt_url);
+      if (data.receipt_url) {
+        setReceiptUrl(data.receipt_url);
+        const signed = await mediaService.getSignedMediaUrl(data.receipt_url);
+        setReceiptDisplayUri(signed.data ?? data.receipt_url);
+      }
       setExpenseIsDeleted(!!data.is_deleted);
       if (data.split_method === 'selected_families_only' && data.expense_splits?.length) {
         const included = data.expense_splits.filter((s) => s.share_amount > 0).map((s) => s.family_id);
@@ -277,8 +286,17 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     // Upload receipt image if we have a local URI that hasn't been uploaded yet
     let finalReceiptUrl = receiptUrl;
     if (receiptLocalUri && !receiptUrl && user) {
-      const upload = await mediaService.uploadChatMedia(tripId, user.id, receiptLocalUri, 'photo');
-      if (upload.data) finalReceiptUrl = upload.data.url;
+      const upload = await mediaService.uploadReceiptImage(tripId, user.id, receiptLocalUri);
+      if (upload.error) {
+        setLoading(false);
+        Alert.alert('Receipt upload failed', upload.error);
+        return;
+      }
+      if (upload.data) {
+        finalReceiptUrl = upload.data.url;
+        setReceiptUrl(upload.data.url);
+        setReceiptDisplayUri(upload.data.previewUrl);
+      }
     }
     const payload = {
       title: title.trim(),
@@ -313,7 +331,10 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           ? await expenseService.saveExpenseSplits(expenseId!, tripId, splits)
           : await expenseService.saveExpensePersonSplits(expenseId!, tripId, personSplits);
         if (splitResult.error) Alert.alert('Error', splitResult.error);
-        else navigation.goBack();
+        else {
+          await expenseService.notifyExpenseChange(expenseId!, user.id, 'updated');
+          navigation.goBack();
+        }
       } else {
         Alert.alert('Error', error);
       }
@@ -329,6 +350,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           await expenseService.deleteExpense(data.id);
           Alert.alert('Error', splitResult.error);
         } else {
+          await expenseService.notifyExpenseChange(data.id, user.id, 'created');
           navigation.goBack();
         }
       } else {
@@ -364,6 +386,7 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
               Alert.alert('Error', deleteError);
               return;
             }
+            await expenseService.notifyExpenseChange(existing.id, user.id, 'deleted');
             navigation.goBack();
           },
         },
@@ -390,6 +413,62 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
     );
   }
 
+  async function handlePickReceipt() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow photo access to attach a receipt.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.85,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setReceiptLocalUri(result.assets[0].uri);
+      setReceiptDisplayUri(result.assets[0].uri);
+      setReceiptUrl(undefined);
+    }
+  }
+
+  async function handleTakeReceiptPhoto() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow camera access to attach a receipt.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.85 });
+    if (!result.canceled && result.assets[0]) {
+      setReceiptLocalUri(result.assets[0].uri);
+      setReceiptDisplayUri(result.assets[0].uri);
+      setReceiptUrl(undefined);
+    }
+  }
+
+  function handleRemoveReceipt() {
+    setReceiptLocalUri(undefined);
+    setReceiptUrl(undefined);
+    setReceiptDisplayUri(undefined);
+  }
+
+  async function handleDownloadReceipt() {
+    if (!receiptImageUri) return;
+    setReceiptDownloading(true);
+    const { error } = await mediaService.saveMediaToLibrary({
+      id: expenseId ?? 'receipt',
+      url: receiptImageUri,
+      media_type: 'photo',
+      mime_type: 'image/jpeg',
+    });
+    setReceiptDownloading(false);
+
+    if (error) {
+      Alert.alert('Download failed', error);
+      return;
+    }
+    Alert.alert('Saved', 'Receipt saved to your photo library.');
+  }
+
   if (fetching) return null;
 
   return (
@@ -398,48 +477,89 @@ export function AddEditExpenseScreen({ navigation, route }: Props) {
           <View style={styles.scanPanel}>
             <View style={styles.scanCopy}>
               <Text style={styles.scanTitle}>Manual expense</Text>
-              <Text style={styles.scanText}>Scan can prefill receipt details, then you review and save.</Text>
+              <Text style={styles.scanText}>Scan can prefill details, or attach a receipt photo and enter the expense yourself.</Text>
             </View>
-            <TouchableOpacity
-              style={styles.scanButton}
-              onPress={() => navigation.navigate('ReceiptScanner', { tripId, returnToExpense: true })}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.scanButtonText}>Scan receipt</Text>
-            </TouchableOpacity>
+            <View style={styles.scanActions}>
+              <TouchableOpacity
+                style={styles.scanButton}
+                onPress={() => navigation.navigate('ReceiptScanner', { tripId, returnToExpense: true })}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.scanButtonText}>Scan</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.scanButton} onPress={handlePickReceipt} activeOpacity={0.8}>
+                <Text style={styles.scanButtonText}>Gallery</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.scanButton} onPress={handleTakeReceiptPhoto} activeOpacity={0.8}>
+                <Text style={styles.scanButtonText}>Camera</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+        {canEdit && isEdit && (
+          <View style={styles.receiptAttachPanel}>
+            <Text style={styles.receiptAttachTitle}>Receipt</Text>
+            <View style={styles.receiptAttachActions}>
+              <TouchableOpacity style={styles.receiptAttachButton} onPress={handlePickReceipt} activeOpacity={0.8}>
+                <Text style={styles.receiptAttachButtonText}>{receiptImageUri ? 'Replace from Gallery' : 'Attach from Gallery'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.receiptAttachButton} onPress={handleTakeReceiptPhoto} activeOpacity={0.8}>
+                <Text style={styles.receiptAttachButtonText}>{receiptImageUri ? 'Retake Photo' : 'Take Photo'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
         {/* Receipt thumbnail — admin/creator only */}
-        {canManageTrip && (receiptLocalUri || receiptUrl) && (
+        {(canManageTrip || canEdit) && receiptImageUri && (
           <View style={styles.receiptRow}>
             <View style={styles.receiptRowHeader}>
               <Text style={styles.receiptLabel}>📎 Receipt attached</Text>
               {canEdit && (
                 <TouchableOpacity onPress={() => Alert.alert('Remove Receipt', 'Remove this receipt?', [
                   { text: 'Cancel', style: 'cancel' },
-                  { text: 'Remove', style: 'destructive', onPress: () => { setReceiptLocalUri(undefined); setReceiptUrl(undefined); } },
+                  { text: 'Remove', style: 'destructive', onPress: handleRemoveReceipt },
                 ])}>
                   <Text style={styles.receiptRemove}>Remove</Text>
                 </TouchableOpacity>
               )}
             </View>
             <TouchableOpacity onPress={() => setReceiptFullScreen(true)} activeOpacity={0.85}>
-              <Image source={{ uri: receiptLocalUri ?? receiptUrl }} style={styles.receiptThumb} resizeMode="cover" />
+              <Image source={{ uri: receiptImageUri }} style={styles.receiptThumb} resizeMode="cover" />
               <Text style={styles.receiptTapHint}>Tap to view full size</Text>
             </TouchableOpacity>
           </View>
         )}
-        {/* Full-screen receipt viewer */}
-        <Modal visible={receiptFullScreen} transparent animationType="fade">
+        {/* Receipt viewer */}
+        <Modal visible={receiptFullScreen} transparent animationType="fade" onRequestClose={() => setReceiptFullScreen(false)}>
           <SafeAreaView style={styles.receiptModal}>
-            <TouchableOpacity style={styles.receiptModalClose} onPress={() => setReceiptFullScreen(false)}>
-              <Text style={styles.receiptModalCloseText}>✕ Close</Text>
-            </TouchableOpacity>
-            <Image
-              source={{ uri: receiptLocalUri ?? receiptUrl }}
-              style={styles.receiptFullImage}
-              resizeMode="contain"
-            />
+            <Pressable style={styles.receiptModalBackdrop} onPress={() => setReceiptFullScreen(false)} />
+            <View style={styles.receiptPreviewPanel}>
+              <Image source={{ uri: receiptImageUri }} style={styles.receiptFullImage} resizeMode="contain" />
+            </View>
+            <View style={styles.receiptModalFooter}>
+              <TouchableOpacity
+                style={[styles.receiptModalAction, styles.receiptModalClose]}
+                onPress={() => setReceiptFullScreen(false)}
+                hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Close receipt preview"
+              >
+                <Text style={styles.receiptModalCloseIcon}>✕</Text>
+                <Text style={styles.receiptModalCloseText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.receiptModalAction, styles.receiptModalDownload]}
+                onPress={handleDownloadReceipt}
+                disabled={receiptDownloading}
+                hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Download receipt"
+              >
+                <Text style={styles.receiptModalDownloadText}>
+                  {receiptDownloading ? 'Saving...' : 'Download'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </SafeAreaView>
         </Modal>
 
@@ -863,10 +983,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
+  scanActions: {
+    alignItems: 'stretch',
+    gap: Spacing.xs,
+  },
   scanButtonText: {
     color: Colors.primary,
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semiBold,
+    textAlign: 'center',
   },
   label: {
     fontSize: FontSize.sm,
@@ -1078,15 +1203,89 @@ const styles = StyleSheet.create({
   previewOwesTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.warning },
   previewOwesSub: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   receiptRow: { marginBottom: Spacing.md },
+  receiptAttachPanel: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  receiptAttachTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+  },
+  receiptAttachActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  receiptAttachButton: {
+    flex: 1,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    alignItems: 'center',
+  },
+  receiptAttachButtonText: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semiBold,
+    color: Colors.primary,
+    textAlign: 'center',
+  },
   receiptRowHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.xs },
   receiptLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.medium, color: Colors.text },
   receiptRemove: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: FontWeight.semiBold },
   receiptThumb: { width: '100%', height: 160, borderRadius: Radius.md, backgroundColor: Colors.border },
   receiptTapHint: { fontSize: FontSize.xs, color: Colors.textSecondary, textAlign: 'center', marginTop: 4 },
-  receiptModal: { flex: 1, backgroundColor: '#000' },
-  receiptModalClose: { padding: Spacing.md, alignSelf: 'flex-end' },
+  receiptModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.lg,
+  },
+  receiptModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  receiptPreviewPanel: {
+    flex: 1,
+    width: '100%',
+    maxHeight: '82%',
+    borderRadius: Radius.lg,
+    overflow: 'hidden',
+    backgroundColor: '#111',
+    marginBottom: Spacing.md,
+  },
+  receiptModalFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+  },
+  receiptModalAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: 52,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.full,
+  },
+  receiptModalClose: { backgroundColor: 'rgba(255,255,255,0.14)' },
+  receiptModalDownload: { backgroundColor: Colors.primary },
+  receiptModalCloseIcon: { color: '#fff', fontSize: FontSize.lg, fontWeight: FontWeight.bold },
   receiptModalCloseText: { color: '#fff', fontSize: FontSize.md, fontWeight: FontWeight.semiBold },
-  receiptFullImage: { flex: 1, width: '100%' },
+  receiptModalDownloadText: { color: Colors.surface, fontSize: FontSize.md, fontWeight: FontWeight.semiBold },
+  receiptFullImage: { width: '100%', height: '100%' },
   readOnlyBanner: {
     backgroundColor: Colors.border,
     borderRadius: Radius.md,

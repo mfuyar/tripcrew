@@ -210,7 +210,7 @@ export const familyService = {
       .from('family_members')
       .update({ push_talk_enabled: enabled })
       .eq('id', memberId)
-      .select('*, profile:profiles(*)')
+      .select('*')
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as FamilyMember, error: null };
@@ -221,7 +221,7 @@ export const familyService = {
       .from('family_members')
       .update({ is_admin: isAdmin })
       .eq('id', memberId)
-      .select('*, profile:profiles(*)')
+      .select('*')
       .single();
     if (error) return { data: null, error: error.message };
     return { data: data as FamilyMember, error: null };

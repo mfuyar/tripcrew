@@ -11,6 +11,17 @@ function isMissingArchiveColumn(error?: string | null): boolean {
   );
 }
 
+function normalizeLatestAnnouncements(rows: unknown): Announcement[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => {
+    const announcement = row as Announcement & { creator?: Announcement['creator'] | Announcement['creator'][] };
+    return {
+      ...announcement,
+      creator: Array.isArray(announcement.creator) ? announcement.creator[0] : announcement.creator,
+    } as Announcement;
+  });
+}
+
 export const announcementService = {
   async create(
     tripId: string,
@@ -27,12 +38,15 @@ export const announcementService = {
     const PRIORITY_ICON: Record<string, string> = {
       urgent: '🔴', high: '🟠', normal: '📢', low: '🟢',
     };
-    notificationService.notifyTripMembers(
+    const notify = await notificationService.notifyTripMembers(
       tripId, userId, 'announcement',
       `${PRIORITY_ICON[input.priority] ?? '📢'} ${input.title}`,
       input.content.length > 80 ? input.content.slice(0, 77) + '…' : input.content,
       { announcement_id: data.id }
     );
+    if (notify.error) {
+      console.warn(`[announcements] notification failed for ${data.id}: ${notify.error}`);
+    }
 
     return { data: data as Announcement, error: null };
   },
@@ -58,13 +72,13 @@ export const announcementService = {
     }
 
     if (error) return { data: null, error: error.message };
-    return { data: data as Announcement[], error: null };
+    return { data: normalizeLatestAnnouncements(data), error: null };
   },
 
   async getLatest(tripId: string, limit = 3): Promise<ServiceResult<Announcement[]>> {
     let { data, error } = await supabase
       .from('announcements')
-      .select('id, title, content, priority, created_at')
+      .select('id, title, content, priority, created_at, created_by, creator:profiles!announcements_created_by_fkey(id, full_name, email)')
       .eq('trip_id', tripId)
       .eq('is_archived', false)
       .order('created_at', { ascending: false })
@@ -73,7 +87,7 @@ export const announcementService = {
     if (error && isMissingArchiveColumn(error.message)) {
       const retry = await supabase
         .from('announcements')
-        .select('id, title, content, priority, created_at')
+        .select('id, title, content, priority, created_at, created_by, creator:profiles!announcements_created_by_fkey(id, full_name, email)')
         .eq('trip_id', tripId)
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -82,7 +96,7 @@ export const announcementService = {
     }
 
     if (error) return { data: null, error: error.message };
-    return { data: data as Announcement[], error: null };
+    return { data: normalizeLatestAnnouncements(data), error: null };
   },
 
   async archive(announcementId: string): Promise<ServiceResult<null>> {

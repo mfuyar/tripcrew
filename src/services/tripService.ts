@@ -13,14 +13,19 @@ function friendlyTripJoinError(message: string): string {
   return message;
 }
 
-function generateInviteCode(): string {
-  const randomUUID = globalThis.crypto?.randomUUID?.();
-  if (randomUUID) return randomUUID.replace(/-/g, '').slice(0, 8).toUpperCase();
+const INVITE_CODE_WORDS = [
+  'ROSE', 'LILY', 'TULIP', 'DAISY', 'IRIS', 'VIOLET', 'JASMINE', 'ORCHID',
+  'PARIS', 'TOKYO', 'ROME', 'LONDON', 'MIAMI', 'DUBAI', 'SEOUL', 'SYDNEY',
+  'MOZART', 'ELVIS', 'OPRAH', 'MESSI', 'BEYONCE', 'SHAKIRA', 'PICASSO', 'CLEO',
+];
 
-  return Math.floor(Math.random() * 0xffffffff)
-    .toString(16)
-    .padStart(8, '0')
-    .toUpperCase();
+function randomInviteWord(): string {
+  return INVITE_CODE_WORDS[Math.floor(Math.random() * INVITE_CODE_WORDS.length)];
+}
+
+function generateInviteCode(): string {
+  const suffix = Math.floor(Math.random() * 100).toString().padStart(2, '0');
+  return `${randomInviteWord()}${randomInviteWord()}${suffix}`.toUpperCase();
 }
 
 export const tripService = {
@@ -141,9 +146,19 @@ export const tripService = {
       p_user_id: userId,
     });
     if (error) return { data: null, error: friendlyTripJoinError(error.message) };
-    // Notifications are sent inside the SECURITY DEFINER DB function,
-    // which can query trip_members even though the requester is not yet a member.
-    return { data: data as TripJoinRequest, error: null };
+    const request = data as TripJoinRequest;
+    // The DB function creates in-app notifications. This sends the remote push
+    // for locked/offline manager devices without granting the requester access
+    // to manager membership rows.
+    if (request?.id && request.trip_id && request.status === 'pending') {
+      await notificationService.sendJoinRequestPush(
+        request.id,
+        request.trip_id,
+        '🙋 New Join Request',
+        'Someone wants to join your trip. Open Trip Settings to review.'
+      );
+    }
+    return { data: request, error: null };
   },
 
   async joinTrip(userId: string, inviteCode: string): Promise<ServiceResult<TripJoinRequest>> {
@@ -268,7 +283,11 @@ export const tripService = {
       p_status: status,
     });
     if (error) return { data: null, error: error.message };
-    return { data: data as TripJoinRequest, error: null };
+    const request = data as TripJoinRequest;
+    if (request?.id && request.trip_id) {
+      await notificationService.sendJoinReviewPush(request.id, request.trip_id, status);
+    }
+    return { data: request, error: null };
   },
 
   async getTripMembers(tripId: string): Promise<ServiceResult<TripMember[]>> {

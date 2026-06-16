@@ -12,10 +12,25 @@ export function NotificationBellButton() {
   const navigation = useNavigation<any>();
   const { unreadCount } = useNotifications();
 
+  function openNotifications() {
+    const parent = navigation.getParent?.();
+    if (parent?.getState?.().routeNames?.includes('Notifications')) {
+      parent.navigate('Notifications');
+      return;
+    }
+
+    if (navigation.getState?.().routeNames?.includes('Notifications')) {
+      navigation.navigate('Notifications');
+      return;
+    }
+
+    parent?.getParent?.()?.navigate?.('Notifications');
+  }
+
   return (
     <TouchableOpacity
       style={styles.button}
-      onPress={() => navigation.navigate('Notifications')}
+      onPress={openNotifications}
       activeOpacity={0.7}
       accessibilityRole="button"
       accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}

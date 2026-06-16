@@ -350,14 +350,33 @@ export interface PackingItem {
   category?: string;
   quantity?: number;
   assigned_family_id?: string;
+  group_id?: string | null;
   status: PackingStatus;
   notes?: string;
   is_essential: boolean;
   added_by: string;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+  current_version?: number;
+  last_edited_by?: string;
+  last_edited_at?: string;
   created_at: string;
   updated_at: string;
   // Joined data
   assigned_family?: Family;
+}
+
+export interface PackingItemVersion {
+  id: string;
+  packing_item_id: string;
+  trip_id: string;
+  version_number: number;
+  snapshot: PackingItem;
+  change_type: 'create' | 'update' | 'delete' | 'restore';
+  changed_by?: string;
+  changed_by_name?: string;
+  created_at: string;
 }
 
 // ─── Cars ─────────────────────────────────────────────────────────────────────
@@ -401,6 +420,12 @@ export interface Poll {
   deadline?: string;
   allow_multiple: boolean;
   created_by: string;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+  current_version?: number;
+  last_edited_by?: string;
+  last_edited_at?: string;
   created_at: string;
   updated_at: string;
   // Joined data
@@ -414,9 +439,25 @@ export interface PollOption {
   trip_id: string;
   option_text: string;
   votes_count: number;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
   created_at: string;
+  updated_at?: string;
   // Joined data
   votes?: PollVote[];
+}
+
+export interface PollVersion {
+  id: string;
+  poll_id: string;
+  trip_id: string;
+  version_number: number;
+  snapshot: Poll & { options?: PollOption[] };
+  change_type: 'create' | 'update' | 'delete' | 'restore' | 'close';
+  changed_by?: string;
+  changed_by_name?: string;
+  created_at: string;
 }
 
 export interface PollVote {

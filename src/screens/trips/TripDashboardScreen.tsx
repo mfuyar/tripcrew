@@ -51,6 +51,7 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
   const { user, isDemoMode } = useAuth();
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [expandedAnnouncements, setExpandedAnnouncements] = useState<Set<string>>(new Set());
   const [activePolls, setActivePolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,6 +105,25 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
     if (h >= 24) return `${Math.floor(h / 24)}d left`;
     if (h > 0) return `${h}h ${m}m left`;
     return `${m}m left`;
+  }
+
+  function toggleAnnouncement(announcementId: string) {
+    setExpandedAnnouncements((prev) => {
+      const next = new Set(prev);
+      if (next.has(announcementId)) next.delete(announcementId);
+      else next.add(announcementId);
+      return next;
+    });
+  }
+
+  function announcementCreatorName(announcement: Announcement): string {
+    const profileName = announcement.creator?.full_name?.trim();
+    if (profileName) return profileName;
+    const member = members.find((m) => m.user_id === announcement.created_by);
+    return member?.profile?.full_name?.trim()
+      || announcement.creator?.email
+      || member?.profile?.email
+      || 'Trip member';
   }
 
   const trip = currentTrip;
@@ -231,53 +251,100 @@ export function TripDashboardScreen({ route }: { route: { params: { tripId: stri
           </TouchableOpacity>
         </View>
         {(
-          announcements.map((ann) => (
-            <View key={ann.id} style={styles.announcementRow}>
-              <Text style={styles.annPriority}>
-                {ann.priority === 'urgent' ? '🔴' : ann.priority === 'high' ? '🟠' : '🟢'}
-              </Text>
-              <Text style={styles.annTitle} numberOfLines={2}>{ann.title}</Text>
-              {canManageAnnouncements && (
-                <TouchableOpacity
-                  hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-                  onPress={() =>
-                    Alert.alert(
-                      ann.title,
-                      'What would you like to do?',
-                      [
-                        {
-                          text: 'Archive',
-                          onPress: async () => {
-                            const { error } = await announcementService.archive(ann.id);
-                            if (error) {
-                              Alert.alert('Archive failed', error);
-                              return;
-                            }
-                            setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
-                          },
-                        },
-                        {
-                          text: 'Delete',
-                          style: 'destructive',
-                          onPress: async () => {
-                            const { error } = await announcementService.delete(ann.id);
-                            if (error) {
-                              Alert.alert('Delete failed', error);
-                              return;
-                            }
-                            setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
-                          },
-                        },
-                        { text: 'Cancel', style: 'cancel' },
-                      ]
-                    )
-                  }
-                >
-                  <Text style={styles.annAction}>⋯</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ))
+          announcements.map((ann) => {
+            const isExpanded = expandedAnnouncements.has(ann.id);
+            return (
+              <TouchableOpacity
+                key={ann.id}
+                style={[styles.announcementRow, isExpanded && styles.announcementRowExpanded]}
+                onPress={() => toggleAnnouncement(ann.id)}
+                activeOpacity={0.82}
+                accessibilityRole="button"
+                accessibilityLabel={`${isExpanded ? 'Collapse' : 'Expand'} announcement ${ann.title}`}
+              >
+                <View style={styles.announcementTopRow}>
+                  <Text style={styles.annPriority}>
+                    {ann.priority === 'urgent' ? '🔴' : ann.priority === 'high' ? '🟠' : '🟢'}
+                  </Text>
+                  <View style={styles.annCopy}>
+                    <Text style={styles.annTitle} numberOfLines={isExpanded ? undefined : 2}>{ann.title}</Text>
+                    <Text style={styles.annMeta}>
+                      By {announcementCreatorName(ann)} • {new Date(ann.created_at).toLocaleDateString()} • {isExpanded ? 'Tap to collapse' : 'Tap for details'}
+                    </Text>
+                  </View>
+                  <Text style={styles.annChevron}>{isExpanded ? '⌃' : '⌄'}</Text>
+                  {canManageAnnouncements && (
+                    <TouchableOpacity
+                      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        Alert.alert(
+                          ann.title,
+                          'What would you like to do?',
+                          [
+                            {
+                              text: 'Archive',
+                              onPress: async () => {
+                                const { error } = await announcementService.archive(ann.id);
+                                if (error) {
+                                  Alert.alert('Archive failed', error);
+                                  return;
+                                }
+                                setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
+                                setExpandedAnnouncements((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(ann.id);
+                                  return next;
+                                });
+                              },
+                            },
+                            {
+                              text: 'Delete',
+                              style: 'destructive',
+                              onPress: async () => {
+                                const { error } = await announcementService.delete(ann.id);
+                                if (error) {
+                                  Alert.alert('Delete failed', error);
+                                  return;
+                                }
+                                setAnnouncements((prev) => prev.filter((a) => a.id !== ann.id));
+                                setExpandedAnnouncements((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(ann.id);
+                                  return next;
+                                });
+                              },
+                            },
+                            { text: 'Cancel', style: 'cancel' },
+                          ]
+                        );
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Manage announcement ${ann.title}`}
+                    >
+                      <Text style={styles.annAction}>⋯</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {isExpanded && (
+                  <View style={styles.annDetails}>
+                    <Text style={styles.annContent}>{ann.content}</Text>
+                    <TouchableOpacity
+                      style={styles.annOpenAll}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        navigation.navigate('Announcements', { tripId });
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Open all announcements"
+                    >
+                      <Text style={styles.annOpenAllText}>Open announcements</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })
         )}
       </View>
       )}
@@ -597,18 +664,48 @@ const styles = StyleSheet.create({
   },
   seeAll: { fontSize: FontSize.sm, color: Colors.primary },
   announcementRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
     padding: Spacing.md,
     marginBottom: Spacing.sm,
-    gap: Spacing.sm,
     ...Shadow.sm,
   },
+  announcementRowExpanded: {
+    borderWidth: 1,
+    borderColor: Colors.primary + '33',
+  },
+  announcementTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
   annPriority: { fontSize: 16 },
-  annTitle: { flex: 1, fontSize: FontSize.sm, color: Colors.text },
+  annCopy: { flex: 1 },
+  annTitle: { fontSize: FontSize.sm, color: Colors.text, fontWeight: FontWeight.semiBold },
+  annMeta: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  annChevron: { fontSize: FontSize.md, color: Colors.textSecondary },
   annAction: { fontSize: 20, color: Colors.textSecondary, paddingLeft: Spacing.sm },
+  annDetails: {
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  annContent: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    lineHeight: 20,
+  },
+  annOpenAll: {
+    alignSelf: 'flex-start',
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  annOpenAllText: {
+    fontSize: FontSize.sm,
+    color: Colors.primary,
+    fontWeight: FontWeight.semiBold,
+  },
   announcementEmpty: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,

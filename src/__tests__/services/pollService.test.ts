@@ -88,14 +88,15 @@ describe('pollService.vote', () => {
 });
 
 describe('pollService.deletePoll', () => {
-  it('deletes a poll by id', async () => {
+  it('soft deletes a poll by id', async () => {
     mockEq.mockResolvedValueOnce({ data: null, error: null });
 
     const { error } = await pollService.deletePoll(pollId);
 
     expect(error).toBeNull();
     expect(mockFrom).toHaveBeenCalledWith('polls');
-    expect(mockDelete).toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ is_deleted: true }));
     expect(mockEq).toHaveBeenCalledWith('id', pollId);
   });
 });

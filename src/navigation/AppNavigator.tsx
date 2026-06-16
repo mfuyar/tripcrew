@@ -361,8 +361,22 @@ function MainNavigator() {
 
 const navigationRef = createNavigationContainerRef();
 
-function handleNotificationNavigation(data: Record<string, unknown>) {
+function normalizeNotificationData(data: unknown): Record<string, unknown> {
+  return data && typeof data === 'object' && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+}
+
+function navigateMain(screen: keyof MainStackParamList, params?: Record<string, unknown>) {
+  (navigationRef as any).navigate('Main', {
+    screen,
+    params,
+  });
+}
+
+function handleNotificationNavigation(rawData: unknown) {
   if (!navigationRef.isReady()) return;
+  const data = normalizeNotificationData(rawData);
   const tripId = data?.trip_id as string | undefined;
   if (!tripId) return;
   const type = data?.type as string | undefined;
@@ -371,29 +385,23 @@ function handleNotificationNavigation(data: Record<string, unknown>) {
     if (type === 'message' || type === 'push_talk') {
       (navigationRef as any).navigate('Main', {
         screen: 'TripStack',
-        params: { tripId, screen: 'Chat' },
+        params: { tripId, screen: 'Chat', params: { tripId } },
       });
       return;
     }
 
     // Join request notifications carry a request_id in data
     if (data?.request_id) {
-      (navigationRef as any).navigate('Main', {
-        screen: 'TripSettings',
-        params: { tripId },
-      });
+      navigateMain('TripSettings', { tripId });
       return;
     }
 
     if (data?.settlement_id) {
-      (navigationRef as any).navigate('Main', {
-        screen: 'PaymentTracking',
-        params: { tripId },
-      });
+      navigateMain('PaymentTracking', { tripId });
       return;
     }
 
-    const MODAL_SCREEN: Record<string, string> = {
+    const MODAL_SCREEN: Partial<Record<string, keyof MainStackParamList>> = {
       expense_added: 'Settlements',
       settlement_request: 'Settlements',
       payment_confirmed: 'PaymentTracking',
@@ -403,14 +411,11 @@ function handleNotificationNavigation(data: Record<string, unknown>) {
 
     const modal = type ? MODAL_SCREEN[type] : undefined;
     if (modal) {
-      (navigationRef as any).navigate('Main', {
-        screen: modal,
-        params: { tripId },
-      });
+      navigateMain(modal, { tripId });
     } else {
       (navigationRef as any).navigate('Main', {
         screen: 'TripStack',
-        params: { tripId, screen: 'Dashboard' },
+        params: { tripId, screen: 'Dashboard', params: { tripId } },
       });
     }
   } catch { /* navigation may fail if screen isn't mounted yet */ }
@@ -423,17 +428,13 @@ export function AppNavigator() {
     // App opened from killed state via notification tap
     Notifications.getLastNotificationResponseAsync().then((response) => {
       if (response) {
-        handleNotificationNavigation(
-          response.notification.request.content.data as Record<string, unknown>
-        );
+        handleNotificationNavigation(response.notification.request.content.data);
       }
     });
 
     // Notification tapped while app is running
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      handleNotificationNavigation(
-        response.notification.request.content.data as Record<string, unknown>
-      );
+      handleNotificationNavigation(response.notification.request.content.data);
     });
 
     return () => sub.remove();
@@ -441,8 +442,33 @@ export function AppNavigator() {
 
   if (loading) return <LoadingView message="Loading Travel Crew..." />;
 
+  const linking = {
+    prefixes: ['travelcrew://'],
+    config: {
+      screens: {
+        Main: {
+          screens: {
+            // travelcrew://poll?pollId=xxx&tripId=xxx
+            PollDetail: {
+              path: 'poll',
+              parse: { pollId: String, tripId: String },
+            },
+            // travelcrew://trip?tripId=xxx  → opens trip dashboard
+            TripStack: {
+              path: 'trip',
+              parse: { tripId: String },
+            },
+            // travelcrew://chat?tripId=xxx  → opens trip, user lands on Chat tab
+            // Handled by TripStack + in-screen navigation via initialRoute logic
+            // (TripStack opens Dashboard by default; chat tab requires user tap)
+          },
+        },
+      },
+    },
+  };
+
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} linking={linking}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {user && !isPasswordRecovery ? (
           <RootStack.Screen name="Main" component={MainNavigator} />

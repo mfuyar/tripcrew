@@ -15,22 +15,29 @@ import { Colors, FontSize, FontWeight, Spacing, Radius, Shadow } from '../../con
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
+function notificationData(n: Notification): Record<string, unknown> {
+  return n.data && typeof n.data === 'object' && !Array.isArray(n.data)
+    ? n.data as Record<string, unknown>
+    : {};
+}
+
 function navigateForNotification(navigation: Nav, n: Notification) {
   const tripId = n.trip_id;
   if (!tripId) return;
+  const data = notificationData(n);
 
   if (n.type === 'message' || n.type === 'push_talk') {
-    (navigation as any).navigate('TripStack', { tripId, screen: 'Chat' });
+    (navigation as any).navigate('TripStack', { tripId, screen: 'Chat', params: { tripId } });
     return;
   }
 
   // Join request notifications carry request_id in data — go straight to TripSettings
-  if (n.data?.request_id) {
+  if (data.request_id) {
     navigation.navigate('TripSettings' as any, { tripId });
     return;
   }
 
-  if (n.data?.settlement_id) {
+  if (data.settlement_id) {
     navigation.navigate('PaymentTracking' as any, { tripId });
     return;
   }
@@ -75,12 +82,16 @@ export function NotificationCenterScreen() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   async function handleTap(n: Notification) {
-    if (!n.is_read) {
-      await notificationService.markRead(n.id);
-      setNotifications((prev) => prev.map((item) => item.id === n.id ? { ...item, is_read: true } : item));
-      refreshUnread();
+    try {
+      if (!n.is_read) {
+        await notificationService.markRead(n.id);
+        setNotifications((prev) => prev.map((item) => item.id === n.id ? { ...item, is_read: true } : item));
+        refreshUnread();
+      }
+      navigateForNotification(navigation, n);
+    } catch {
+      Alert.alert('Notification unavailable', 'This notification could not be opened.');
     }
-    navigateForNotification(navigation, n);
   }
 
   async function handleMarkAllRead() {

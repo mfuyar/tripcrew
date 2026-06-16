@@ -35,7 +35,7 @@ describe('announcementService.getLatest', () => {
     expect(error).toBeNull();
     expect(data).toEqual(rows);
     expect(mockFrom).toHaveBeenCalledWith('announcements');
-    expect(mockSelect).toHaveBeenCalledWith('id, title, content, priority, created_at');
+    expect(mockSelect).toHaveBeenCalledWith('id, title, content, priority, created_at, created_by, creator:profiles!announcements_created_by_fkey(id, full_name, email)');
     expect(mockEq).toHaveBeenCalledWith('trip_id', 'trip-1');
     expect(mockEq).toHaveBeenCalledWith('is_archived', false);
     expect(mockOrder).toHaveBeenCalledWith('created_at', { ascending: false });

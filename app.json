@@ -2,7 +2,7 @@
   "expo": {
     "name": "TripCrew: Family Travel",
     "slug": "tripcrew",
-    "version": "1.0.7",
+    "version": "1.8.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,7 +12,7 @@
       "bundleIdentifier": "com.muhemmet.travelcrew",
       "appleTeamId": "B6N8Y2FHV5",
       "deploymentTarget": "16.4",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "entitlements": {
         "aps-environment": "production"
       },
@@ -105,7 +105,15 @@
       ],
       "expo-asset",
       "expo-system-ui",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "buildReactNativeFromSource": true
+          }
+        }
+      ]
     ],
     "scheme": "travelcrew",
     "extra": {

@@ -1,13 +1,19 @@
 import Constants from 'expo-constants';
-import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabaseClient';
-import { sendBroadcast } from '../lib/realtimeBroadcast';
 import { Notification, ServiceResult } from '../types';
 import { NOTIFICATION_SOUND } from '../constants/notifications';
 
-const NOTIFY_CHANNEL = (userId: string) => `user-notifications:${userId}`;
+const PUSH_INSTALLATION_ID_KEY = 'tripcrew_push_installation_id';
+
+export type PushRegistration = {
+  token: string;
+  platform: 'ios' | 'android' | 'web' | 'unknown';
+  deviceId: string | null;
+  activeTokens: number;
+};
 
 type PushPayload = {
   userIds: string[];
@@ -21,12 +27,6 @@ type ExpoPushTicket = {
   message?: string;
   details?: Record<string, unknown>;
 };
-
-function broadcastNotification(notification: Notification): void {
-  const channel = supabase.channel(NOTIFY_CHANNEL(notification.user_id));
-  void sendBroadcast(channel, 'notification', notification)
-    .finally(() => supabase.removeChannel(channel));
-}
 
 function getExpoProjectId(): string | null {
   const extraProjectId = Constants.expoConfig?.extra?.eas?.projectId;
@@ -43,96 +43,67 @@ function getPlatformName(): 'ios' | 'android' | 'web' | 'unknown' {
   return 'unknown';
 }
 
+function createInstallationId() {
+  const random = Math.random().toString(36).slice(2);
+  return `tripcrew-${Date.now().toString(36)}-${random}`;
+}
+
+async function getInstallationId() {
+  if (Platform.OS === 'web') return null;
+  const existing = await AsyncStorage.getItem(PUSH_INSTALLATION_ID_KEY);
+  if (existing) return existing;
+  const installationId = createInstallationId();
+  await AsyncStorage.setItem(PUSH_INSTALLATION_ID_KEY, installationId);
+  return installationId;
+}
+
 function getPushSendError(tickets: unknown): string | null {
   const ticketList = Array.isArray(tickets)
     ? tickets
     : Array.isArray((tickets as { data?: unknown[] } | null)?.data)
       ? (tickets as { data: unknown[] }).data
       : null;
-  const failed = ticketList?.find((ticket) => (ticket as ExpoPushTicket)?.status === 'error') as ExpoPushTicket | undefined;
+  const failed = ticketList?.find((ticket) => {
+    const pushTicket = ticket as ExpoPushTicket;
+    return pushTicket?.status === 'error' && pushTicket.details?.error !== 'DeviceNotRegistered';
+  }) as ExpoPushTicket | undefined;
   return failed?.message ?? null;
 }
 
-async function sendDirectExpoPushNotifications({ userIds, title, body, data }: PushPayload): Promise<ServiceResult<number>> {
-  const uniqueUserIds = Array.from(new Set(userIds));
-  if (uniqueUserIds.length === 0) return { data: 0, error: null };
-
-  const { data: tokens, error } = await supabase
-    .from('push_tokens')
-    .select('token')
-    .in('user_id', uniqueUserIds)
-    .eq('is_active', true);
-
-  if (error) return { data: null, error: error.message };
-
-  const uniqueTokens = Array.from(new Set((tokens ?? []).map((row: { token: string }) => row.token)));
-  if (uniqueTokens.length === 0) {
-    // Recipients simply haven't enabled push notifications on any device — not
-    // a send failure. The in-app/broadcast notification row was already created,
-    // so surfacing this to the sender as an error would be both unactionable and
-    // would fire on virtually every send.
-    return { data: 0, error: null };
-  }
-
-  const response = await fetch('https://exp.host/--/api/v2/push/send', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Accept-Encoding': 'gzip, deflate',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(uniqueTokens.map((to) => ({
-      to,
-      title,
-      body,
-      data: data ?? {},
-      sound: NOTIFICATION_SOUND,
-      channelId: 'default',
-      priority: 'high',
-    }))),
-  });
-
-  const tickets = await response.json().catch(() => null);
-  if (!response.ok) {
-    return { data: null, error: `Expo push request failed (${response.status}).` };
-  }
-
-  const ticketError = getPushSendError(tickets);
-  if (ticketError) return { data: null, error: ticketError };
-  return { data: uniqueTokens.length, error: null };
+function logPushWarning(context: string, error: string | null | undefined) {
+  if (!error) return;
+  console.warn(`[notifications] ${context}: ${error}`);
 }
 
 async function sendExpoPushNotifications(payload: PushPayload): Promise<ServiceResult<number>> {
   const uniqueUserIds = Array.from(new Set(payload.userIds));
   if (uniqueUserIds.length === 0) return { data: 0, error: null };
 
-  try {
-    const { data, error } = await supabase.functions.invoke('send-push', {
-      body: {
-        userIds: uniqueUserIds,
-        title: payload.title,
-        body: payload.body,
-        data: payload.data ?? {},
-      },
-    });
-    if (error) throw error;
-    const sent = typeof (data as { sent?: unknown } | null)?.sent === 'number'
-      ? (data as { sent: number }).sent
-      : null;
-    const ticketError = getPushSendError((data as { tickets?: unknown } | null)?.tickets);
-    if (ticketError) return { data: null, error: ticketError };
-    if (sent && sent > 0) return { data: sent, error: null };
-  } catch {
-    // Fall through to direct Expo push fallback below.
+  const { data, error } = await supabase.functions.invoke('send-push', {
+    body: {
+      userIds: uniqueUserIds,
+      title: payload.title,
+      body: payload.body,
+      data: payload.data ?? {},
+    },
+  });
+  if (error) return { data: null, error: error.message };
+  if ((data as { error?: unknown } | null)?.error) {
+    return { data: null, error: String((data as { error: unknown }).error) };
   }
-
-  return sendDirectExpoPushNotifications({ ...payload, userIds: uniqueUserIds });
+  const sent = typeof (data as { sent?: unknown } | null)?.sent === 'number'
+    ? (data as { sent: number }).sent
+    : uniqueUserIds.length;
+  const ticketError = getPushSendError((data as { tickets?: unknown } | null)?.tickets);
+  if (ticketError) return { data: null, error: ticketError };
+  return { data: sent, error: null };
 }
 
 export const notificationService = {
-  async registerForPushNotifications(userId: string): Promise<ServiceResult<string>> {
-    if (!Device.isDevice) {
-      return { data: null, error: 'Push notifications require a physical device.' };
+  async registerForPushNotifications(userId: string): Promise<ServiceResult<PushRegistration>> {
+    void userId;
+    if (Platform.OS === 'web') {
+      return { data: null, error: 'Push notifications are only available on iOS and Android builds.' };
     }
 
     if (Platform.OS === 'android') {
@@ -148,7 +119,13 @@ export const notificationService = {
     const existing = await Notifications.getPermissionsAsync();
     let finalStatus = existing.status;
     if (finalStatus !== 'granted') {
-      const requested = await Notifications.requestPermissionsAsync();
+      const requested = await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: true,
+          allowSound: true,
+        },
+      });
       finalStatus = requested.status;
     }
 
@@ -161,19 +138,63 @@ export const notificationService = {
       return { data: null, error: 'Notification permission is enabled. Add a real EAS projectId in app.json to register push tokens.' };
     }
 
-    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-    const { error } = await supabase
-      .from('push_tokens')
-      .upsert({
-        user_id: userId,
-        token,
-        platform: getPlatformName(),
-        device_id: Constants.sessionId ?? null,
-        is_active: true,
-      }, { onConflict: 'token' });
+    let token: string;
+    try {
+      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    } catch (error) {
+      return {
+        data: null,
+        error: error instanceof Error
+          ? error.message
+          : 'Expo could not create a push token for this device.',
+      };
+    }
 
-    if (error) return { data: null, error: error.message };
-    return { data: token, error: null };
+    try {
+      const deviceId = await getInstallationId();
+      const { data, error } = await supabase.functions.invoke('register-push-token', {
+        body: {
+          token,
+          platform: getPlatformName(),
+          deviceId,
+        },
+      });
+
+      if (error) {
+        // Try to extract the actual error message from the function response body
+        let detail = error.message;
+        try {
+          const ctx = (error as unknown as { context?: { json?: () => Promise<{ error?: string }> } }).context;
+          if (ctx?.json) {
+            const body = await ctx.json();
+            if (body?.error) detail = body.error;
+          }
+        } catch { /* ignore – use generic message */ }
+        return { data: null, error: detail };
+      }
+      if ((data as { error?: unknown } | null)?.error) {
+        return { data: null, error: String((data as { error: unknown }).error) };
+      }
+      const registration = data as Partial<PushRegistration> | null;
+      return {
+        data: {
+          token,
+          platform: getPlatformName(),
+          deviceId,
+          activeTokens: typeof registration?.activeTokens === 'number'
+            ? registration.activeTokens
+            : 1,
+        },
+        error: null,
+      };
+    } catch (error) {
+      return {
+        data: null,
+        error: error instanceof Error
+          ? error.message
+          : 'The push token could not be saved.',
+      };
+    }
   },
 
   async getNotifications(userId: string): Promise<ServiceResult<Notification[]>> {
@@ -225,11 +246,15 @@ export const notificationService = {
       [input.user_id],
       input.title,
       input.body,
-      { ...((input.data as Record<string, unknown> | null) ?? {}), type: input.type }
+      {
+        ...((input.data as Record<string, unknown> | null) ?? {}),
+        ...(input.trip_id ? { trip_id: input.trip_id } : {}),
+        type: input.type,
+      }
     );
     const notification = data as Notification;
-    broadcastNotification(notification);
-    return { data: notification, error: push.error };
+    logPushWarning('single push delivery failed after notification row was created', push.error);
+    return { data: notification, error: null };
   },
 
   async notifyUsers(
@@ -260,10 +285,14 @@ export const notificationService = {
 
     if (error) return { data: null, error: error.message };
 
-    const push = await notificationService.sendPushToUsers(uniqueUserIds, title, body, { ...(data ?? {}), type });
-    (inserted ?? []).forEach((n) => broadcastNotification(n as Notification));
+    const push = await notificationService.sendPushToUsers(uniqueUserIds, title, body, {
+      ...(data ?? {}),
+      ...(tripId ? { trip_id: tripId } : {}),
+      type,
+    });
 
-    return { data: (inserted ?? []) as Notification[], error: push.error };
+    logPushWarning('push delivery failed after notification rows were created', push.error);
+    return { data: (inserted ?? []) as Notification[], error: null };
   },
 
   async sendPushToUsers(
@@ -275,10 +304,72 @@ export const notificationService = {
     return sendExpoPushNotifications({ userIds, title, body, data });
   },
 
+  async sendJoinRequestPush(
+    requestId: string,
+    tripId: string,
+    title: string,
+    body: string
+  ): Promise<ServiceResult<number>> {
+    const { data, error } = await supabase.functions.invoke('send-push', {
+      body: {
+        requestId,
+        title,
+        body,
+        data: {
+          type: 'join_request',
+          trip_id: tripId,
+          request_id: requestId,
+        },
+      },
+    });
+    if (error) return { data: null, error: error.message };
+    if ((data as { error?: unknown } | null)?.error) {
+      return { data: null, error: String((data as { error: unknown }).error) };
+    }
+    return {
+      data: typeof (data as { sent?: unknown } | null)?.sent === 'number'
+        ? (data as { sent: number }).sent
+        : 0,
+      error: null,
+    };
+  },
+
+  async sendJoinReviewPush(
+    requestId: string,
+    tripId: string,
+    status: 'approved' | 'rejected'
+  ): Promise<ServiceResult<number>> {
+    const approved = status === 'approved';
+    const { data, error } = await supabase.functions.invoke('send-push', {
+      body: {
+        requestId,
+        title: approved ? '✅ Join Request Approved' : 'Join Request Update',
+        body: approved
+          ? 'Your request to join the trip was approved.'
+          : 'Your request to join the trip was not approved.',
+        data: {
+          type: 'join_request_review',
+          trip_id: tripId,
+          request_id: requestId,
+          status,
+        },
+      },
+    });
+    if (error) return { data: null, error: error.message };
+    if ((data as { error?: unknown } | null)?.error) {
+      return { data: null, error: String((data as { error: unknown }).error) };
+    }
+    return {
+      data: typeof (data as { sent?: unknown } | null)?.sent === 'number'
+        ? (data as { sent: number }).sent
+        : 0,
+      error: null,
+    };
+  },
+
   /**
-   * Creates a notification for every trip member except the sender,
-   * and broadcasts it on each user's personal channel so online users
-   * see it instantly without polling.
+   * Creates a notification for every trip member except the sender.
+   * Delivery is handled by RLS-protected Postgres realtime and push.
    */
   async notifyTripMembers(
     tripId: string,
@@ -288,37 +379,33 @@ export const notificationService = {
     body: string,
     data?: Record<string, unknown>
   ): Promise<ServiceResult<number>> {
-    // Get all member user IDs for the trip
+    // Use SECURITY DEFINER RPC so the insert bypasses RLS (same pattern as push-talk).
+    const { data: count, error: rpcError } = await supabase.rpc('create_trip_notifications', {
+      p_trip_id: tripId,
+      p_sender_id: excludeUserId,
+      p_type: type,
+      p_title: title,
+      p_body: body,
+      p_data: data ?? null,
+    });
+
+    if (rpcError) return { data: null, error: rpcError.message };
+    if (!count) return { data: 0, error: null };
+
+    // Get recipients so we can send push (RPC already handled the DB insert)
     const { data: members } = await supabase
       .from('trip_members')
       .select('user_id')
       .eq('trip_id', tripId)
       .neq('user_id', excludeUserId);
 
-    if (!members?.length) return { data: 0, error: null };
-    const userIds = members.map((m: { user_id: string }) => m.user_id);
+    const userIds = (members ?? []).map((m: { user_id: string }) => m.user_id);
+    if (userIds.length > 0) {
+      const push = await notificationService.sendPushToUsers(userIds, title, body, { ...data, trip_id: tripId, type });
+      logPushWarning('trip-member push delivery failed after notification rows were created', push.error);
+    }
 
-    const rows = userIds.map((userId) => ({
-      user_id: userId,
-      trip_id: tripId,
-      type,
-      title,
-      body,
-      data: data ?? null,
-      is_read: false,
-    }));
-
-    const { data: inserted } = await supabase
-      .from('notifications')
-      .insert(rows)
-      .select();
-
-    // Include type in push payload so notification tap can route correctly
-    const push = await notificationService.sendPushToUsers(userIds, title, body, { ...data, type });
-
-    // Broadcast to each user's personal channel for real-time delivery
-    (inserted ?? []).forEach((n: Notification) => broadcastNotification(n));
-    return push;
+    return { data: count as number, error: null };
   },
 
   /** Subscribe to real-time notifications for a user. Returns unsubscribe fn. */
@@ -333,12 +420,7 @@ export const notificationService = {
       onNotification(n);
     };
     const channel = supabase
-      .channel(NOTIFY_CHANNEL(userId))
-      .on('broadcast', { event: 'notification' }, ({ payload }) => {
-        deliver(payload as Notification);
-      })
-      // Fallback for missed/failed broadcasts (e.g. socket reconnects mid-send) —
-      // mirrors chatService.subscribeToMessages' dual broadcast + postgres_changes pattern.
+      .channel(`user-notifications-db:${userId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },

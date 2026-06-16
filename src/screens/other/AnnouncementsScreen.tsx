@@ -8,6 +8,8 @@ import { Announcement, AnnouncementPriority } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTripContext } from '../../contexts/TripContext';
 import { announcementService } from '../../services/announcementService';
+import { tripEmailService } from '../../services/tripEmailService';
+import { whatsappService } from '../../services/whatsappService';
 import { displayName } from '../../utils/displayName';
 import { demoAnnouncements } from '../../lib/mockData';
 import { LoadingView } from '../../components/LoadingView';
@@ -23,7 +25,7 @@ const PRIORITY_COLORS: Record<AnnouncementPriority, string> = {
 export function AnnouncementsScreen({ route }: { route: { params: { tripId: string } } }) {
   const { tripId } = route.params;
   const { user, isDemoMode, isGlobalAdmin } = useAuth();
-  const { canManageAnnouncements, members } = useTripContext();
+  const { canManageAnnouncements, members, currentTrip } = useTripContext();
   const canManage = canManageAnnouncements || isGlobalAdmin;
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +34,7 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [priority, setPriority] = useState<AnnouncementPriority>('normal');
+  const [emailEveryone, setEmailEveryone] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [archived, setArchived] = useState<Announcement[]>([]);
@@ -59,8 +62,27 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
     }
     setTitle('');
     setContent('');
+    setEmailEveryone(false);
     setShowAdd(false);
     setAnnouncements((prev) => [data, ...prev]);
+    if (emailEveryone) {
+      const email = await tripEmailService.emailAnnouncement(
+        tripId,
+        currentTrip,
+        data.title,
+        data.content
+      );
+      if (email.error) Alert.alert('Email not opened', email.error);
+    }
+    if (priority === 'urgent') {
+      const wa = await whatsappService.sendEmergency(
+        tripId,
+        `🔴 ${data.title}\n\n${data.content}`,
+        undefined,
+        true
+      );
+      if (wa.error) Alert.alert('WhatsApp not sent', wa.error);
+    }
   }
 
   async function handleMarkRead(id: string) {
@@ -241,8 +263,27 @@ export function AnnouncementsScreen({ route }: { route: { params: { tripId: stri
                 </TouchableOpacity>
               ))}
             </View>
+            {priority === 'urgent' && (
+              <View style={styles.urgentNotice}>
+                <Text style={styles.urgentNoticeText}>💬 WhatsApp alert will be sent automatically to all trip members.</Text>
+              </View>
+            )}
             <TextInput style={styles.modalInput} value={title} onChangeText={setTitle} placeholder="Title" placeholderTextColor={Colors.textSecondary} />
             <TextInput style={[styles.modalInput, { minHeight: 80, textAlignVertical: 'top' }]} value={content} onChangeText={setContent} placeholder="Write your announcement..." placeholderTextColor={Colors.textSecondary} multiline />
+            <TouchableOpacity
+              style={styles.emailToggle}
+              onPress={() => setEmailEveryone((v) => !v)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: emailEveryone }}
+            >
+              <View style={[styles.emailCheckbox, emailEveryone && styles.emailCheckboxActive]}>
+                {emailEveryone && <Text style={styles.emailCheckmark}>✓</Text>}
+              </View>
+              <View style={styles.emailToggleCopy}>
+                <Text style={styles.emailToggleTitle}>Email everyone</Text>
+                <Text style={styles.emailToggleText}>Sends automatically to trip members after posting.</Text>
+              </View>
+            </TouchableOpacity>
             <AppButton title="Post" onPress={handleCreate} loading={saving} fullWidth />
             <AppButton title="Cancel" onPress={() => setShowAdd(false)} variant="outline" fullWidth style={{ marginTop: Spacing.sm }} />
             </View>
@@ -288,6 +329,44 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl },
   modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.text, marginBottom: Spacing.md },
+  emailToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  emailCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emailCheckboxActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  emailCheckmark: {
+    color: Colors.surface,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+  },
+  emailToggleCopy: { flex: 1 },
+  emailToggleTitle: { fontSize: FontSize.sm, fontWeight: FontWeight.semiBold, color: Colors.text },
+  emailToggleText: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  urgentNotice: {
+    backgroundColor: Colors.danger + '15',
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  urgentNoticeText: { fontSize: FontSize.xs, color: Colors.danger, fontWeight: FontWeight.semiBold },
   priorityRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },
   priorityChip: {
     width: '48%',
