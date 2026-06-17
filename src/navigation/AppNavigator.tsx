@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, TabActions } from '@react-navigation/native';
 import { createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -171,8 +171,8 @@ function MainTabs() {
   );
 }
 
-function TripTabs({ route }: { route: { params: { tripId: string } } }) {
-  const { tripId } = route.params;
+function TripTabs({ route, navigation }: { route: { params: { tripId: string; initialTab?: string } }; navigation: any }) {
+  const { tripId, initialTab } = route.params;
   const {
     currentTrip,
     loadTripData,
@@ -204,11 +204,31 @@ function TripTabs({ route }: { route: { params: { tripId: string } } }) {
     };
   }, [tripId, currentTrip, loadTripData]);
 
+  // Navigate to the requested tab after bootstrapping (set by notification tap).
+  // We do this here rather than in handleNotificationNavigation because specifying
+  // a nested tab screen before TripTab.Navigator mounts causes a native crash.
+  // By the time this effect fires with bootstrapping=false, TripTab.Navigator
+  // is mounted and the full nested path is safe to use.
+  useEffect(() => {
+    if (!bootstrapping && initialTab) {
+      navigation.setParams({ initialTab: undefined });
+      try {
+        // TripTab.Navigator is now mounted (bootstrapping=false).
+        // Full nested path is safe here and correctly switches the active tab.
+        (navigationRef as any).navigate('Main', {
+          screen: 'TripStack',
+          params: { tripId, screen: initialTab, params: { tripId } },
+        });
+      } catch { /* tab not available (feature disabled) — stay on Dashboard */ }
+    }
+  }, [bootstrapping, initialTab]);
+
   if (bootstrapping) return <LoadingView />;
 
   return (
     <TripTab.Navigator
       key={tripId}
+      initialRouteName={(initialTab as keyof TripTabParamList | undefined) ?? 'Dashboard'}
       screenOptions={({ navigation, route }) => ({
         headerShown: true,
         headerTintColor: Colors.primary,
@@ -378,17 +398,14 @@ function handleNotificationNavigation(rawData: unknown) {
   if (!navigationRef.isReady()) return;
   const data = normalizeNotificationData(rawData);
   const tripId = data?.trip_id as string | undefined;
-  if (!tripId) return;
   const type = data?.type as string | undefined;
+  if (!tripId) return;
 
   try {
     if (type === 'message' || type === 'push_talk') {
-      // Don't specify screen:'Chat' — TripTabs may still be bootstrapping
-      // (showing LoadingView instead of the tab navigator), which causes a
-      // crash when React Navigation tries to resolve the nested tab route.
       (navigationRef as any).navigate('Main', {
         screen: 'TripStack',
-        params: { tripId },
+        params: { tripId, initialTab: 'Chat' },
       });
       return;
     }
@@ -424,14 +441,24 @@ function handleNotificationNavigation(rawData: unknown) {
   } catch { /* navigation may fail if screen isn't mounted yet */ }
 }
 
+// Stores notification data when nav isn't ready yet (cold start race condition).
+// Processed in NavigationContainer's onReady callback.
+let pendingNotificationData: unknown = null;
+
 export function AppNavigator() {
   const { user, loading, isPasswordRecovery } = useAuth();
 
   useEffect(() => {
-    // App opened from killed state via notification tap
+    // App opened from killed state via notification tap.
+    // NavigationContainer may not be mounted yet (loading=true guard below),
+    // so store the data and process it in onReady instead.
     Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response) {
-        handleNotificationNavigation(response.notification.request.content.data);
+      if (!response) return;
+      const data = response.notification.request.content.data;
+      if (navigationRef.isReady()) {
+        handleNotificationNavigation(data);
+      } else {
+        pendingNotificationData = data;
       }
     });
 
@@ -471,7 +498,16 @@ export function AppNavigator() {
   };
 
   return (
-    <NavigationContainer ref={navigationRef} linking={linking}>
+    <NavigationContainer
+      ref={navigationRef}
+      linking={linking}
+      onReady={() => {
+        if (pendingNotificationData) {
+          handleNotificationNavigation(pendingNotificationData);
+          pendingNotificationData = null;
+        }
+      }}
+    >
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {user && !isPasswordRecovery ? (
           <RootStack.Screen name="Main" component={MainNavigator} />

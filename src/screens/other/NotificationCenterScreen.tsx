@@ -27,10 +27,7 @@ function navigateForNotification(navigation: Nav, n: Notification) {
   const data = notificationData(n);
 
   if (n.type === 'message' || n.type === 'push_talk') {
-    // Navigate to TripStack without a nested screen — TripTabs may still be
-    // bootstrapping the trip context, and specifying screen:'Chat' would crash
-    // if the tab navigator hasn't mounted yet.
-    (navigation as any).navigate('TripStack', { tripId });
+    (navigation as any).navigate('TripStack', { tripId, initialTab: 'Chat' });
     return;
   }
 

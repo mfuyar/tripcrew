@@ -721,7 +721,7 @@ export type AuthStackParamList = {
 
 export type MainStackParamList = {
   Tabs: undefined;
-  TripStack: { tripId: string };
+  TripStack: { tripId: string; initialTab?: string };
   Families: { tripId: string };
   JoinFamily: { tripId: string };
   AddEditFamily: { tripId: string; familyId?: string };
