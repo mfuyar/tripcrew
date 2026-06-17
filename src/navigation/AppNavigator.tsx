@@ -383,9 +383,12 @@ function handleNotificationNavigation(rawData: unknown) {
 
   try {
     if (type === 'message' || type === 'push_talk') {
+      // Don't specify screen:'Chat' — TripTabs may still be bootstrapping
+      // (showing LoadingView instead of the tab navigator), which causes a
+      // crash when React Navigation tries to resolve the nested tab route.
       (navigationRef as any).navigate('Main', {
         screen: 'TripStack',
-        params: { tripId, screen: 'Chat', params: { tripId } },
+        params: { tripId },
       });
       return;
     }
@@ -415,7 +418,7 @@ function handleNotificationNavigation(rawData: unknown) {
     } else {
       (navigationRef as any).navigate('Main', {
         screen: 'TripStack',
-        params: { tripId, screen: 'Dashboard', params: { tripId } },
+        params: { tripId },
       });
     }
   } catch { /* navigation may fail if screen isn't mounted yet */ }

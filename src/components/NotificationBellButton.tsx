@@ -11,20 +11,30 @@ import { Colors, FontWeight } from '../constants/theme';
 export function NotificationBellButton() {
   const navigation = useNavigation<any>();
   const { unreadCount } = useNotifications();
+  const navigatingRef = React.useRef(false);
 
   function openNotifications() {
-    const parent = navigation.getParent?.();
-    if (parent?.getState?.().routeNames?.includes('Notifications')) {
-      parent.navigate('Notifications');
-      return;
-    }
+    if (navigatingRef.current) return;
+    navigatingRef.current = true;
+    setTimeout(() => { navigatingRef.current = false; }, 800);
 
-    if (navigation.getState?.().routeNames?.includes('Notifications')) {
-      navigation.navigate('Notifications');
-      return;
+    try {
+      const parent = navigation.getParent?.();
+      if (parent?.getState?.()?.routeNames?.includes('Notifications')) {
+        parent.navigate('Notifications');
+        return;
+      }
+      if (navigation.getState?.()?.routeNames?.includes('Notifications')) {
+        navigation.navigate('Notifications');
+        return;
+      }
+      const grandparent = parent?.getParent?.();
+      if (grandparent?.getState?.()?.routeNames?.includes('Notifications')) {
+        grandparent.navigate('Notifications');
+      }
+    } catch {
+      // Navigation may fail during a transition — silently ignore.
     }
-
-    parent?.getParent?.()?.navigate?.('Notifications');
   }
 
   return (
